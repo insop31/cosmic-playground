@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { useRef, useMemo } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
 import RocketModel from './RocketModel';
@@ -103,10 +103,68 @@ const Atmosphere = ({ density }: { density: number }) => (
   </mesh>
 );
 
+// Cinematic camera controller
+const CinematicCamera = ({ state, controlsRef }: { state: RocketState; controlsRef: React.RefObject<any> }) => {
+  const { camera } = useThree();
+  const targetPos = useRef(new THREE.Vector3(0, 5, 0));
+  const targetCam = useRef(new THREE.Vector3(8, 6, 12));
+  const smoothing = 0.03; // lower = smoother/slower transitions
+
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const [px, py] = state.position;
+    const rocketWorldX = px * 2;
+    const rocketWorldY = 1.2 + py * 2;
+    const phase = state.phase;
+    const altitude = state.altitude;
+
+    if (phase === 'idle') {
+      // Ground-level cinematic view of the pad
+      targetPos.current.set(0, 3, 0);
+      targetCam.current.set(8, 4, 10);
+    } else if (phase === 'launching' || phase === 'coasting') {
+      if (altitude < 3) {
+        // Close ground launch view — dramatic low angle
+        targetPos.current.set(rocketWorldX, rocketWorldY, 0);
+        targetCam.current.set(rocketWorldX + 5, rocketWorldY + 1, 8);
+      } else if (altitude < 15) {
+        // Chase cam — pulls back and rises with rocket
+        targetPos.current.set(rocketWorldX, rocketWorldY, 0);
+        targetCam.current.set(rocketWorldX + 6, rocketWorldY + 2, 12);
+      } else if (altitude < 35) {
+        // Wide tracking shot — zooms out to show trajectory
+        targetPos.current.set(rocketWorldX * 0.5, rocketWorldY * 0.6, 0);
+        targetCam.current.set(rocketWorldX * 0.3 + 10, rocketWorldY * 0.5 + 5, 20);
+      } else {
+        // Orbital pull-back — very wide to show scale
+        targetPos.current.set(rocketWorldX * 0.3, rocketWorldY * 0.4, 0);
+        targetCam.current.set(rocketWorldX * 0.2 + 15, rocketWorldY * 0.3 + 10, 30);
+      }
+    } else if (phase === 'outcome') {
+      // Hold position, slight drift back
+      targetCam.current.lerp(
+        new THREE.Vector3(targetCam.current.x + 0.5, targetCam.current.y + 0.2, targetCam.current.z + 0.3),
+        0.001
+      );
+    }
+
+    // Smooth interpolation
+    camera.position.lerp(targetCam.current, smoothing);
+    controls.target.lerp(targetPos.current, smoothing);
+    controls.update();
+  });
+
+  return null;
+};
+
 const RocketScene = ({ params, state, onUpdateState }: RocketSceneProps) => {
+  const controlsRef = useRef<any>(null);
+
   return (
     <Canvas
-      camera={{ position: [8, 6, 12], fov: 50, near: 0.1, far: 500 }}
+      camera={{ position: [8, 4, 10], fov: 50, near: 0.1, far: 500 }}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       style={{ background: '#050a14' }}
     >
@@ -127,12 +185,15 @@ const RocketScene = ({ params, state, onUpdateState }: RocketSceneProps) => {
 
       <RocketModel params={params} state={state} onUpdateState={onUpdateState} />
 
+      <CinematicCamera state={state} controlsRef={controlsRef} />
+
       <OrbitControls
+        ref={controlsRef}
         enableDamping
         dampingFactor={0.05}
         minDistance={3}
-        maxDistance={60}
-        target={[0, 5, 0]}
+        maxDistance={80}
+        target={[0, 3, 0]}
       />
     </Canvas>
   );
