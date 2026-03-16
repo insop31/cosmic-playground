@@ -68,7 +68,8 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
   const outcome = outcomeConfig[state.outcome];
 
   return (
-    <div className="glass-panel-strong p-4 w-[280px] max-h-[calc(100vh-140px)] overflow-y-auto space-y-4 scrollbar-thin">
+    <div className="glass-panel-strong p-4 w-[280px] h-[calc(100vh-140px)] flex flex-col">
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
       {/* Header */}
       <div className="flex items-center gap-2.5 pb-3 border-b border-border/30">
         <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
@@ -196,9 +197,10 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
           }`} />
         </button>
       </div>
+    </div>
 
-      {/* Launch / Reset Button */}
-      <div className="pt-2 border-t border-border/20">
+    {/* Launch / Reset Button */}
+    <div className="pt-4 mt-2 border-t border-border/20 shrink-0">
         {!isActive ? (
           <button
             onClick={onLaunch}

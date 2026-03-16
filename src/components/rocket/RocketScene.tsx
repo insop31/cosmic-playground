@@ -13,39 +13,52 @@ interface RocketSceneProps {
 
 const PlanetSurface = () => (
   <group>
+    {/* Base terrain */}
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
       <planeGeometry args={[200, 200, 64, 64]} />
-      <meshStandardMaterial color="#1a1a2e" roughness={0.9} metalness={0.1} />
+      <meshStandardMaterial color="#2d3748" roughness={0.8} metalness={0.1} />
     </mesh>
+    {/* Grid */}
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
       <planeGeometry args={[200, 200, 32, 32]} />
-      <meshStandardMaterial color="#16213e" roughness={1} metalness={0} transparent opacity={0.5} wireframe />
+      <meshStandardMaterial color="#4a5568" roughness={1} metalness={0} transparent opacity={0.6} wireframe />
     </mesh>
+    {/* Launch pad base (brighter concrete) */}
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-      <circleGeometry args={[2.5, 32]} />
-      <meshStandardMaterial color="#2a2a4a" roughness={0.7} metalness={0.3} />
+      <circleGeometry args={[4, 32]} />
+      <meshStandardMaterial color="#cbd5e1" roughness={0.9} metalness={0.1} />
     </mesh>
+    {/* Outer warning ring */}
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
-      <ringGeometry args={[1.8, 2, 32]} />
-      <meshStandardMaterial color="#ff4400" emissive="#ff4400" emissiveIntensity={0.3} roughness={0.5} />
+      <ringGeometry args={[2.8, 3.2, 32]} />
+      <meshStandardMaterial color="#f59e0b" emissive="#f59e0b" emissiveIntensity={0.5} roughness={0.5} />
     </mesh>
+    {/* Inner glow ring */}
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
-      <ringGeometry args={[0.4, 0.5, 32]} />
-      <meshStandardMaterial color="#00e5ff" emissive="#00e5ff" emissiveIntensity={0.5} />
+      <ringGeometry args={[0.8, 1.2, 32]} />
+      <meshStandardMaterial color="#38bdf8" emissive="#38bdf8" emissiveIntensity={0.8} />
     </mesh>
-    <mesh position={[-1.5, 3, 0]}>
-      <boxGeometry args={[0.15, 6, 0.15]} />
-      <meshStandardMaterial color="#444466" metalness={0.8} roughness={0.3} />
+    
+    {/* Launch tower */}
+    <mesh position={[-2.5, 4, 0]}>
+      <boxGeometry args={[0.4, 8, 0.4]} />
+      <meshStandardMaterial color="#cbd5e1" metalness={0.5} roughness={0.5} />
     </mesh>
-    <mesh position={[-0.75, 4.5, 0]}>
-      <boxGeometry args={[1.5, 0.08, 0.08]} />
-      <meshStandardMaterial color="#444466" metalness={0.8} roughness={0.3} />
+    <mesh position={[-1.25, 6.5, 0]}>
+      <boxGeometry args={[2.5, 0.15, 0.15]} />
+      <meshStandardMaterial color="#cbd5e1" metalness={0.5} roughness={0.5} />
     </mesh>
-    <pointLight position={[-1.5, 6, 0]} color="#ff0000" intensity={0.5} distance={5} />
-    <mesh position={[-1.5, 6.1, 0]}>
-      <sphereGeometry args={[0.08, 8, 8]} />
-      <meshBasicMaterial color="#ff0000" />
+    
+    {/* Tower Lights */}
+    <pointLight position={[-2.5, 8, 0]} color="#ef4444" intensity={2} distance={10} />
+    <mesh position={[-2.5, 8.1, 0]}>
+      <sphereGeometry args={[0.15, 8, 8]} />
+      <meshBasicMaterial color="#ef4444" />
     </mesh>
+
+    {/* Pad Lights to illuminate the rocket */}
+    <pointLight position={[3, 2, 3]} color="#ffffff" intensity={4} distance={15} />
+    <pointLight position={[-3, 2, -3]} color="#ffffff" intensity={4} distance={15} />
   </group>
 );
 
@@ -171,7 +184,7 @@ const RocketScene = ({ params, state, onUpdateState }: RocketSceneProps) => {
       <color attach="background" args={['#050a14']} />
       <fog attach="fog" args={['#050a14', 80, 200]} />
 
-      <ambientLight intensity={0.3} />
+      <ambientLight intensity={0.5} />
       <directionalLight position={[10, 20, 10]} intensity={0.8} color="#aaccff" />
       <pointLight position={[0, 10, 0]} intensity={0.4} color="#00e5ff" />
 

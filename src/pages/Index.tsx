@@ -36,6 +36,10 @@ const Index = () => {
     setBodies((prev) => [...prev, { ...obj, id: `obj_${nextId++}` }]);
   }, []);
 
+  const handleRemoveBody = useCallback((id: string) => {
+    setBodies((prev) => prev.filter((b) => b.id !== id));
+  }, []);
+
   const handleRemoveAll = useCallback(() => setBodies([]), []);
 
   const handleResetSpacetime = useCallback(() => {
@@ -130,7 +134,7 @@ const Index = () => {
       {/* Left Panel */}
       <div className="absolute left-4 top-20 bottom-20 z-10 pointer-events-auto">
         {mode === 'spacetime' ? (
-          <ObjectLibrary onAddObject={handleAddObject} bodies={bodies} onRemoveAll={handleRemoveAll} />
+          <ObjectLibrary onAddObject={handleAddObject} bodies={bodies} onRemoveBody={handleRemoveBody} onRemoveAll={handleRemoveAll} />
         ) : (
           <RocketControls
             params={rocketParams}

@@ -35,8 +35,6 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     if (!groupRef.current) return;
 
     if (state.phase !== 'launching' && state.phase !== 'coasting') {
-      groupRef.current.position.set(0, 1.2, 0);
-      groupRef.current.rotation.set(0, 0, 0);
       return;
     }
 
@@ -49,8 +47,8 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     if (fuel > 0 && state.phase === 'launching') {
       const currentMass = params.dryMass + fuel * params.fuelMass;
       const thrustAcc = params.thrustForce / currentMass;
-      vx += Math.sin(angleRad) * thrustAcc * dt * 0.5;
-      vy += Math.cos(angleRad) * thrustAcc * dt * 0.5;
+      vx += Math.sin(angleRad) * thrustAcc * dt;
+      vy += Math.cos(angleRad) * thrustAcc * dt;
       fuel -= dt / params.burnDuration;
 
       if (fuel <= 0) {
