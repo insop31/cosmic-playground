@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import SpaceScene, { CelestialBody } from '../components/space/SpaceScene';
 import RocketScene from '../components/rocket/RocketScene';
 import RocketControls from '../components/rocket/RocketControls';
@@ -11,6 +11,9 @@ let nextId = 1;
 
 type AppMode = 'spacetime' | 'rocket';
 
+// Universe expansion starts after this many real seconds
+const EXPANSION_DELAY_S = 600; // 10 minutes
+
 const Index = () => {
   const [mode, setMode] = useState<AppMode>('spacetime');
 
@@ -20,12 +23,42 @@ const Index = () => {
     { id: 'planet1', type: 'planet', position: [8, 0, 0], mass: 2, radius: 0.7, color: '#4488ff', velocity: [0, 0, 1.1] },
     { id: 'planet2', type: 'planet', position: [-5, 0, 6], mass: 1.5, radius: 0.5, color: '#ff6644', velocity: [0.9, 0, 0.3] },
   ]);
+
+  // timeScale can be negative for rewind (-4 … -0.5 … 0.5 … 4)
   const [timeScale, setTimeScale] = useState(1);
   const [isPlaying, setIsPlaying] = useState(true);
+
+  // Universe expansion
+  const universeAgeRef = useRef(0);
+  const [universeScale, setUniverseScale] = useState(1);
+  const lastTickRef = useRef(Date.now());
 
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
   const [rocketState, setRocketState] = useState<RocketState>(INITIAL_STATE);
+
+  // ─── Universe age ticker ───
+  useEffect(() => {
+    if (mode !== 'spacetime') return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = (now - lastTickRef.current) / 1000;
+      lastTickRef.current = now;
+
+      // Only age the universe while time is moving forward
+      if (isPlaying && timeScale > 0) {
+        universeAgeRef.current += elapsed;
+      }
+
+      const age = universeAgeRef.current;
+      // Scale starts at 1, grows slowly after EXPANSION_DELAY_S
+      const newScale = 1 + 0.00018 * Math.max(0, age - EXPANSION_DELAY_S);
+      setUniverseScale(newScale);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [mode, isPlaying, timeScale]);
 
   // ─── Spacetime handlers ───
   const handleUpdateBody = useCallback((id: string, pos: [number, number, number], vel: [number, number, number]) => {
@@ -49,6 +82,8 @@ const Index = () => {
     ]);
     setTimeScale(1);
     setIsPlaying(true);
+    universeAgeRef.current = 0;
+    setUniverseScale(1);
   }, []);
 
   // ─── Rocket handlers ───
@@ -64,13 +99,19 @@ const Index = () => {
     setRocketState({ ...INITIAL_STATE });
   }, []);
 
+  // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
 
   return (
     <div className="w-full h-screen relative overflow-hidden bg-background">
       {/* 3D Canvases - use visibility instead of conditional render to avoid WebGL context loss */}
       <div className="absolute inset-0" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
-        <SpaceScene bodies={bodies} timeScale={effectiveTimeScale} onUpdateBody={handleUpdateBody} />
+        <SpaceScene
+          bodies={bodies}
+          timeScale={effectiveTimeScale}
+          onUpdateBody={handleUpdateBody}
+          universeScale={universeScale}
+        />
       </div>
       <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
         <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} />
@@ -118,7 +159,16 @@ const Index = () => {
             {mode === 'spacetime' ? (
               <>
                 <div className="text-muted-foreground">Bodies: <span className="text-primary">{bodies.length}</span></div>
-                <div className="text-muted-foreground">Speed: <span className="text-primary">{timeScale}x</span></div>
+                <div className="text-muted-foreground">
+                  Speed: <span className={timeScale < 0 ? 'text-amber-400' : 'text-primary'}>
+                    {timeScale < 0 ? `◀ ${Math.abs(timeScale)}x` : `${timeScale}x`}
+                  </span>
+                </div>
+                {universeScale > 1.001 && (
+                  <div className="text-muted-foreground">
+                    ∿ Scale: <span className="text-violet-400">{universeScale.toFixed(3)}x</span>
+                  </div>
+                )}
               </>
             ) : (
               <>

@@ -18,9 +18,12 @@ interface SpaceSceneProps {
   bodies: CelestialBody[];
   timeScale: number;
   onUpdateBody: (id: string, pos: [number, number, number], vel: [number, number, number]) => void;
+  universeScale?: number;
 }
 
-const SpaceScene = ({ bodies, timeScale, onUpdateBody }: SpaceSceneProps) => {
+const GRID_SIZE = 120;
+
+const SpaceScene = ({ bodies, timeScale, onUpdateBody, universeScale = 1 }: SpaceSceneProps) => {
   return (
     <Canvas
       camera={{ position: [0, 25, 25], fov: 60, near: 0.1, far: 500 }}
@@ -28,14 +31,14 @@ const SpaceScene = ({ bodies, timeScale, onUpdateBody }: SpaceSceneProps) => {
       style={{ background: 'black' }}
     >
       <color attach="background" args={['#050a14']} />
-      <fog attach="fog" args={['#050a14', 60, 150]} />
+      <fog attach="fog" args={['#050a14', 80, 200]} />
 
       <ambientLight intensity={0.15} />
       <pointLight position={[20, 30, 20]} intensity={0.5} color="#00e5ff" />
       <pointLight position={[-15, 20, -10]} intensity={0.3} color="#7c3aed" />
 
       <Starfield />
-      <SpacetimeGrid bodies={bodies} />
+      <SpacetimeGrid bodies={bodies} gridSize={GRID_SIZE} gridResolution={120} universeScale={universeScale} />
 
       {bodies.map((body) => (
         <CelestialObject
@@ -44,6 +47,8 @@ const SpaceScene = ({ bodies, timeScale, onUpdateBody }: SpaceSceneProps) => {
           timeScale={timeScale}
           allBodies={bodies}
           onUpdatePosition={onUpdateBody}
+          universeScale={universeScale}
+          gridSize={GRID_SIZE}
         />
       ))}
 
@@ -51,7 +56,7 @@ const SpaceScene = ({ bodies, timeScale, onUpdateBody }: SpaceSceneProps) => {
         enableDamping
         dampingFactor={0.05}
         minDistance={5}
-        maxDistance={80}
+        maxDistance={120}
         maxPolarAngle={Math.PI / 2.1}
       />
     </Canvas>
