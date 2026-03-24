@@ -1,6 +1,7 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { liveVelocities } from '../../pages/Index';
 
 interface CelestialBody {
   id: string;
@@ -40,12 +41,23 @@ const CelestialObject = ({
 }: CelestialObjectProps) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  const isMerged = body.id.startsWith('merged_');
+  const scaleRef = useRef<number>(isMerged ? 0.01 : 1.0);
 
   // Live position and velocity tracked inside the loop
   const posRef = useRef<THREE.Vector3>(new THREE.Vector3(...body.position));
   const velocity = useRef<THREE.Vector3>(
     new THREE.Vector3(...(body.velocity || [0, 0, 0]))
   );
+
+  useEffect(() => {
+    // Cleanup: remove this body's velocity from shared map when unmounted
+    return () => {
+      liveVelocities.delete(body.id);
+    };
+  }, [body.id]);
 
   // History buffer for time-rewind
   const history = useRef<Snapshot[]>([]);
@@ -82,7 +94,8 @@ const CelestialObject = ({
         if (other.id === body.id) continue;
         const otherPos = new THREE.Vector3(...other.position);
         const dir = otherPos.clone().sub(pos);
-        const distSq = Math.max(dir.lengthSq(), 0.5);
+        const softening = Math.max(0.5, other.mass * 0.1);
+        const distSq = Math.max(dir.lengthSq(), softening);
         const force = (G * other.mass) / distSq;
         acc.add(dir.normalize().multiplyScalar(force));
       }
@@ -124,6 +137,17 @@ const CelestialObject = ({
 
       meshRef.current.position.set(...newPos);
       if (glowRef.current) glowRef.current.position.set(...newPos);
+      if (ringRef.current) ringRef.current.position.set(...newPos);
+
+      if (isMerged && scaleRef.current < 1) {
+        scaleRef.current += (1 - scaleRef.current) * 0.1;
+        meshRef.current.scale.setScalar(scaleRef.current);
+        if (glowRef.current) glowRef.current.scale.setScalar(scaleRef.current);
+        if (ringRef.current) ringRef.current.scale.setScalar(scaleRef.current);
+      }
+
+      // Write live velocity to shared map for collision momentum resolution
+      liveVelocities.set(body.id, [velocity.current.x, velocity.current.z]);
 
       onUpdatePosition(body.id, newPos, [velocity.current.x, velocity.current.y, velocity.current.z]);
 
@@ -147,6 +171,7 @@ const CelestialObject = ({
 
       meshRef.current.position.set(...newPos);
       if (glowRef.current) glowRef.current.position.set(...newPos);
+      if (ringRef.current) ringRef.current.position.set(...newPos);
 
       onUpdatePosition(body.id, newPos, [velocity.current.x, velocity.current.y, velocity.current.z]);
     }
@@ -195,7 +220,7 @@ const CelestialObject = ({
       )}
 
       {isBlackHole && (
-        <mesh position={body.position} rotation={[Math.PI / 2, 0, 0]}>
+        <mesh ref={ringRef} position={body.position} rotation={[Math.PI / 2, 0, 0]}>
           <ringGeometry args={[body.radius * 1.5, body.radius * 3, 64]} />
           <meshBasicMaterial
             color="#ff6600"

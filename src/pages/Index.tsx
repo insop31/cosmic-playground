@@ -8,6 +8,11 @@ import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { Atom, Rocket, Orbit } from 'lucide-react';
 
 let nextId = 1;
+export const liveVelocities = new Map<string, [number, number]>();
+// ↑ This is a module-level Map (NOT a useRef) so SpaceScene can read it
+// without prop drilling. Each CelestialObject writes here every frame.
+// Index.tsx reads from it inside handleMerge for momentum conservation.
+
 
 type AppMode = 'spacetime' | 'rocket';
 
@@ -33,9 +38,13 @@ const Index = () => {
   const [universeScale, setUniverseScale] = useState(1);
   const lastTickRef = useRef(Date.now());
 
+
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
   const [rocketState, setRocketState] = useState<RocketState>(INITIAL_STATE);
+
+  // ─── Visuals ───
+  const [lastMergeEvent, setLastMergeEvent] = useState<{ x: number; z: number; intensity: number } | null>(null);
 
   // ─── Universe age ticker ───
   useEffect(() => {
@@ -63,6 +72,55 @@ const Index = () => {
   // ─── Spacetime handlers ───
   const handleUpdateBody = useCallback((id: string, pos: [number, number, number], vel: [number, number, number]) => {
     setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, position: pos, velocity: vel } : b)));
+  }, []);
+
+  const handleMerge = useCallback((idA: string, idB: string) => {
+    setBodies((prev) => {
+      const bodyA = prev.find((b) => b.id === idA);
+      const bodyB = prev.find((b) => b.id === idB);
+      if (!bodyA || !bodyB) return prev; // already removed
+
+      // --- Conservation of Mass ---
+      const mergedMass = bodyA.mass + bodyB.mass;
+
+      // --- Conservation of Momentum ---
+      const velA = liveVelocities.get(idA) ?? [0, 0];
+      const velB = liveVelocities.get(idB) ?? [0, 0];
+      const mergedVx = (bodyA.mass * velA[0] + bodyB.mass * velB[0]) / mergedMass;
+      const mergedVz = (bodyA.mass * velA[1] + bodyB.mass * velB[1]) / mergedMass;
+
+      // --- Center of Mass Position ---
+      const mergedX = (bodyA.mass * bodyA.position[0] + bodyB.mass * bodyB.position[0]) / mergedMass;
+      const mergedZ = (bodyA.mass * bodyA.position[2] + bodyB.mass * bodyB.position[2]) / mergedMass;
+
+      // --- Visual Radius (event horizon scaling) ---
+      const mergedRadius = Math.sqrt(bodyA.radius ** 2 + bodyB.radius ** 2);
+
+      // --- Type Priority: blackhole wins over everything ---
+      const typePriority = ['comet','asteroid','planet','neutron','star','blackhole'];
+      const mergedType = typePriority.indexOf(bodyA.type) > typePriority.indexOf(bodyB.type)
+        ? bodyA.type : bodyB.type;
+
+      // --- Color: keep the higher-priority body's color ---
+      const mergedColor = typePriority.indexOf(bodyA.type) >= typePriority.indexOf(bodyB.type)
+        ? bodyA.color : bodyB.color;
+
+      // --- Trigger Merge Wave ---
+      setLastMergeEvent({ x: mergedX, z: mergedZ, intensity: Math.sqrt(mergedMass) * 0.2 });
+
+      const mergedBody: CelestialBody = {
+        id: `merged_${nextId++}`,
+        type: mergedType,
+        position: [mergedX, 0, mergedZ],
+        mass: mergedMass,
+        radius: mergedRadius,
+        color: mergedColor,
+        velocity: [mergedVx, 0, mergedVz],
+      };
+
+      // Remove both, add merged
+      return [...prev.filter((b) => b.id !== idA && b.id !== idB), mergedBody];
+    });
   }, []);
 
   const handleAddObject = useCallback((obj: Omit<CelestialBody, 'id'>) => {
@@ -111,6 +169,8 @@ const Index = () => {
           timeScale={effectiveTimeScale}
           onUpdateBody={handleUpdateBody}
           universeScale={universeScale}
+          onMerge={handleMerge}
+          mergeEvent={lastMergeEvent}
         />
       </div>
       <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>

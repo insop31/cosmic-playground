@@ -16,6 +16,7 @@ interface SpacetimeGridProps {
   gridSize?: number;
   gridResolution?: number;
   universeScale?: number;
+  mergeEvent?: { x: number; z: number; intensity: number } | null;
 }
 
 const SpacetimeGrid = ({
@@ -23,6 +24,7 @@ const SpacetimeGrid = ({
   gridSize = 120,
   gridResolution = 120,
   universeScale = 1,
+  mergeEvent = null,
 }: SpacetimeGridProps) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.ShaderMaterial>(null);
@@ -44,16 +46,35 @@ const SpacetimeGrid = ({
         uDepthColor: { value: new THREE.Color(0x7c3aed) },
         uGridSize: { value: gridSize },
         uUniverseScale: { value: universeScale },
+        uMergeEvent: { value: new THREE.Vector4(0, 0, -999, 0) },
+        // ↑ x=worldX, y=worldZ, z=eventTime (set to -999 = inactive), w=intensity
       },
       vertexShader: `
+        uniform float uTime;
+        uniform vec4 uMergeEvent;  // x,z = position; z = eventTime; w = intensity
         varying float vDepth;
         varying vec2 vUv;
         varying vec3 vWorldPos;
         void main() {
           vUv = uv;
-          vDepth = -position.y;
-          vWorldPos = position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vec3 pos = position;
+
+          // Gravitational wave ripple from merge event
+          float timeSinceMerge = uTime - uMergeEvent.z;
+          if (timeSinceMerge > 0.0 && timeSinceMerge < 3.0) {
+            float dx = pos.x - uMergeEvent.x;
+            float dz = pos.z - uMergeEvent.y;
+            float dist = sqrt(dx*dx + dz*dz);
+            float wave = sin(dist * 2.0 - timeSinceMerge * 8.0)
+                       * uMergeEvent.w
+                       * exp(-timeSinceMerge * 1.5)
+                       * exp(-dist * 0.05);
+            pos.y += wave;
+          }
+
+          vDepth = -pos.y;
+          vWorldPos = pos;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }
       `,
       fragmentShader: `
@@ -134,6 +155,15 @@ const SpacetimeGrid = ({
 
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+      
+      if (mergeEvent) {
+        materialRef.current.uniforms.uMergeEvent.value.set(
+          mergeEvent.x,
+          mergeEvent.z,
+          state.clock.elapsedTime,
+          mergeEvent.intensity
+        );
+      }
     }
   });
 
