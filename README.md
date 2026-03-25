@@ -1,73 +1,53 @@
-# Welcome to your Lovable project
+# Cosmic Playground 🚀✨
 
-## Project info
+Welcome to **Cosmic Playground**, an interactive Spacetime Lab and Rocket Simulator built with modern web technologies. This project explores gravitational physics, universe expansion, and orbital mechanics in a beautiful 3D web interface.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## 🌟 Features
 
-## How can I edit this code?
+- **Spacetime Gravity Sandbox**: Place stars and planets, and watch them orbit and warp spacetime dynamically. Features real-time planetary physics and time-scaling (including rewind and universe expansion).
+- **Rocket Simulator**: Launch a rocket and simulate its trajectory and phases using adjustible parameters.
+- **Interactive 3D UI**: Fully interactive 3D visualizations built using `three.js` and React Three Fiber.
+- **Glassmorphism Design**: Sleek and modern user interface styled with Tailwind CSS and Radix UI primitives.
 
-There are several ways of editing your application.
+## 🛠️ Technologies Used
 
-**Use Lovable**
+- **Framework**: [React 18](https://react.dev/) + [Vite](https://vitejs.dev/)
+- **Language**: [TypeScript](https://www.typescriptlang.org/)
+- **3D Graphics**: [Three.js](https://threejs.org/), [@react-three/fiber](https://docs.pmnd.rs/react-three-fiber), [@react-three/drei](https://github.com/pmndrs/drei)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **UI Components**: [shadcn/ui](https://ui.shadcn.com/) + [Radix UI](https://www.radix-ui.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## 🚀 Getting Started
 
-Changes made via Lovable will be committed automatically to this repo.
+Follow these instructions to set up and run the project locally.
 
-**Use your preferred IDE**
+### Prerequisites
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Make sure you have [Node.js](https://nodejs.org/) (v18+) and `npm` installed.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Installation
 
-Follow these steps:
+1. **Clone the repository:**
+   ```bash
+   git clone <YOUR_GIT_URL>
+   cd cosmic-playground
+   ```
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+3. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
 
-# Step 3: Install the necessary dependencies.
-npm i
+4. **Open your browser:**
+   Navigate to `http://localhost:5173` (or the port specified in your terminal) to explore the playground!
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## 🎮 How to Play
 
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- **Spacetime Mode:** Drag to orbit the camera, scroll to zoom, and use the left panel to add celestial objects to warp spacetime. You can play, pause, or rewind time.
+- **Rocket Mode:** Switch to the Rocket tab to adjust parameters (like fuel and thrust), launch your creation, and observe its altitude and trajectory.
