@@ -121,7 +121,6 @@ const CinematicCamera = ({ state, controlsRef }: { state: RocketState; controlsR
   const { camera } = useThree();
   const targetPos = useRef(new THREE.Vector3(0, 5, 0));
   const targetCam = useRef(new THREE.Vector3(8, 6, 12));
-  const smoothing = 0.03; // lower = smoother/slower transitions
 
   useFrame(() => {
     const controls = controlsRef.current;
@@ -138,22 +137,21 @@ const CinematicCamera = ({ state, controlsRef }: { state: RocketState; controlsR
       targetPos.current.set(0, 3, 0);
       targetCam.current.set(8, 4, 10);
     } else if (phase === 'launching' || phase === 'coasting') {
+      // Always look directly at the rocket
+      targetPos.current.set(rocketWorldX, rocketWorldY, 0);
+
       if (altitude < 3) {
         // Close ground launch view — dramatic low angle
-        targetPos.current.set(rocketWorldX, rocketWorldY, 0);
         targetCam.current.set(rocketWorldX + 5, rocketWorldY + 1, 8);
       } else if (altitude < 15) {
         // Chase cam — pulls back and rises with rocket
-        targetPos.current.set(rocketWorldX, rocketWorldY, 0);
         targetCam.current.set(rocketWorldX + 6, rocketWorldY + 2, 12);
       } else if (altitude < 35) {
         // Wide tracking shot — zooms out to show trajectory
-        targetPos.current.set(rocketWorldX * 0.5, rocketWorldY * 0.6, 0);
-        targetCam.current.set(rocketWorldX * 0.3 + 10, rocketWorldY * 0.5 + 5, 20);
+        targetCam.current.set(rocketWorldX + 10, rocketWorldY + 5, 20);
       } else {
-        // Orbital pull-back — very wide to show scale
-        targetPos.current.set(rocketWorldX * 0.3, rocketWorldY * 0.4, 0);
-        targetCam.current.set(rocketWorldX * 0.2 + 15, rocketWorldY * 0.3 + 10, 30);
+        // High-altitude pull-back — wide view, still centred on rocket
+        targetCam.current.set(rocketWorldX + 15, rocketWorldY + 8, 30);
       }
     } else if (phase === 'outcome') {
       // Hold position, slight drift back
@@ -163,7 +161,10 @@ const CinematicCamera = ({ state, controlsRef }: { state: RocketState; controlsR
       );
     }
 
-    // Smooth interpolation
+    // Dynamic smoothing: faster catch-up at high altitudes so the camera keeps up
+    const distToRocket = camera.position.distanceTo(targetCam.current);
+    const smoothing = Math.min(0.08, 0.04 + distToRocket * 0.002);
+
     camera.position.lerp(targetCam.current, smoothing);
     controls.target.lerp(targetPos.current, smoothing);
     controls.update();
