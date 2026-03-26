@@ -22,19 +22,28 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     velocityRef.current = [0, 0];
     posRef.current = [0, 0];
     fuelRef.current = 1;
+    if (groupRef.current) {
+      groupRef.current.position.set(0, 1.2, 0);
+      groupRef.current.rotation.set(0, 0, 0);
+    }
   }
   // Also reset when launching starts fresh
   if (state.phase === 'launching' && prevPhaseRef.current === 'idle') {
     velocityRef.current = [0, 0];
     posRef.current = [0, 0];
     fuelRef.current = 1;
+    if (groupRef.current) {
+      groupRef.current.position.set(0, 1.2, 0);
+      groupRef.current.rotation.set(0, 0, 0);
+    }
   }
   prevPhaseRef.current = state.phase;
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
 
-    if (state.phase !== 'launching' && state.phase !== 'coasting') {
+    const isEscaping = state.phase === 'outcome' && state.outcome === 'escape';
+    if (state.phase !== 'launching' && state.phase !== 'coasting' && !isEscaping) {
       return;
     }
 
@@ -43,6 +52,22 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     let [vx, vy] = velocityRef.current;
     let [px, py] = posRef.current;
     let fuel = fuelRef.current;
+
+    if (isEscaping) {
+      // Just keep flying linearly out of the camera's view, but still update the trajectory trail!
+      px += vx * dt;
+      py += vy * dt;
+      posRef.current = [px, py];
+      groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
+      onUpdateState((prev) => ({
+        ...prev,
+        position: [px, py, 0],
+        altitude: py,
+        maxAltitude: Math.max(prev.maxAltitude, py),
+        trajectory: [...prev.trajectory, [px, py]],
+      }));
+      return;
+    }
 
     if (fuel > 0 && state.phase === 'launching') {
       const currentMass = params.dryMass + fuel * params.fuelMass;
@@ -116,7 +141,7 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
       velocity: [vx, vy],
       elapsed: prev.elapsed + dt,
       position: [px, py, 0],
-      trajectory: [...prev.trajectory.slice(-500), [px, py]],
+      trajectory: [...prev.trajectory, [px, py]],
     }));
   });
 
