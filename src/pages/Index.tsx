@@ -61,8 +61,14 @@ const Index = () => {
   }, [mode, isPlaying, timeScale]);
 
   // ─── Spacetime handlers ───
-  const handleUpdateBody = useCallback((id: string, pos: [number, number, number], vel: [number, number, number]) => {
-    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, position: pos, velocity: vel } : b)));
+  // Physics positions are managed inside PhysicsSimulator via refs — no per-frame
+  // React state update needed. These callbacks only fire on low-frequency events.
+  const handleBodyRemoved = useCallback((id: string) => {
+    setBodies((prev) => prev.filter((b) => b.id !== id));
+  }, []);
+
+  const handleBodyUpdated = useCallback((id: string, mass: number, radius: number) => {
+    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, mass, radius } : b)));
   }, []);
 
   const handleAddObject = useCallback((obj: Omit<CelestialBody, 'id'>) => {
@@ -109,7 +115,8 @@ const Index = () => {
         <SpaceScene
           bodies={bodies}
           timeScale={effectiveTimeScale}
-          onUpdateBody={handleUpdateBody}
+          onBodyRemoved={handleBodyRemoved}
+          onBodyUpdated={handleBodyUpdated}
           universeScale={universeScale}
         />
       </div>

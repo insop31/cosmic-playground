@@ -1,8 +1,9 @@
+import { useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import SpacetimeGrid from './SpacetimeGrid';
-import CelestialObject from './CelestialObject';
 import Starfield from './Starfield';
+import PhysicsSimulator from './PhysicsSimulator';
 
 export interface CelestialBody {
   id: string;
@@ -17,13 +18,25 @@ export interface CelestialBody {
 interface SpaceSceneProps {
   bodies: CelestialBody[];
   timeScale: number;
-  onUpdateBody: (id: string, pos: [number, number, number], vel: [number, number, number]) => void;
+  onBodyRemoved: (id: string) => void;
+  onBodyUpdated: (id: string, mass: number, radius: number) => void;
   universeScale?: number;
 }
 
 const GRID_SIZE = 120;
 
-const SpaceScene = ({ bodies, timeScale, onUpdateBody, universeScale = 1 }: SpaceSceneProps) => {
+const SpaceScene = ({
+  bodies,
+  timeScale,
+  onBodyRemoved,
+  onBodyUpdated,
+  universeScale = 1,
+}: SpaceSceneProps) => {
+  // Shared ref written by PhysicsSimulator and read by SpacetimeGrid every frame.
+  // Using a plain ref keeps grid deformation in sync with physics without any
+  // React state updates in the hot path.
+  const livePhysicsRef = useRef<Array<{ position: [number, number, number]; mass: number }>>([]);
+
   return (
     <Canvas
       camera={{ position: [0, 25, 25], fov: 60, near: 0.1, far: 500 }}
@@ -38,19 +51,24 @@ const SpaceScene = ({ bodies, timeScale, onUpdateBody, universeScale = 1 }: Spac
       <pointLight position={[-15, 20, -10]} intensity={0.3} color="#7c3aed" />
 
       <Starfield />
-      <SpacetimeGrid bodies={bodies} gridSize={GRID_SIZE} gridResolution={120} universeScale={universeScale} />
 
-      {bodies.map((body) => (
-        <CelestialObject
-          key={body.id}
-          body={body}
-          timeScale={timeScale}
-          allBodies={bodies}
-          onUpdatePosition={onUpdateBody}
-          universeScale={universeScale}
-          gridSize={GRID_SIZE}
-        />
-      ))}
+      <SpacetimeGrid
+        bodies={bodies}
+        livePhysicsRef={livePhysicsRef}
+        gridSize={GRID_SIZE}
+        gridResolution={120}
+        universeScale={universeScale}
+      />
+
+      <PhysicsSimulator
+        bodies={bodies}
+        timeScale={timeScale}
+        onBodyRemoved={onBodyRemoved}
+        onBodyUpdated={onBodyUpdated}
+        livePhysicsRef={livePhysicsRef}
+        universeScale={universeScale}
+        gridSize={GRID_SIZE}
+      />
 
       <OrbitControls
         enableDamping

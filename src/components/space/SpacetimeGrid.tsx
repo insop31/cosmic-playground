@@ -13,6 +13,9 @@ interface CelestialBody {
 
 interface SpacetimeGridProps {
   bodies: CelestialBody[];
+  /** Written by PhysicsSimulator each frame with live physics positions.
+   *  When populated the grid uses these instead of stale React state positions. */
+  livePhysicsRef?: React.MutableRefObject<Array<{ position: [number, number, number]; mass: number }>>;
   gridSize?: number;
   gridResolution?: number;
   universeScale?: number;
@@ -20,6 +23,7 @@ interface SpacetimeGridProps {
 
 const SpacetimeGrid = ({
   bodies,
+  livePhysicsRef,
   gridSize = 120,
   gridResolution = 120,
   universeScale = 1,
@@ -104,13 +108,17 @@ const SpacetimeGrid = ({
   }, [shaderMaterial, universeScale, gridSize]);
 
   const deformGrid = useCallback((posArray: Float32Array) => {
+    // Prefer live physics positions (updated every frame by PhysicsSimulator)
+    // over React state positions (only updated on body add/remove)
+    const liveBods = livePhysicsRef?.current?.length ? livePhysicsRef.current : bodies;
     const vertexCount = posArray.length / 3;
+
     for (let i = 0; i < vertexCount; i++) {
       const x = posArray[i * 3];
       const z = posArray[i * 3 + 2];
       let totalDisplacement = 0;
 
-      for (const body of bodies) {
+      for (const body of liveBods) {
         const dx = x - body.position[0];
         const dz = z - body.position[2];
         const dist = Math.sqrt(dx * dx + dz * dz);
@@ -120,6 +128,9 @@ const SpacetimeGrid = ({
 
       posArray[i * 3 + 1] = -totalDisplacement;
     }
+  // livePhysicsRef is a stable ref object — its .current is read at call time,
+  // so it does not need to be in deps. bodies is included for the initial frame.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bodies]);
 
   useFrame((state) => {

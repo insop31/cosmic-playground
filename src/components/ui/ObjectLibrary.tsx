@@ -2,6 +2,9 @@ import { CelestialBody } from '../space/SpaceScene';
 import { Orbit, Sun, Circle, Hexagon, Star, Zap, Sparkles } from 'lucide-react';
 import { type ReactNode } from 'react';
 
+// Must match the G constant in PhysicsSimulator.tsx
+const G = 0.5;
+
 const OBJECT_PRESETS: { type: string; label: string; mass: number; radius: number; color: string; icon: ReactNode }[] = [
   { type: 'planet', label: 'Planet', mass: 3, radius: 0.8, color: '#4488ff', icon: <Circle size={16} /> },
   { type: 'star', label: 'Star', mass: 8, radius: 1.5, color: '#ffcc00', icon: <Sun size={16} /> },
@@ -20,21 +23,34 @@ interface ObjectLibraryProps {
 
 const ObjectLibrary = ({ onAddObject, bodies, onRemoveBody, onRemoveAll }: ObjectLibraryProps) => {
   const addObject = (preset: typeof OBJECT_PRESETS[0]) => {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 4 + Math.random() * 8;
-    const x = Math.cos(angle) * dist;
-    const z = Math.sin(angle) * dist;
-    // Give a perpendicular velocity for orbital motion
-    const speed = 0.8 + Math.random() * 0.5;
-    const vx = -Math.sin(angle) * speed;
-    const vz = Math.cos(angle) * speed;
+    const angle     = Math.random() * Math.PI * 2;
+    const placeDist = 4 + Math.random() * 8;
+    const x = Math.cos(angle) * placeDist;
+    const z = Math.sin(angle) * placeDist;
+
+    // Physics-accurate circular orbit: v = sqrt(G * M_attractor / r)
+    // Tangent direction: normalize(R) × UP  →  [nx, 0, nz] × [0,1,0] = [-nz, 0, nx]
+    let vx = 0, vz = 0;
+    if (bodies.length > 0) {
+      const attractor = bodies.reduce((max, b) => (b.mass > max.mass ? b : max));
+      const rx = x - attractor.position[0];
+      const rz = z - attractor.position[2];
+      const orbDist = Math.sqrt(rx * rx + rz * rz);
+      if (orbDist > 0.01) {
+        const speed = Math.sqrt(G * attractor.mass / orbDist);
+        const nx = rx / orbDist;
+        const nz = rz / orbDist;
+        vx = -nz * speed;
+        vz =  nx * speed;
+      }
+    }
 
     onAddObject({
-      type: preset.type,
+      type:     preset.type,
       position: [x, 0, z],
-      mass: preset.mass,
-      radius: preset.radius,
-      color: preset.color,
+      mass:     preset.mass,
+      radius:   preset.radius,
+      color:    preset.color,
       velocity: [vx, 0, vz],
     });
   };
