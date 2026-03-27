@@ -1,5 +1,6 @@
 import { RocketParams, RocketState, LaunchOutcome } from './rocketTypes';
 import { Rocket, Gauge, Flame, Wind, Globe, Layers, ChevronRight, RotateCcw, Activity, Fuel, ArrowUp, Timer } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface RocketControlsProps {
   params: RocketParams;
@@ -68,16 +69,16 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
   const outcome = outcomeConfig[state.outcome];
 
   return (
-    <div className="glass-panel-strong p-4 w-[280px] h-[calc(100vh-140px)] flex flex-col">
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
+    <div className="glass-panel-strong p-5 w-[300px] h-[calc(100vh-140px)] flex flex-col border border-white/10 shadow-[0_0_30px_rgba(139,92,246,0.15)]">
+      <div className="flex-1 overflow-y-auto space-y-5 pr-2 scrollbar-thin">
       {/* Header */}
-      <div className="flex items-center gap-2.5 pb-3 border-b border-border/30">
-        <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
-          <Rocket size={16} className="text-primary" />
+      <div className="flex items-center gap-3 pb-4 border-b border-white/10">
+        <div className="w-9 h-9 rounded-xl bg-secondary/20 flex items-center justify-center glow-border border border-secondary/30">
+          <Rocket size={18} className="text-secondary" />
         </div>
         <div>
-          <h3 className="text-sm font-bold text-foreground tracking-wide">LAUNCH CONTROL</h3>
-          <p className="text-[10px] font-mono text-muted-foreground">Configure & Deploy</p>
+          <h3 className="text-sm font-bold text-foreground tracking-widest leading-tight uppercase">LAUNCH CONTROL</h3>
+          <p className="text-[10px] font-mono text-secondary tracking-wider">SYSTEM CONFIG</p>
         </div>
       </div>
 
@@ -200,30 +201,33 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
     </div>
 
     {/* Launch / Reset Button */}
-    <div className="pt-4 mt-2 border-t border-border/20 shrink-0">
+    <div className="pt-5 mt-2 border-t border-white/10 shrink-0">
         {!isActive ? (
-          <button
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={onLaunch}
-            className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest flex items-center justify-center gap-2 transition-all hover-lift
-              bg-gradient-to-r from-primary/30 via-secondary/40 to-primary/30 text-white
-              hover:from-primary/50 hover:via-secondary/60 hover:to-primary/50
-              border border-primary/40 hover:border-primary/80
-              shadow-[0_0_20px_-5px_hsl(var(--primary)/0.5)]
-              hover:shadow-[0_0_40px_-5px_hsl(var(--secondary)/0.8)]
-              active:scale-[0.98]"
+            className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest flex items-center justify-center gap-2 transition-all
+              bg-gradient-to-r from-secondary/30 to-secondary/10 text-secondary
+              hover:from-secondary/40 hover:to-secondary/20
+              border border-secondary/30 hover:border-secondary/50
+              shadow-[0_0_20px_rgba(192,38,211,0.2)] hover:shadow-[0_0_30px_rgba(192,38,211,0.3)]
+              relative overflow-hidden group"
           >
-            <Rocket size={16} className="text-white drop-shadow-[0_0_8px_white]" /> LAUNCH <ChevronRight size={14} className="opacity-80 drop-shadow-[0_0_4px_white]" />
-          </button>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-[100%] group-hover:animate-[shimmer_1.5s_infinite]" />
+            <Rocket size={16} /> IGNITE <ChevronRight size={16} />
+          </motion.button>
         ) : (
-          <button
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={onReset}
-            className="w-full py-3.5 rounded-xl font-semibold text-sm tracking-wide flex items-center justify-center gap-2 transition-all
-              bg-muted/20 text-muted-foreground border border-border/30
-              hover:bg-muted/30 hover:text-foreground
-              active:scale-[0.98]"
+            className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest flex items-center justify-center gap-2 transition-all
+              bg-black/30 text-muted-foreground border border-white/10
+              hover:bg-white/5 hover:text-foreground hover:border-white/20"
           >
-            <RotateCcw size={14} /> RESET
-          </button>
+            <RotateCcw size={16} /> ABORT & RESET
+          </motion.button>
         )}
       </div>
     </div>

@@ -6,56 +6,43 @@
 
 @layer base {
   :root {
-    --background: 228 30% 4%;
-    --foreground: 200 100% 95%;
+    --background: 260 40% 5%; /* very dark deep space purple/navy */
+    --foreground: 210 40% 98%; /* crisp white */
 
-    --card: 225 30% 8%;
-    --card-foreground: 200 100% 95%;
+    --card: 260 30% 8%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 225 30% 8%;
-    --popover-foreground: 200 100% 95%;
+    --popover: 260 30% 8%;
+    --popover-foreground: 210 40% 98%;
 
+    /* Neon Cyan Glow */
     --primary: 188 100% 50%;
-    --primary-foreground: 228 30% 4%;
+    --primary-foreground: 260 40% 5%;
 
-    --secondary: 260 60% 50%;
-    --secondary-foreground: 200 100% 95%;
+    /* Magenta/Purple Accent */
+    --secondary: 290 80% 60%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 225 20% 14%;
-    --muted-foreground: 215 20% 55%;
+    --muted: 260 20% 12%;
+    --muted-foreground: 215 20% 65%;
 
     --accent: 188 80% 40%;
-    --accent-foreground: 200 100% 95%;
+    --accent-foreground: 210 40% 98%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 215 30% 18%;
-    --input: 215 30% 18%;
+    --border: 260 30% 20%;
+    --input: 260 30% 20%;
     --ring: 188 100% 50%;
 
-    --radius: 0.75rem;
+    --radius: 1rem;
 
-    --space-deep: 228 30% 4%;
-    --space-navy: 230 35% 10%;
-    --space-purple: 260 40% 15%;
-    --cyan-glow: 188 100% 50%;
-    --cyan-dim: 188 60% 30%;
-    --nebula: 280 50% 20%;
-    --star-white: 200 100% 95%;
-
-    --glass-bg: 225 30% 10%;
-    --glass-border: 215 40% 25%;
-    --glass-shadow: 188 100% 50%;
-
-    --sidebar-background: 225 30% 8%;
-    --sidebar-foreground: 200 100% 95%;
-    --sidebar-primary: 188 100% 50%;
-    --sidebar-primary-foreground: 228 30% 4%;
-    --sidebar-accent: 225 20% 14%;
-    --sidebar-accent-foreground: 200 100% 95%;
-    --sidebar-border: 215 30% 18%;
-    --sidebar-ring: 188 100% 50%;
+    /* Custom Cosmic Variables */
+    --glass-bg: 260 30% 12%;       /* Base for glassmorphism */
+    --glass-border: 210 40% 98%;   /* White for thin transparent borders */
+    --glass-glow: 290 80% 60%;     /* Magenta/Purple soft glow */
+    --glass-glow-cyan: 188 100% 50%; /* Cyan soft glow */
   }
 }
 
@@ -71,23 +58,19 @@
 
 @layer components {
   .glass-panel {
-    @apply rounded-xl border backdrop-blur-2xl;
-    background: radial-gradient(circle at 50% 0%, hsla(var(--glass-bg) / 0.7) 0%, hsla(var(--glass-bg) / 0.9) 100%);
-    border-color: hsla(var(--glass-border) / 0.5);
-    box-shadow: 0 8px 32px -8px hsla(var(--space-deep) / 0.8),
-                0 0 20px -5px hsla(var(--glass-shadow) / 0.15),
-                inset 0 1px 0 0 hsla(var(--star-white) / 0.1),
-                inset 0 -1px 0 0 hsla(var(--star-white) / 0.02);
+    @apply rounded-2xl border backdrop-blur-xl relative overflow-hidden;
+    background: hsla(var(--glass-bg) / 0.4);
+    border-color: hsla(var(--glass-border) / 0.1);
+    box-shadow: 0 0 30px hsla(var(--glass-glow) / 0.15),
+                inset 0 1px 1px hsla(var(--glass-border) / 0.1);
   }
 
   .glass-panel-strong {
-    @apply rounded-xl border backdrop-blur-3xl;
-    background: radial-gradient(circle at 50% 0%, hsla(var(--glass-bg) / 0.85) 0%, hsla(var(--space-deep) / 0.95) 100%);
-    border-color: hsla(var(--glass-border) / 0.6);
-    box-shadow: 0 12px 40px -10px hsla(var(--space-deep) / 0.9),
-                0 0 30px -5px hsla(var(--glass-shadow) / 0.25),
-                inset 0 1px 0 0 hsla(var(--star-white) / 0.15),
-                inset 0 -1px 0 0 hsla(var(--star-white) / 0.03);
+    @apply rounded-2xl border backdrop-blur-2xl relative overflow-hidden;
+    background: hsla(var(--glass-bg) / 0.6);
+    border-color: hsla(var(--glass-border) / 0.15);
+    box-shadow: 0 0 40px hsla(var(--glass-glow-cyan) / 0.15),
+                inset 0 1px 1px hsla(var(--glass-border) / 0.15);
   }
 
   .glow-text {
