@@ -1,166 +1,216 @@
 import { CelestialBody } from '../space/SpaceScene';
-import { Orbit, Sun, Circle, Hexagon, Star, Zap, Sparkles, X } from 'lucide-react';
-import { type ReactNode } from 'react';
-import { motion } from 'framer-motion';
+import { Orbit, Sun, Circle, Hexagon, Star, Zap, Sparkles } from 'lucide-react';
+import { type ReactNode, useMemo, useState } from 'react';
 
-// Must match the G constant in PhysicsSimulator.tsx
-const G = 0.5;
-
-export interface ObjectPreset {
-  type: string;
-  label: string;
+interface PlanetPreset {
+  name: string;
   mass: number;
-  radius: number;
+  physicalRadius: number;
+  bodyClass: 'rocky' | 'gas' | 'ice';
   color: string;
-  icon: ReactNode;
+  atmosphere: boolean;
 }
 
-export const OBJECT_PRESETS: ObjectPreset[] = [
-  { type: 'planet', label: 'Planet', mass: 3, radius: 0.8, color: '#4488ff', icon: <Circle size={16} /> },
-  { type: 'star', label: 'Star', mass: 8, radius: 1.5, color: '#ffcc00', icon: <Sun size={16} /> },
-  { type: 'blackhole', label: 'Black Hole', mass: 20, radius: 1.2, color: '#aa44ff', icon: <Hexagon size={16} /> },
-  { type: 'asteroid', label: 'Asteroid', mass: 0.5, radius: 0.3, color: '#888888', icon: <Star size={16} /> },
-  { type: 'neutron', label: 'Neutron Star', mass: 12, radius: 0.5, color: '#00ffcc', icon: <Zap size={16} /> },
-  { type: 'comet', label: 'Comet', mass: 0.3, radius: 0.25, color: '#66ddff', icon: <Sparkles size={16} /> },
+const PLANET_PRESETS: PlanetPreset[] = [
+  { name: 'Mercury', mass: 3.30e23, physicalRadius: 2_439_700, bodyClass: 'rocky', color: '#b5aea2', atmosphere: false },
+  { name: 'Venus', mass: 4.87e24, physicalRadius: 6_051_800, bodyClass: 'rocky', color: '#d9b38c', atmosphere: true },
+  { name: 'Earth', mass: 5.97e24, physicalRadius: 6_371_000, bodyClass: 'rocky', color: '#4b84d8', atmosphere: true },
+  { name: 'Mars', mass: 6.42e23, physicalRadius: 3_389_500, bodyClass: 'rocky', color: '#c96b4b', atmosphere: true },
+  { name: 'Jupiter', mass: 1.90e27, physicalRadius: 69_911_000, bodyClass: 'gas', color: '#d2b48c', atmosphere: true },
+  { name: 'Saturn', mass: 5.68e26, physicalRadius: 58_232_000, bodyClass: 'gas', color: '#d8c58f', atmosphere: true },
+  { name: 'Uranus', mass: 8.68e25, physicalRadius: 25_362_000, bodyClass: 'ice', color: '#7fd1d8', atmosphere: true },
+  { name: 'Neptune', mass: 1.02e26, physicalRadius: 24_622_000, bodyClass: 'ice', color: '#4f79de', atmosphere: true },
 ];
 
-export const createBodyFromPreset = (
-  preset: ObjectPreset,
-  bodies: CelestialBody[],
-  position: [number, number, number]
-): Omit<CelestialBody, 'id'> => {
-  // Physics-accurate circular orbit: v = sqrt(G * M_attractor / r)
-  // Tangent direction: normalize(R) × UP  →  [nx, 0, nz] × [0,1,0] = [-nz, 0, nx]
-  let vx = 0;
-  let vz = 0;
-  if (bodies.length > 0) {
-    const attractor = bodies.reduce((max, b) => (b.mass > max.mass ? b : max));
-    const rx = position[0] - attractor.position[0];
-    const rz = position[2] - attractor.position[2];
-    const orbDist = Math.sqrt(rx * rx + rz * rz);
-    if (orbDist > 0.01) {
-      const speed = Math.sqrt(G * attractor.mass / orbDist);
-      const nx = rx / orbDist;
-      const nz = rz / orbDist;
-      vx = -nz * speed;
-      vz = nx * speed;
-    }
-  }
+const OTHER_PRESETS: { type: string; label: string; mass: number; radius: number; color: string; icon: ReactNode }[] = [
+  { type: 'star', label: 'Star', mass: 1.989e30, radius: 2.4, color: '#ffcc00', icon: <Sun size={16} /> },
+  { type: 'blackhole', label: 'Black Hole', mass: 5.0e30, radius: 1.4, color: '#aa44ff', icon: <Hexagon size={16} /> },
+  { type: 'asteroid', label: 'Asteroid', mass: 1.0e16, radius: 0.28, color: '#888888', icon: <Star size={16} /> },
+  { type: 'neutron', label: 'Neutron Star', mass: 2.8e30, radius: 0.7, color: '#00ffcc', icon: <Zap size={16} /> },
+  { type: 'comet', label: 'Comet', mass: 2.0e14, radius: 0.22, color: '#66ddff', icon: <Sparkles size={16} /> },
+];
 
-  return {
-    type: preset.type,
-    position,
-    mass: preset.mass,
-    radius: preset.radius,
-    color: preset.color,
-    velocity: [vx, 0, vz],
-  };
-};
+const MASS_FORMATTER = new Intl.NumberFormat('en-US', { notation: 'scientific', maximumFractionDigits: 2 });
+const PLANET_RENDER_RADIUS_SCALE = 4e7;
 
 interface ObjectLibraryProps {
+  onBeginPlacement: (body: Omit<CelestialBody, 'id'>) => void;
   bodies: CelestialBody[];
   onRemoveBody: (id: string) => void;
   onRemoveAll: () => void;
-  selectedType: string | null;
-  onSelectType: (type: string | null) => void;
+  placementActive: boolean;
+  onVelocityScaleChange: (value: number) => void;
+  velocityScale: number;
+  realisticMode: boolean;
+  onRealisticModeChange: (value: boolean) => void;
 }
 
-const ObjectLibrary = ({ bodies, onRemoveBody, onRemoveAll, selectedType, onSelectType }: ObjectLibraryProps) => {
+const ObjectLibrary = ({
+  onBeginPlacement,
+  bodies,
+  onRemoveBody,
+  onRemoveAll,
+  placementActive,
+  onVelocityScaleChange,
+  velocityScale,
+  realisticMode,
+  onRealisticModeChange,
+}: ObjectLibraryProps) => {
+  const [selectedPlanetName, setSelectedPlanetName] = useState('Earth');
+  const selectedPlanet = useMemo(
+    () => PLANET_PRESETS.find((planet) => planet.name === selectedPlanetName) ?? PLANET_PRESETS[2],
+    [selectedPlanetName],
+  );
+
+  const beginPlanetPlacement = () => {
+    onBeginPlacement({
+      name: selectedPlanet.name,
+      type: 'planet',
+      bodyClass: selectedPlanet.bodyClass,
+      position: [0, 0, 0],
+      mass: selectedPlanet.mass,
+      radius: Math.max(0.35, selectedPlanet.physicalRadius / PLANET_RENDER_RADIUS_SCALE),
+      physicalRadius: selectedPlanet.physicalRadius,
+      color: selectedPlanet.color,
+      atmosphere: selectedPlanet.atmosphere,
+      velocity: [0, 0, 0],
+    });
+  };
+
+  const beginPlacementFromPreset = (preset: typeof OTHER_PRESETS[0]) => {
+    onBeginPlacement({
+      type: preset.type,
+      bodyClass: preset.type === 'star' ? 'star' : preset.type === 'blackhole' ? 'blackhole' : 'asteroid',
+      position: [0, 0, 0],
+      mass: preset.mass,
+      radius: preset.radius,
+      color: preset.color,
+      velocity: [0, 0, 0],
+      eventHorizonRadius: preset.type === 'blackhole' ? preset.radius * 2.2 : undefined,
+    });
+  };
+
   return (
-    <div className="glass-panel-strong p-5 w-[280px] flex flex-col h-full border border-white/10 shadow-[0_0_30px_rgba(139,92,246,0.15)]">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-white/10">
-        <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center glow-border">
-          <Orbit size={18} className="text-primary" strokeWidth={1.5} />
+    <div className="glass-panel p-4 w-64 animate-fade-in">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Orbit size={16} className="text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">Objects</h3>
         </div>
-        <div>
-          <h3 className="text-sm font-bold text-foreground tracking-widest uppercase">Object Library</h3>
-          <p className="text-[10px] font-mono text-muted-foreground">{bodies.length} ACTIVE BODIES</p>
-        </div>
+        <span className="text-xs font-mono text-muted-foreground">{bodies.length} active</span>
       </div>
 
-      {/* Preset Buttons Grid */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        {OBJECT_PRESETS.map((preset) => (
-          <motion.button
-            key={preset.type}
-            onClick={() => onSelectType(selectedType === preset.type ? null : preset.type)}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl transition-all group overflow-hidden relative border ${
-              selectedType === preset.type
-                ? 'bg-primary/15 border-primary/50 shadow-[0_0_15px_rgba(34,211,238,0.2)]'
-                : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-primary/30'
+      <div className="space-y-3 mb-4">
+        <div className="rounded-lg bg-muted/20 border border-border/30 p-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Circle size={15} className="text-primary" />
+            <span className="text-xs text-foreground">Planet</span>
+          </div>
+          <select
+            value={selectedPlanetName}
+            onChange={(e) => setSelectedPlanetName(e.target.value)}
+            className="w-full bg-background/60 rounded-md px-2 py-1.5 text-xs mb-2 border border-border/40"
+          >
+            {PLANET_PRESETS.map((planet) => (
+              <option key={planet.name} value={planet.name}>
+                {`${planet.name} -------- ${MASS_FORMATTER.format(planet.mass)} kg`}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={beginPlanetPlacement}
+            className={`w-full flex items-center gap-2 p-2.5 rounded-lg border transition-all group text-left ${
+              placementActive ? 'bg-primary/20 border-primary/40' : 'bg-muted/30 hover:bg-muted/50 border-transparent hover:border-primary/20'
             }`}
           >
-            {/* Subtle glow background on hover */}
-            <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            
-            <span className="relative z-10 text-muted-foreground group-hover:text-primary transition-colors drop-shadow-lg" style={{ color: preset.color }}>
-              {preset.icon}
-            </span>
-            <span className="relative z-10 text-[11px] font-medium tracking-wide text-muted-foreground group-hover:text-foreground transition-colors">
-              {preset.label}
-            </span>
-          </motion.button>
-        ))}
+            <Circle size={16} style={{ color: selectedPlanet.color }} />
+            <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">Planet</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {OTHER_PRESETS.map((preset) => (
+            <button
+              key={preset.type}
+              onClick={() => beginPlacementFromPreset(preset)}
+              className={`flex items-center gap-2 p-2.5 rounded-lg border transition-all group text-left ${
+                placementActive ? 'bg-primary/20 border-primary/40' : 'bg-muted/30 hover:bg-muted/50 border-transparent hover:border-primary/20'
+              }`}
+            >
+              <span className="text-muted-foreground group-hover:text-primary transition-colors" style={{ color: preset.color }}>
+                {preset.icon}
+              </span>
+              <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+                {preset.label}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {selectedType && (
-        <div className="text-[11px] text-primary/90 bg-primary/10 border border-primary/20 rounded-lg px-2.5 py-2 mb-3">
-          Placement mode active. Click or drag on the grid to place {OBJECT_PRESETS.find((p) => p.type === selectedType)?.label}.
+      <div className="border-t border-border/20 pt-3 mb-3 space-y-2">
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>Placement velocity</span>
+          <span>{velocityScale.toFixed(2)}x</span>
         </div>
-      )}
+        <input
+          type="range"
+          min={0.2}
+          max={3}
+          step={0.05}
+          value={velocityScale}
+          onChange={(e) => onVelocityScaleChange(Number(e.target.value))}
+          className="w-full"
+        />
+        <label className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>Realistic physics</span>
+          <input
+            type="checkbox"
+            checked={realisticMode}
+            onChange={(e) => onRealisticModeChange(e.target.checked)}
+          />
+        </label>
+        {placementActive && (
+          <p className="text-[10px] text-primary/90 font-mono">Placement mode active: click on the spacetime grid</p>
+        )}
+      </div>
 
-      {/* Active Bodies List */}
       {bodies.length > 0 && (
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <span className="text-[10px] font-mono font-semibold text-primary/70 uppercase tracking-widest">Active System</span>
+        <div className="border-t border-border/20 pt-4 mt-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Bodies</span>
           </div>
-          
-          <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-thin mb-4">
+          <div className="space-y-1.5 max-h-32 overflow-y-auto scrollbar-thin pr-1 mb-3">
             {bodies.map((body) => {
-              const preset = OBJECT_PRESETS.find(p => p.type === body.type) || OBJECT_PRESETS[0];
+              const label = body.name ?? body.type;
               return (
-                <motion.div 
-                  key={body.id} 
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  className="flex items-center justify-between p-2 rounded-lg bg-black/20 border border-white/5 hover:bg-white/5 hover:border-white/10 transition-all group"
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_currentColor]" style={{ backgroundColor: body.color, color: body.color }} />
-                    <div className="flex flex-col">
-                      <span className="text-xs text-foreground truncate font-medium">
-                        {preset.label}
-                      </span>
-                      <span className="text-[9px] text-muted-foreground font-mono">
-                        {body.mass}M • {body.type}
-                      </span>
-                    </div>
+                <div key={body.id} className="flex items-center gap-2 justify-between p-1.5 rounded bg-muted/20 hover:bg-muted/30 transition-colors group">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: body.color }} />
+                    <span className="text-[11px] text-muted-foreground truncate group-hover:text-foreground">
+                      {label}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">
+                      {MASS_FORMATTER.format(body.mass)} kg
+                    </span>
                   </div>
                   <button
                     onClick={() => onRemoveBody(body.id)}
-                    className="text-muted-foreground hover:text-destructive p-1.5 rounded-md hover:bg-destructive/20 transition-colors opacity-0 group-hover:opacity-100"
-                    title="Remove Object"
+                    className="text-muted-foreground hover:text-destructive p-1 rounded hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Remove"
                   >
-                    <X size={14} strokeWidth={2} />
+                    <svg width="10" height="10" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.5571 2.99385 11.193 2.99385 10.9685 3.2184L7.50005 6.68682L4.03164 3.2184C3.80708 2.99385 3.44301 2.99385 3.21846 3.2184C2.99391 3.44295 2.99391 3.80702 3.21846 4.03157L6.68688 7.50001L3.21846 10.9684C2.99391 11.193 2.99391 11.5571 3.21846 11.7816C3.44301 12.0061 3.80708 12.0061 4.03164 11.7816L7.50005 8.31319L10.9685 11.7816C11.193 12.0061 11.5571 12.0061 11.7816 11.7816C12.0062 11.5571 12.0062 11.193 11.7816 10.9684L8.31322 7.50001L11.7816 4.03157Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path></svg>
                   </button>
-                </motion.div>
+                </div>
               );
             })}
           </div>
-          
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+          <button
             onClick={onRemoveAll}
-            className="w-full shrink-0 flex items-center justify-center gap-2 text-xs py-3 rounded-xl font-semibold tracking-wide border border-destructive/30 text-destructive/90 hover:text-destructive hover:bg-destructive/20 hover:border-destructive/50 transition-all shadow-[inset_0_0_15px_rgba(239,68,68,0.05)] hover:shadow-[inset_0_0_20px_rgba(239,68,68,0.15)]"
+            className="w-full text-xs py-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           >
-            <X size={14} /> PURGE SYSTEM
-          </motion.button>
+            Clear All Objects
+          </button>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useRef, useMemo, useCallback } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { ThreeEvent, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 interface CelestialBody {
@@ -19,6 +19,7 @@ interface SpacetimeGridProps {
   gridSize?: number;
   gridResolution?: number;
   universeScale?: number;
+  onGridClick?: (position: [number, number, number]) => void;
 }
 
 const SpacetimeGrid = ({
@@ -27,7 +28,15 @@ const SpacetimeGrid = ({
   gridSize = 120,
   gridResolution = 120,
   universeScale = 1,
+  onGridClick,
 }: SpacetimeGridProps) => {
+  const handleGridClick = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!onGridClick) return;
+    event.stopPropagation();
+    const { x, y, z } = event.point;
+    onGridClick([x, y, z]);
+  }, [onGridClick]);
+
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.ShaderMaterial>(null);
 
@@ -149,7 +158,7 @@ const SpacetimeGrid = ({
   });
 
   return (
-    <mesh ref={meshRef} geometry={geometry} material={shaderMaterial}>
+    <mesh ref={meshRef} geometry={geometry} material={shaderMaterial} onPointerDown={handleGridClick}>
       <primitive object={shaderMaterial} ref={materialRef} attach="material" />
     </mesh>
   );
