@@ -1,7 +1,9 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RocketParams, RocketState, LaunchOutcome } from './rocketTypes';
-import { Rocket, Gauge, Flame, Wind, Globe, Layers, ChevronRight, RotateCcw, Activity, Fuel, ArrowUp, Timer, Info } from 'lucide-react';
+import { Rocket, Gauge, Flame, Wind, Globe, Layers, ChevronRight, RotateCcw, Activity, Fuel, ArrowUp, Timer, Info, Bot } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { AI_HINTS, type HintScenario, deriveHintScenario } from './rocketHints';
 
 interface RocketControlsProps {
   params: RocketParams;
@@ -105,6 +107,10 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
   const isActive = state.phase !== 'idle';
   const showOutcome = state.phase === 'outcome';
   const outcome = outcomeConfig[state.outcome];
+  const hintScenario = useMemo(() => deriveHintScenario(params, state), [params, state]);
+  const hintIndexRef = useRef<Record<HintScenario, number>>({} as Record<HintScenario, number>);
+  const [activeHint, setActiveHint] = useState(AI_HINTS[hintScenario][0]);
+  const [hintTick, setHintTick] = useState(0);
 
   const planetTheme = {
     '--primary': '216 64% 57%',
@@ -112,9 +118,48 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
     '--cyan-dim': '216 64% 30%',
   } as React.CSSProperties;
 
+  useEffect(() => {
+    const advanceHint = () => {
+      const options = AI_HINTS[hintScenario];
+      const previousIndex = hintIndexRef.current[hintScenario] ?? -1;
+      let nextIndex = 0;
+      if (options.length > 1) {
+        nextIndex = Math.floor(Math.random() * options.length);
+        while (nextIndex === previousIndex) {
+          nextIndex = Math.floor(Math.random() * options.length);
+        }
+      }
+      hintIndexRef.current[hintScenario] = nextIndex;
+      setActiveHint(options[nextIndex]);
+      setHintTick((tick) => tick + 1);
+    };
+
+    advanceHint();
+    const intervalId = window.setInterval(advanceHint, 6500);
+    return () => window.clearInterval(intervalId);
+  }, [hintScenario]);
+
   return (
     <TooltipProvider delayDuration={150}>
-      <div style={planetTheme} className="glass-panel-strong p-7 w-[440px] h-[calc(100vh-140px)] flex flex-col border border-white/10 shadow-[0_0_30px_rgba(45,55,72,0.5)]">
+      <div style={planetTheme} className="glass-panel-strong p-7 w-[440px] h-[calc(100vh-140px)] flex flex-col border border-white/10 shadow-[0_0_30px_rgba(45,55,72,0.5)] overflow-visible">
+        <div className="sticky top-0 z-20 rounded-2xl border border-primary/45 bg-[linear-gradient(135deg,rgba(96,165,250,0.28),rgba(148,163,184,0.14))] px-5 py-4 mb-5 shadow-[0_0_32px_rgba(96,165,250,0.22)] backdrop-blur-xl shrink-0">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-primary/18 border border-primary/35 flex items-center justify-center shadow-[0_0_18px_rgba(96,165,250,0.24)]">
+                <Bot size={18} className="text-primary" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">AI Launch Coach</div>
+                <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-secondary/85">Always-on guidance</div>
+              </div>
+            </div>
+          </div>
+          <div className="text-xs font-mono uppercase tracking-[0.18em] text-secondary mb-2">
+            Scenario: {hintScenario.replaceAll('-', ' ')}
+          </div>
+          <p className="text-[15px] text-foreground leading-relaxed font-medium">{activeHint}</p>
+        </div>
+
         <div className="flex-1 overflow-y-auto space-y-5 pr-2 scrollbar-thin">
           <div className="flex items-center gap-3 pb-4 border-b border-white/10">
             <div className="w-12 h-12 rounded-xl bg-secondary/20 flex items-center justify-center glow-border border border-secondary/30">

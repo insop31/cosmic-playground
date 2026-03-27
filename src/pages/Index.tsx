@@ -5,6 +5,7 @@ import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
+import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
 import { Atom, Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -437,6 +438,26 @@ const Index = () => {
     stableBlackHoleTimerRef.current = 0;
   }, []);
 
+  const handleApplyTemplate = useCallback((templateId: string) => {
+    const template = SPACETIME_TEMPLATES.find((entry) => entry.id === templateId);
+    if (!template) return;
+
+    const nextBodies = template.createBodies().map((body, index) => ({
+      ...body,
+      id: `template_${templateId}_${nextId++}_${index}`,
+    }));
+
+    setBodies(nextBodies);
+    setPendingPlacement(null);
+    setTimeScale(1);
+    setIsPlaying(true);
+    universeAgeRef.current = 0;
+    setUniverseScale(1);
+    stableSystemTimerRef.current = 0;
+    stableBlackHoleTimerRef.current = 0;
+    registerExperiment(`template:${templateId}`, 24);
+  }, [registerExperiment]);
+
   const handleResetSpacetime = useCallback(() => {
     setBodies([
       { id: 'sun', name: 'Sun', type: 'star', bodyClass: 'star', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, physicalRadius: 696_340_000, color: '#ffcc00', velocity: [0, 0, 0] },
@@ -587,6 +608,7 @@ const Index = () => {
         {mode === 'spacetime' ? (
           <ObjectLibrary
             onBeginPlacement={handleBeginPlacement}
+            onApplyTemplate={handleApplyTemplate}
             bodies={bodies}
             onRemoveBody={handleRemoveBody}
             onRemoveAll={handleRemoveAll}
