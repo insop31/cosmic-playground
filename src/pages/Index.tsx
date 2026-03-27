@@ -5,7 +5,7 @@ import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
-import { Atom, Rocket, Orbit } from 'lucide-react';
+import { Atom, Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
 
 let nextId = 1;
 
@@ -19,6 +19,17 @@ const REAL_G = 6.674e-11;
 const REAL_GRAVITY_BOOST = 1.2e20;
 const MIN_ORBITAL_SPEED = 0.08;
 const MAX_ORBITAL_SPEED = 3.0;
+
+const ACHIEVEMENT_CONFIG = [
+  { id: 'first-stable-orbit', name: 'First Stable Orbit', description: 'Reach orbit in the rocket simulator.', score: 120 },
+  { id: 'gravity-master', name: 'Gravity Master', description: 'Experiment broadly across the lab.', score: 140 },
+  { id: 'chaos-creator', name: 'Chaos Creator', description: 'Build a dense, unpredictable gravitational system.', score: 100 },
+  { id: 'slingshot-expert', name: 'Slingshot Expert', description: 'Launch a fast body into a strong gravity assist setup.', score: 110 },
+  { id: 'black-hole-survivor', name: 'Black Hole Survivor', description: 'Keep a living system stable around a black hole.', score: 150 },
+  { id: 'escape-velocity-achieved', name: 'Escape Velocity Achieved', description: 'Leave the atmosphere behind for good.', score: 130 },
+] as const;
+
+type AchievementId = (typeof ACHIEVEMENT_CONFIG)[number]['id'];
 
 const Index = () => {
   const [mode, setMode] = useState<AppMode>('spacetime');
@@ -45,6 +56,40 @@ const Index = () => {
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
   const [rocketState, setRocketState] = useState<RocketState>(INITIAL_STATE);
+  const [explorationScore, setExplorationScore] = useState(0);
+  const [achievements, setAchievements] = useState<Record<AchievementId, boolean>>({
+    'first-stable-orbit': false,
+    'gravity-master': false,
+    'chaos-creator': false,
+    'slingshot-expert': false,
+    'black-hole-survivor': false,
+    'escape-velocity-achieved': false,
+  });
+  const experimentKeysRef = useRef<Set<string>>(new Set());
+  const stableSystemTimerRef = useRef(0);
+  const stableBlackHoleTimerRef = useRef(0);
+  const previousOutcomeRef = useRef<RocketState['outcome']>('none');
+
+  const awardScore = useCallback((points: number) => {
+    setExplorationScore((prev) => prev + points);
+  }, []);
+
+  const unlockAchievement = useCallback((id: AchievementId) => {
+    setAchievements((prev) => {
+      if (prev[id]) return prev;
+      const reward = ACHIEVEMENT_CONFIG.find((achievement) => achievement.id === id)?.score ?? 0;
+      if (reward > 0) {
+        setExplorationScore((score) => score + reward);
+      }
+      return { ...prev, [id]: true };
+    });
+  }, []);
+
+  const registerExperiment = useCallback((key: string, points = 12) => {
+    if (experimentKeysRef.current.has(key)) return;
+    experimentKeysRef.current.add(key);
+    awardScore(points);
+  }, [awardScore]);
 
   // ─── Universe age ticker ───
   useEffect(() => {
@@ -68,6 +113,64 @@ const Index = () => {
 
     return () => clearInterval(interval);
   }, [mode, isPlaying, timeScale]);
+
+  useEffect(() => {
+    if (experimentKeysRef.current.size >= 8) {
+      unlockAchievement('gravity-master');
+    }
+  }, [bodies, placementVelocityScale, realisticMode, rocketParams, unlockAchievement]);
+
+  useEffect(() => {
+    if (rocketState.phase !== 'outcome') {
+      previousOutcomeRef.current = rocketState.outcome;
+      return;
+    }
+
+    if (previousOutcomeRef.current === rocketState.outcome) return;
+    previousOutcomeRef.current = rocketState.outcome;
+
+    if (rocketState.outcome === 'orbiting') {
+      awardScore(80);
+      unlockAchievement('first-stable-orbit');
+    }
+
+    if (rocketState.outcome === 'escape') {
+      awardScore(90);
+      unlockAchievement('escape-velocity-achieved');
+    }
+  }, [awardScore, rocketState.outcome, rocketState.phase, unlockAchievement]);
+
+  useEffect(() => {
+    if (mode !== 'spacetime' || !isPlaying || timeScale <= 0) return;
+
+    const interval = setInterval(() => {
+      const hasStableCandidate = bodies.length >= 4
+        && bodies.some((body) => body.type === 'star')
+        && bodies.filter((body) => body.type === 'planet' || body.type === 'asteroid' || body.type === 'comet').length >= 2;
+      const hasBlackHoleCandidate = bodies.some((body) => body.type === 'blackhole')
+        && bodies.filter((body) => body.type !== 'blackhole').length >= 2;
+
+      stableSystemTimerRef.current = hasStableCandidate ? stableSystemTimerRef.current + 1 : 0;
+      stableBlackHoleTimerRef.current = hasBlackHoleCandidate ? stableBlackHoleTimerRef.current + 1 : 0;
+
+      if (stableSystemTimerRef.current === 12) {
+        awardScore(75);
+        unlockAchievement('gravity-master');
+      }
+
+      if (stableBlackHoleTimerRef.current >= 10) {
+        unlockAchievement('black-hole-survivor');
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [awardScore, bodies, isPlaying, mode, timeScale, unlockAchievement]);
+
+  useEffect(() => {
+    if (bodies.length >= 7 || (bodies.some((body) => body.type === 'blackhole') && bodies.some((body) => body.type === 'neutron') && bodies.length >= 5)) {
+      unlockAchievement('chaos-creator');
+    }
+  }, [bodies, unlockAchievement]);
 
   // ─── Spacetime handlers ───
   // Physics positions are managed inside PhysicsSimulator via refs — no per-frame
@@ -99,7 +202,8 @@ const Index = () => {
   const handleBeginPlacement = useCallback((obj: Omit<CelestialBody, 'id'>) => {
     const { position: _ignored, ...bodyWithoutPosition } = obj;
     setPendingPlacement(bodyWithoutPosition);
-  }, []);
+    registerExperiment(`prep:${obj.type}:${Math.round(obj.mass).toExponential(1)}`);
+  }, [registerExperiment]);
 
   const handlePlaceOnGrid = useCallback((position: [number, number, number]) => {
     if (!pendingPlacement) return;
@@ -123,6 +227,11 @@ const Index = () => {
       }
 
       const velocity = computePlacementVelocity(spawnPos, prev, placementVelocityScale);
+      const hasHeavyAnchor = prev.some((body) => body.mass >= 1e27);
+      if ((pendingPlacement.type === 'comet' || pendingPlacement.type === 'asteroid') && placementVelocityScale >= 1.5 && hasHeavyAnchor) {
+        unlockAchievement('slingshot-expert');
+      }
+      registerExperiment(`place:${pendingPlacement.type}:${spawnPos[0].toFixed(1)}:${spawnPos[2].toFixed(1)}:${placementVelocityScale.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
       return [...prev, {
         ...pendingPlacement,
         id: `obj_${nextId++}`,
@@ -131,13 +240,17 @@ const Index = () => {
       }];
     });
     setPendingPlacement(null);
-  }, [computePlacementVelocity, pendingPlacement, placementVelocityScale]);
+  }, [computePlacementVelocity, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment, unlockAchievement]);
 
   const handleRemoveBody = useCallback((id: string) => {
     setBodies((prev) => prev.filter((b) => b.id !== id));
   }, []);
 
-  const handleRemoveAll = useCallback(() => setBodies([]), []);
+  const handleRemoveAll = useCallback(() => {
+    setBodies([]);
+    stableSystemTimerRef.current = 0;
+    stableBlackHoleTimerRef.current = 0;
+  }, []);
 
   const handleResetSpacetime = useCallback(() => {
     setBodies([
@@ -149,23 +262,43 @@ const Index = () => {
     universeAgeRef.current = 0;
     setUniverseScale(1);
     setPendingPlacement(null);
+    stableSystemTimerRef.current = 0;
+    stableBlackHoleTimerRef.current = 0;
   }, []);
 
   // ─── Rocket handlers ───
   const handleRocketParamChange = useCallback((key: keyof RocketParams, value: number | boolean) => {
-    setRocketParams((prev) => ({ ...prev, [key]: value }));
-  }, []);
+    setRocketParams((prev) => {
+      const next = { ...prev, [key]: value };
+      registerExperiment(`rocket:${key}:${String(value)}`);
+      registerExperiment(`rocket-profile:${next.launchAngle}-${next.thrustForce}-${next.fuelMass}-${next.dragCoefficient}-${next.gravity}-${next.stageSeparation ? 1 : 0}`, 10);
+      return next;
+    });
+  }, [registerExperiment]);
 
   const handleLaunch = useCallback(() => {
+    awardScore(15);
     setRocketState({ ...INITIAL_STATE, phase: 'launching', fuel: 1 });
-  }, []);
+  }, [awardScore]);
 
   const handleRocketReset = useCallback(() => {
     setRocketState({ ...INITIAL_STATE });
+    previousOutcomeRef.current = 'none';
   }, []);
+
+  const handleVelocityScaleChange = useCallback((value: number) => {
+    setPlacementVelocityScale(value);
+    registerExperiment(`velocity-scale:${value.toFixed(2)}`);
+  }, [registerExperiment]);
+
+  const handleRealisticModeChange = useCallback((value: boolean) => {
+    setRealisticMode(value);
+    registerExperiment(`physics-mode:${value ? 'realistic' : 'arcade'}`);
+  }, [registerExperiment]);
 
   // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
+  const unlockedCount = ACHIEVEMENT_CONFIG.filter((achievement) => achievements[achievement.id]).length;
 
   return (
     <div className="w-full h-screen relative overflow-hidden bg-background">
@@ -259,9 +392,9 @@ const Index = () => {
             onRemoveAll={handleRemoveAll}
             placementActive={Boolean(pendingPlacement)}
             velocityScale={placementVelocityScale}
-            onVelocityScaleChange={setPlacementVelocityScale}
+            onVelocityScaleChange={handleVelocityScaleChange}
             realisticMode={realisticMode}
-            onRealisticModeChange={setRealisticMode}
+            onRealisticModeChange={handleRealisticModeChange}
           />
         ) : (
           <RocketControls
@@ -272,6 +405,67 @@ const Index = () => {
             onReset={handleRocketReset}
           />
         )}
+      </div>
+
+      <div className="absolute right-4 top-20 z-10 w-72 pointer-events-auto">
+        <div className="glass-panel p-4 animate-fade-in">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <div className="flex items-center gap-2 text-primary mb-1">
+                <Trophy size={16} />
+                <span className="text-xs font-semibold tracking-[0.18em] uppercase">Mission Progress</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Experiment, orbit, and build resilient systems to unlock milestones.</p>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Score</div>
+              <div className="text-2xl font-semibold text-foreground">{explorationScore}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">
+                <Sparkles size={12} />
+                Unlocks
+              </div>
+              <div className="text-lg font-semibold text-foreground">{unlockedCount}/{ACHIEVEMENT_CONFIG.length}</div>
+            </div>
+            <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">
+                <Target size={12} />
+                Experiments
+              </div>
+              <div className="text-lg font-semibold text-foreground">{experimentKeysRef.current.size}</div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {ACHIEVEMENT_CONFIG.map((achievement) => {
+              const unlocked = achievements[achievement.id];
+              return (
+                <div
+                  key={achievement.id}
+                  className={`rounded-xl border px-3 py-2.5 transition-colors ${
+                    unlocked
+                      ? 'border-primary/35 bg-primary/10'
+                      : 'border-border/25 bg-muted/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className={`text-sm font-medium ${unlocked ? 'text-primary' : 'text-foreground'}`}>{achievement.name}</div>
+                      <div className="text-[11px] text-muted-foreground">{achievement.description}</div>
+                    </div>
+                    <div className={`text-[10px] font-mono uppercase tracking-[0.2em] ${unlocked ? 'text-primary' : 'text-muted-foreground/70'}`}>
+                      {unlocked ? 'Unlocked' : 'Locked'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Bottom Center - Time Controls */}
