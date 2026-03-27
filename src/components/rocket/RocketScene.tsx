@@ -189,30 +189,48 @@ const RULER_X = 12; // world-X of the altitude ruler line
 const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: number; yMin: number; yMax: number }) => {
   const height = yMax - yMin;
   const centerY = (yMin + yMax) / 2;
+  const bandOpacity = Math.min(opacity * 4.2, 0.42);
+  const capOpacity = Math.min(opacity * 2.4, 0.24);
   
   return (
     <group>
-      {/* ── Outer volumetric tube background ── */}
+      {/* Main volumetric band wall */}
       <mesh position={[0, centerY, 0]}>
         <cylinderGeometry args={[250, 250, height, 256, 1, true]} />
         <meshBasicMaterial 
           color={color} 
           transparent 
-          opacity={Math.min(opacity * 6, 0.8)} 
+          opacity={bandOpacity}
           depthWrite={false} 
+          depthTest={false}
           side={THREE.BackSide}
           blending={THREE.AdditiveBlending}
         />
       </mesh>
       
-      {/* ── Horizontal "Ceiling" plane at the layer boundary ── */}
+      {/* Top cap */}
       <mesh position={[0, yMax, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0, 250, 256]} />
+        <circleGeometry args={[250, 192]} />
         <meshBasicMaterial 
           color={color} 
           transparent 
-          opacity={Math.min(opacity * 4, 0.6)} 
+          opacity={capOpacity}
+          depthTest={false}
           depthWrite={false} 
+          side={THREE.DoubleSide}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* Bottom cap - completes upper layers visually */}
+      <mesh position={[0, yMin, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[250, 192]} />
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={capOpacity * 0.9}
+          depthTest={false}
+          depthWrite={false}
           side={THREE.DoubleSide}
           blending={THREE.AdditiveBlending}
         />
@@ -350,7 +368,7 @@ const CinematicCamera = ({
   const targetPos = useRef(new THREE.Vector3(0, 5, 0));
   const targetCam = useRef(new THREE.Vector3(8, 6, 20));
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const controls = controlsRef.current;
     if (!controls) return;
 
@@ -370,32 +388,23 @@ const CinematicCamera = ({
       // Always centre on the rocket
       targetPos.current.set(rocketWorldX, rocketWorldY, 0);
 
-      // Camera zone matches atmospheric layer boundaries so the band
-      // fills a good portion of the screen at each stage
-      if (alt < 8) {
-        // Troposphere — close dramatic view
-        targetCam.current.set(rocketWorldX + 4, rocketWorldY + 2, 20);
-      } else if (alt < 20) {
-        // Stratosphere — pull back enough to see the purple band
-        targetCam.current.set(rocketWorldX + 5, rocketWorldY + 3, 24);
-      } else if (alt < 33) {
-        // Mesosphere — wider
-        targetCam.current.set(rocketWorldX + 7, rocketWorldY + 5, 30);
-      } else if (alt < 45) {
-        // Thermosphere — very wide
-        targetCam.current.set(rocketWorldX + 9, rocketWorldY + 6, 36);
-      } else {
-        // Exosphere — maximum pull-back, shows whole atmospheric stack
-        targetCam.current.set(rocketWorldX + 11, rocketWorldY + 8, 44);
-      }
+      // Smoothly blend camera offsets by normalized altitude to avoid jumps at layer edges.
+      const t = THREE.MathUtils.clamp(alt / 62, 0, 1);
+      const offsetX = THREE.MathUtils.lerp(4, 11, t);
+      const offsetY = THREE.MathUtils.lerp(2, 8, t);
+      const offsetZ = THREE.MathUtils.lerp(20, 44, t);
+      targetCam.current.set(rocketWorldX + offsetX, rocketWorldY + offsetY, offsetZ);
     }
 
-    // Aggressive adaptive smoothing: larger lag → faster catch-up
-    const dist = camera.position.distanceTo(targetCam.current);
-    const smoothing = Math.min(0.18, 0.08 + dist * 0.006);
-
-    camera.position.lerp(targetCam.current, smoothing);
-    controls.target.lerp(targetPos.current, smoothing);
+    // Time-based damping keeps camera motion smooth and framerate independent.
+    const damping = 6.5;
+    const dt = Math.min(delta, 0.05);
+    camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCam.current.x, damping, dt);
+    camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCam.current.y, damping, dt);
+    camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCam.current.z, damping, dt);
+    controls.target.x = THREE.MathUtils.damp(controls.target.x, targetPos.current.x, damping, dt);
+    controls.target.y = THREE.MathUtils.damp(controls.target.y, targetPos.current.y, damping, dt);
+    controls.target.z = THREE.MathUtils.damp(controls.target.z, targetPos.current.z, damping, dt);
     controls.update();
   });
 

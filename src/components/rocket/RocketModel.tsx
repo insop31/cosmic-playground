@@ -47,7 +47,7 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
       return;
     }
 
-    const dt = Math.min(delta, 0.05) * 2; // clamp delta, speed up sim
+    const dt = Math.min(delta, 0.05); // clamp delta for stable integration
     const angleRad = (params.launchAngle * Math.PI) / 180;
     let [vx, vy] = velocityRef.current;
     let [px, py] = posRef.current;
@@ -131,7 +131,11 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     // Update visual position
     groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
     const rocketAngle = Math.atan2(vx, Math.max(vy, 0.001));
-    groupRef.current.rotation.set(0, 0, -rocketAngle);
+    groupRef.current.rotation.z = THREE.MathUtils.lerp(
+      groupRef.current.rotation.z,
+      -rocketAngle,
+      Math.min(1, dt * 10)
+    );
 
     onUpdateState((prev) => ({
       ...prev,
