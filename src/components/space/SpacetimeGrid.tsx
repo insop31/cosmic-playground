@@ -131,7 +131,13 @@ const SpacetimeGrid = ({
         const dx = x - body.position[0];
         const dz = z - body.position[2];
         const dist = Math.sqrt(dx * dx + dz * dz);
-        const influence = (body.mass * 2) / (dist * dist + 1.5);
+        // SI masses (e.g. 1.989e30) would blow up the formula directly.
+        // Log-normalize anything above the arcade range so the grid stays visible
+        // regardless of whether realistic or arcade mode is active.
+        const visualMass = body.mass > 1000
+          ? Math.max(0.5, (Math.log10(body.mass) - 10) * 1.5)
+          : body.mass;
+        const influence = (visualMass * 2) / (dist * dist + 1.5);
         totalDisplacement += influence;
       }
 

@@ -16,6 +16,10 @@ const MAX_SIM_BODIES = 180;
 const MAX_INTERACTION_RADIUS = 45;
 const QUADTREE_CAPACITY = 6;
 const QUADTREE_MAX_DEPTH = 6;
+const MIN_ORBITAL_SPEED = 0.08;
+const MAX_ORBITAL_SPEED_REALISTIC = 3.0;
+const MAX_ORBITAL_SPEED_ARCADE = 6.0;
+const BOUNDARY_DAMPING = 0.35;
 
 // ── Internal Types ─────────────────────────────────────────────────────────
 interface PhysicsBody {
@@ -174,7 +178,9 @@ function computeOrbitalVelocity(newPos: THREE.Vector3, physicsBodies: PhysicsBod
 
   // Circular orbit speed: v = sqrt(G * M / r)
   const effectiveG = realisticMode ? REAL_G * REAL_GRAVITY_BOOST : ARCADE_G;
-  const speed = Math.sqrt(effectiveG * attractor.mass / dist);
+  const rawSpeed = Math.sqrt(effectiveG * attractor.mass / dist);
+  const maxSpeed = realisticMode ? MAX_ORBITAL_SPEED_REALISTIC : MAX_ORBITAL_SPEED_ARCADE;
+  const speed = Math.min(maxSpeed, Math.max(MIN_ORBITAL_SPEED, rawSpeed));
 
   // Tangent = normalize(R) × UP
   const up = new THREE.Vector3(0, 1, 0);
@@ -531,6 +537,12 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
       // a = F / m  →  velocity += a * dt  (update v before x = semi-implicit Euler)
       body.velocity.addScaledVector(body.force, dt / body.mass);
 
+      const maxSpeed = realisticMode ? MAX_ORBITAL_SPEED_REALISTIC : MAX_ORBITAL_SPEED_ARCADE;
+      const speedNow = body.velocity.length();
+      if (speedNow > maxSpeed) {
+        body.velocity.multiplyScalar(maxSpeed / speedNow);
+      }
+
       // position += velocity * dt
       body.position.addScaledVector(body.velocity, dt);
 
@@ -538,11 +550,21 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
       body.position.y = 0;
       body.velocity.y = 0;
 
-      // Escape condition support: allow fly-away trajectories.
+      // Boundary handling: keep objects in scene instead of deleting instantly.
       const halfGrid = (gridSize * universeScale) / 2;
-      if (Math.abs(body.position.x) > halfGrid * 1.5 || Math.abs(body.position.z) > halfGrid * 1.5) {
-        toRemove.add(body.id);
-        continue;
+      if (body.position.x < -halfGrid) {
+        body.position.x = -halfGrid;
+        body.velocity.x = Math.abs(body.velocity.x) * BOUNDARY_DAMPING;
+      } else if (body.position.x > halfGrid) {
+        body.position.x = halfGrid;
+        body.velocity.x = -Math.abs(body.velocity.x) * BOUNDARY_DAMPING;
+      }
+      if (body.position.z < -halfGrid) {
+        body.position.z = -halfGrid;
+        body.velocity.z = Math.abs(body.velocity.z) * BOUNDARY_DAMPING;
+      } else if (body.position.z > halfGrid) {
+        body.position.z = halfGrid;
+        body.velocity.z = -Math.abs(body.velocity.z) * BOUNDARY_DAMPING;
       }
 
       const strongestAttractor = bods

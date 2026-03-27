@@ -16,6 +16,9 @@ const EXPANSION_DELAY_S = 600; // 10 minutes
 const DEFAULT_STAR_MASS = 1.989e30;
 const MASSIVE_ATTRACTOR_THRESHOLD = 1e27;
 const REAL_G = 6.674e-11;
+const REAL_GRAVITY_BOOST = 1.2e20;
+const MIN_ORBITAL_SPEED = 0.08;
+const MAX_ORBITAL_SPEED = 3.0;
 
 const Index = () => {
   const [mode, setMode] = useState<AppMode>('spacetime');
@@ -86,7 +89,8 @@ const Index = () => {
     if (distance < 0.01) return [0, 0, 0];
     const normalizedDistance = Math.max(distance, 0.25);
     const effectiveMass = Math.max(attractor.mass, MASSIVE_ATTRACTOR_THRESHOLD);
-    const orbitalSpeed = Math.sqrt((REAL_G * effectiveMass * 1.2e20) / normalizedDistance);
+    const orbitalSpeedRaw = Math.sqrt((REAL_G * effectiveMass * REAL_GRAVITY_BOOST) / normalizedDistance);
+    const orbitalSpeed = Math.min(MAX_ORBITAL_SPEED, Math.max(MIN_ORBITAL_SPEED, orbitalSpeedRaw));
     const tangentX = -rz / distance;
     const tangentZ = rx / distance;
     return [tangentX * orbitalSpeed * scale, 0, tangentZ * orbitalSpeed * scale];
@@ -100,11 +104,29 @@ const Index = () => {
   const handlePlaceOnGrid = useCallback((position: [number, number, number]) => {
     if (!pendingPlacement) return;
     setBodies((prev) => {
-      const velocity = computePlacementVelocity(position, prev, placementVelocityScale);
+      const attractor = prev.length > 0 ? prev.reduce((max, b) => (b.mass > max.mass ? b : max)) : null;
+      let spawnPos = position;
+      if (attractor) {
+        const dx = position[0] - attractor.position[0];
+        const dz = position[2] - attractor.position[2];
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const minSafeDistance = (attractor.radius ?? 0.5) + (pendingPlacement.radius ?? 0.3) + 0.7;
+        if (dist < minSafeDistance) {
+          const ux = dist > 1e-6 ? dx / dist : 1;
+          const uz = dist > 1e-6 ? dz / dist : 0;
+          spawnPos = [
+            attractor.position[0] + ux * minSafeDistance,
+            0,
+            attractor.position[2] + uz * minSafeDistance,
+          ];
+        }
+      }
+
+      const velocity = computePlacementVelocity(spawnPos, prev, placementVelocityScale);
       return [...prev, {
         ...pendingPlacement,
         id: `obj_${nextId++}`,
-        position,
+        position: spawnPos,
         velocity,
       }];
     });

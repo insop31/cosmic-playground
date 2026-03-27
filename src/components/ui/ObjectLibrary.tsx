@@ -106,17 +106,20 @@ const ObjectLibrary = ({
             <Circle size={15} className="text-primary" />
             <span className="text-xs text-foreground">Planet</span>
           </div>
-          <select
-            value={selectedPlanetName}
-            onChange={(e) => setSelectedPlanetName(e.target.value)}
-            className="w-full bg-background/60 rounded-md px-2 py-1.5 text-xs mb-2 border border-border/40"
-          >
-            {PLANET_PRESETS.map((planet) => (
-              <option key={planet.name} value={planet.name}>
-                {`${planet.name} -------- ${MASS_FORMATTER.format(planet.mass)} kg`}
-              </option>
-            ))}
-          </select>
+          <div className="relative mb-2">
+            <select
+              value={selectedPlanetName}
+              onChange={(e) => setSelectedPlanetName(e.target.value)}
+              className="w-full appearance-none bg-gradient-to-r from-cyan-950/30 to-violet-950/30 text-cyan-100 rounded-md px-2 py-1.5 text-xs border border-cyan-400/25 focus:border-cyan-300/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40"
+            >
+              {PLANET_PRESETS.map((planet) => (
+                <option key={planet.name} value={planet.name} className="bg-slate-950 text-cyan-100">
+                  {`${planet.name} -------- ${MASS_FORMATTER.format(planet.mass)} kg`}
+                </option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-cyan-300/80 text-[10px]">▼</span>
+          </div>
           <button
             onClick={beginPlanetPlacement}
             className={`w-full flex items-center gap-2 p-2.5 rounded-lg border transition-all group text-left ${
