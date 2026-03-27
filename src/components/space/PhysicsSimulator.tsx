@@ -4,11 +4,18 @@ import * as THREE from 'three';
 import { CelestialBody } from './SpaceScene';
 
 // ── Physics Constants ──────────────────────────────────────────────────────
-export const G = 0.5;               // Gravitational constant (gameplay-tuned)
+export const REAL_G = 6.674e-11;    // Newtonian constant (SI)
+export const ARCADE_G = 0.5;        // Gameplay-tuned gravity
+const REAL_GRAVITY_BOOST = 1.2e20;  // Normalization so SI masses remain playable in scene units
 const SOFTENING_SQ = 0.25;          // ε² prevents singularity as r → 0
 const HEAVY_MASS_THRESHOLD = 7;     // mass ≥ this → "star-class", repels other heavy bodies
 const MAX_TRAIL_POINTS = 100;
 const MAX_HISTORY = 3600;           // ~60 s of rewind at 60 fps
+const MIN_ORBIT_DIST = 0.01;
+const MAX_SIM_BODIES = 180;
+const MAX_INTERACTION_RADIUS = 45;
+const QUADTREE_CAPACITY = 6;
+const QUADTREE_MAX_DEPTH = 6;
 
 // ── Internal Types ─────────────────────────────────────────────────────────
 interface PhysicsBody {
@@ -21,6 +28,96 @@ interface PhysicsBody {
   type: string;
   color: string;
   trailPositions: number[];         // flat [x,y,z, x,y,z, ...] buffer
+  motionState: 'bound' | 'escaping' | 'captured';
+}
+
+type BodyType = 'star' | 'planet' | 'asteroid' | 'blackhole' | 'neutron' | 'comet' | string;
+type Bounds2D = { minX: number; maxX: number; minZ: number; maxZ: number };
+
+interface SpatialEntry {
+  index: number;
+  x: number;
+  z: number;
+}
+
+class Quadtree {
+  private bounds: Bounds2D;
+  private depth: number;
+  private entries: SpatialEntry[] = [];
+  private children: Quadtree[] | null = null;
+
+  constructor(bounds: Bounds2D, depth = 0) {
+    this.bounds = bounds;
+    this.depth = depth;
+  }
+
+  private containsPoint(x: number, z: number): boolean {
+    return x >= this.bounds.minX && x <= this.bounds.maxX && z >= this.bounds.minZ && z <= this.bounds.maxZ;
+  }
+
+  private intersects(bounds: Bounds2D): boolean {
+    return !(
+      bounds.maxX < this.bounds.minX ||
+      bounds.minX > this.bounds.maxX ||
+      bounds.maxZ < this.bounds.minZ ||
+      bounds.minZ > this.bounds.maxZ
+    );
+  }
+
+  private subdivide() {
+    const { minX, maxX, minZ, maxZ } = this.bounds;
+    const midX = (minX + maxX) * 0.5;
+    const midZ = (minZ + maxZ) * 0.5;
+    const nextDepth = this.depth + 1;
+    this.children = [
+      new Quadtree({ minX, maxX: midX, minZ, maxZ: midZ }, nextDepth),
+      new Quadtree({ minX: midX, maxX, minZ, maxZ: midZ }, nextDepth),
+      new Quadtree({ minX, maxX: midX, minZ: midZ, maxZ }, nextDepth),
+      new Quadtree({ minX: midX, maxX, minZ: midZ, maxZ }, nextDepth),
+    ];
+  }
+
+  insert(entry: SpatialEntry): boolean {
+    if (!this.containsPoint(entry.x, entry.z)) return false;
+
+    if (!this.children && (this.entries.length < QUADTREE_CAPACITY || this.depth >= QUADTREE_MAX_DEPTH)) {
+      this.entries.push(entry);
+      return true;
+    }
+
+    if (!this.children) {
+      this.subdivide();
+      const oldEntries = this.entries;
+      this.entries = [];
+      for (const existing of oldEntries) {
+        this.insert(existing);
+      }
+    }
+
+    for (const child of this.children ?? []) {
+      if (child.insert(entry)) return true;
+    }
+
+    this.entries.push(entry);
+    return true;
+  }
+
+  query(bounds: Bounds2D, out: SpatialEntry[]) {
+    if (!this.intersects(bounds)) return;
+    for (const entry of this.entries) {
+      if (
+        entry.x >= bounds.minX &&
+        entry.x <= bounds.maxX &&
+        entry.z >= bounds.minZ &&
+        entry.z <= bounds.maxZ
+      ) {
+        out.push(entry);
+      }
+    }
+    for (const child of this.children ?? []) {
+      child.query(bounds, out);
+    }
+  }
 }
 
 interface WorldSnapshot {
@@ -40,6 +137,7 @@ interface MeshEntry {
 export interface PhysicsSimulatorProps {
   bodies: CelestialBody[];
   timeScale: number;
+  realisticMode?: boolean;
   onBodyRemoved: (id: string) => void;
   onBodyUpdated: (id: string, mass: number, radius: number) => void;
   livePhysicsRef: React.MutableRefObject<Array<{ position: [number, number, number]; mass: number }>>;
@@ -48,7 +146,23 @@ export interface PhysicsSimulatorProps {
 }
 
 // ── Orbital velocity helper ────────────────────────────────────────────────
-function computeOrbitalVelocity(newPos: THREE.Vector3, physicsBodies: PhysicsBody[]): THREE.Vector3 {
+function isStarClass(body: PhysicsBody): boolean {
+  return body.type === 'star' || body.mass >= HEAVY_MASS_THRESHOLD;
+}
+
+function shouldRepel(a: PhysicsBody, b: PhysicsBody): boolean {
+  return isStarClass(a) && isStarClass(b);
+}
+
+function shouldAttract(a: PhysicsBody, b: PhysicsBody): boolean {
+  const aIsStar = a.type === 'star';
+  const bIsStar = b.type === 'star';
+  const aIsPlanetary = a.type === 'planet' || a.type === 'asteroid' || a.type === 'comet';
+  const bIsPlanetary = b.type === 'planet' || b.type === 'asteroid' || b.type === 'comet';
+  return (aIsStar && bIsPlanetary) || (bIsStar && aIsPlanetary) || (!shouldRepel(a, b));
+}
+
+function computeOrbitalVelocity(newPos: THREE.Vector3, physicsBodies: PhysicsBody[], realisticMode: boolean): THREE.Vector3 {
   if (physicsBodies.length === 0) return new THREE.Vector3();
 
   // Find the most massive body (the "Attractor")
@@ -56,15 +170,23 @@ function computeOrbitalVelocity(newPos: THREE.Vector3, physicsBodies: PhysicsBod
 
   const R = newPos.clone().sub(attractor.position);
   const dist = R.length();
-  if (dist < 0.01) return new THREE.Vector3();
+  if (dist < MIN_ORBIT_DIST) return new THREE.Vector3();
 
   // Circular orbit speed: v = sqrt(G * M / r)
-  const speed = Math.sqrt(G * attractor.mass / dist);
+  const effectiveG = realisticMode ? REAL_G * REAL_GRAVITY_BOOST : ARCADE_G;
+  const speed = Math.sqrt(effectiveG * attractor.mass / dist);
 
-  // Tangent: normalize(R) × UP  →  [nx,0,nz] × [0,1,0] = [-nz, 0, nx]
-  const nx = R.x / dist;
-  const nz = R.z / dist;
-  return new THREE.Vector3(-nz, 0, nx).multiplyScalar(speed);
+  // Tangent = normalize(R) × UP
+  const up = new THREE.Vector3(0, 1, 0);
+  const radialDir = R.clone().normalize();
+  let tangent = radialDir.clone().cross(up);
+  if (tangent.lengthSq() < 1e-8) {
+    tangent = new THREE.Vector3(1, 0, 0);
+  } else {
+    tangent.normalize();
+  }
+
+  return tangent.multiplyScalar(speed);
 }
 
 // ── Per-body visual renderer ───────────────────────────────────────────────
@@ -141,6 +263,7 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
 const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   bodies,
   timeScale,
+  realisticMode = true,
   onBodyRemoved,
   onBodyUpdated,
   livePhysicsRef,
@@ -164,12 +287,11 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     for (const body of bodies) {
       if (!currentIds.has(body.id)) {
         const pos = new THREE.Vector3(...body.position);
-
-        // Use computed orbital velocity for all bodies except the very first
-        // (first body — typically the star — uses its provided velocity)
-        const vel = physicsRef.current.length > 0
-          ? computeOrbitalVelocity(pos, physicsRef.current)
-          : new THREE.Vector3(...(body.velocity ?? [0, 0, 0]));
+        const providedVel = new THREE.Vector3(...(body.velocity ?? [0, 0, 0]));
+        const hasProvidedVelocity = providedVel.lengthSq() > 1e-12;
+        const vel = hasProvidedVelocity
+          ? providedVel
+          : computeOrbitalVelocity(pos, physicsRef.current, realisticMode);
 
         physicsRef.current.push({
           id:            body.id,
@@ -178,9 +300,10 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
           force:         new THREE.Vector3(),
           mass:          body.mass,
           radius:        body.radius,
-          type:          body.type,
+          type:          body.type as BodyType,
           color:         body.color,
           trailPositions: [],
+          motionState:   'bound',
         });
       }
     }
@@ -192,13 +315,13 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     }
 
     setRenderList([...bodies]);
-  }, [bodies]);
+  }, [bodies, realisticMode]);
 
   // ── N-body Physics Loop ────────────────────────────────────────────────
   useFrame((_, delta) => {
     if (timeScale === 0) return;
 
-    const bods = physicsRef.current;
+    const bods = physicsRef.current.slice(0, MAX_SIM_BODIES);
 
     // ── Rewind path ────────────────────────────────────────────────────
     if (timeScale < 0) {
@@ -234,15 +357,53 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     historyRef.current.push(snapshot);
     if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
 
+    const effectiveG = realisticMode ? REAL_G * REAL_GRAVITY_BOOST : ARCADE_G;
+
     // ── A. Reset accumulated forces ──────────────────────────────────
     for (const b of bods) b.force.set(0, 0, 0);
 
     const toRemove = new Set<string>();
 
-    // ── B. Force accumulation + collision detection ───────────────────
-    // O(n²) nested loop — each pair processed once (j starts at i+1)
+    // ── B. Broad-phase (quadtree) + narrow-phase resolution ───────────
+    const halfGrid = (gridSize * universeScale) / 2;
+    const quadtree = new Quadtree(
+      { minX: -halfGrid * 1.6, maxX: halfGrid * 1.6, minZ: -halfGrid * 1.6, maxZ: halfGrid * 1.6 },
+      0,
+    );
+
     for (let i = 0; i < bods.length; i++) {
-      for (let j = i + 1; j < bods.length; j++) {
+      quadtree.insert({ index: i, x: bods[i].position.x, z: bods[i].position.z });
+    }
+
+    const candidateSet = new Set<string>();
+    const queryResult: SpatialEntry[] = [];
+    const interactionRange = Math.min(MAX_INTERACTION_RADIUS, halfGrid * 0.9);
+
+    for (let i = 0; i < bods.length; i++) {
+      queryResult.length = 0;
+      const center = bods[i].position;
+      quadtree.query(
+        {
+          minX: center.x - interactionRange,
+          maxX: center.x + interactionRange,
+          minZ: center.z - interactionRange,
+          maxZ: center.z + interactionRange,
+        },
+        queryResult,
+      );
+
+      for (const candidate of queryResult) {
+        if (candidate.index <= i) continue;
+        candidateSet.add(`${i}:${candidate.index}`);
+      }
+    }
+
+    for (const pairKey of candidateSet) {
+      const splitAt = pairKey.indexOf(':');
+      const i = Number(pairKey.slice(0, splitAt));
+      const j = Number(pairKey.slice(splitAt + 1));
+      if (!Number.isInteger(i) || !Number.isInteger(j)) continue;
+      if (!bods[i] || !bods[j]) continue;
         if (toRemove.has(bods[i].id) || toRemove.has(bods[j].id)) continue;
 
         const a = bods[i];
@@ -251,8 +412,79 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         const diff = b.position.clone().sub(a.position);
         const r    = diff.length();
 
-        // ── Collision & Merging ──────────────────────────────────────
+        const aIsPlanet = a.type === 'planet';
+        const bIsPlanet = b.type === 'planet';
+        const aIsStar = a.type === 'star' || a.type === 'neutron';
+        const bIsStar = b.type === 'star' || b.type === 'neutron';
+        const aIsAsteroid = a.type === 'asteroid' || a.type === 'comet';
+        const bIsAsteroid = b.type === 'asteroid' || b.type === 'comet';
+        const aIsBlackHole = a.type === 'blackhole';
+        const bIsBlackHole = b.type === 'blackhole';
+
+        // Event horizon capture for planet-blackhole interaction.
+        if ((aIsPlanet && bIsBlackHole) || (bIsPlanet && aIsBlackHole)) {
+          const planet = aIsPlanet ? a : b;
+          const blackHole = aIsBlackHole ? a : b;
+          const eventHorizon = Math.max(blackHole.radius * 2.2, 0.2);
+          if (r < eventHorizon) {
+            planet.motionState = 'captured';
+            blackHole.mass += planet.mass;
+            blackHole.radius = Math.cbrt(Math.pow(blackHole.radius, 3) + Math.pow(planet.radius, 3));
+            toRemove.add(planet.id);
+            continue;
+          }
+        }
+
+        // ── Collision & per-type resolution ───────────────────────────
         if (r < a.radius + b.radius) {
+          // CASE 1: Planet + Planet → merge (momentum conserved)
+          if (aIsPlanet && bIsPlanet) {
+            const [survivor, absorbed] = a.mass >= b.mass ? [a, b] : [b, a];
+            const totalMass = survivor.mass + absorbed.mass;
+            survivor.velocity
+              .multiplyScalar(survivor.mass)
+              .addScaledVector(absorbed.velocity, absorbed.mass)
+              .divideScalar(totalMass);
+            survivor.radius = Math.cbrt(
+              Math.pow(survivor.radius, 3) + Math.pow(absorbed.radius, 3)
+            );
+            survivor.mass = totalMass;
+            toRemove.add(absorbed.id);
+            continue;
+          }
+
+          // CASE 2: Planet + Star → planet absorbed.
+          if ((aIsPlanet && bIsStar) || (bIsPlanet && aIsStar)) {
+            const planet = aIsPlanet ? a : b;
+            const star = aIsStar ? a : b;
+            planet.motionState = 'captured';
+            star.mass += planet.mass;
+            star.radius = Math.cbrt(Math.pow(star.radius, 3) + Math.pow(planet.radius, 3));
+            toRemove.add(planet.id);
+            continue;
+          }
+
+          // CASE 3: Planet + Asteroid → impact changes trajectory.
+          if ((aIsPlanet && bIsAsteroid) || (bIsPlanet && aIsAsteroid)) {
+            const planet = aIsPlanet ? a : b;
+            const asteroid = aIsAsteroid ? a : b;
+            const impactDir = planet.position.clone().sub(asteroid.position).normalize();
+            planet.velocity.multiplyScalar(0.92).addScaledVector(impactDir, 0.08);
+            asteroid.velocity.multiplyScalar(-0.35);
+            continue;
+          }
+
+          // CASE 4: Planet + Black Hole → if collision, absorbed.
+          if ((aIsPlanet && bIsBlackHole) || (bIsPlanet && aIsBlackHole)) {
+            const planet = aIsPlanet ? a : b;
+            const blackHole = aIsBlackHole ? a : b;
+            planet.motionState = 'captured';
+            blackHole.mass += planet.mass;
+            blackHole.radius = Math.cbrt(Math.pow(blackHole.radius, 3) + Math.pow(planet.radius, 3));
+            toRemove.add(planet.id);
+            continue;
+          }
+
           const [survivor, absorbed] = a.mass >= b.mass ? [a, b] : [b, a];
           const totalMass = survivor.mass + absorbed.mass;
 
@@ -272,24 +504,24 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
           continue;
         }
 
+        if (r > interactionRange) continue;
+
         // Softened r² to prevent force blow-up at very close range
         const rSq = Math.max(r * r, SOFTENING_SQ);
+        const forceMag = effectiveG * a.mass * b.mass / rSq;
+        const direction = diff.normalize();
+        const forceVec = direction.multiplyScalar(forceMag);
 
-        // Anti-gravity: if both bodies are "heavy" (star-class) → repel
-        const bothHeavy = a.mass >= HEAVY_MASS_THRESHOLD && b.mass >= HEAVY_MASS_THRESHOLD;
-        const forceMag  = G * a.mass * b.mass / rSq;
-        const forceVec  = diff.normalize().multiplyScalar(forceMag);
-
-        if (bothHeavy) {
-          // Repulsion — invert direction for both
+        // Attraction by default, explicit anti-gravity for star-class pairs.
+        if (shouldRepel(a, b)) {
+          // Repulsion: push away from each other.
           a.force.sub(forceVec);
           b.force.add(forceVec);
-        } else {
-          // Attraction — Newton's law
+        } else if (shouldAttract(a, b)) {
+          // Attraction: pull toward each other.
           a.force.add(forceVec);
           b.force.sub(forceVec);
         }
-      }
     }
 
     // ── C. Semi-implicit Euler integration + mesh sync ────────────────
@@ -306,10 +538,29 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
       body.position.y = 0;
       body.velocity.y = 0;
 
-      // Boundary clamp: wrap at universe edge
+      // Escape condition support: allow fly-away trajectories.
       const halfGrid = (gridSize * universeScale) / 2;
-      body.position.x = Math.max(-halfGrid, Math.min(halfGrid, body.position.x));
-      body.position.z = Math.max(-halfGrid, Math.min(halfGrid, body.position.z));
+      if (Math.abs(body.position.x) > halfGrid * 1.5 || Math.abs(body.position.z) > halfGrid * 1.5) {
+        toRemove.add(body.id);
+        continue;
+      }
+
+      const strongestAttractor = bods
+        .filter((other) => other.id !== body.id)
+        .reduce<PhysicsBody | null>((best, other) => {
+          if (!best) return other;
+          return other.mass > best.mass ? other : best;
+        }, null);
+
+      if (!strongestAttractor) {
+        body.motionState = 'bound';
+      } else {
+        const rel = body.position.clone().sub(strongestAttractor.position);
+        const distance = Math.max(rel.length(), 1e-3);
+        const speed = body.velocity.length();
+        const escapeSpeed = Math.sqrt((2 * effectiveG * strongestAttractor.mass) / distance);
+        body.motionState = speed > escapeSpeed ? 'escaping' : 'bound';
+      }
 
       // Trail ring-buffer update
       body.trailPositions.push(body.position.x, 0, body.position.z);
@@ -325,10 +576,15 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 
         // Update scale only if radius changed (after merge)
         if (entry.meshRef.current) {
-          entry.meshRef.current.scale.setScalar(body.radius);
+          entry.meshRef.current.scale.set(body.radius, body.radius, body.radius);
         }
         if (entry.glowRef.current) {
-          entry.glowRef.current.scale.setScalar(body.radius * 1.8);
+          const glowScale = body.radius * 1.8;
+          entry.glowRef.current.scale.set(glowScale, glowScale, glowScale);
+          const glowMaterial = entry.glowRef.current.material as THREE.MeshBasicMaterial;
+          if (glowMaterial) {
+            glowMaterial.opacity = body.motionState === 'escaping' ? 0.16 : 0.08;
+          }
         }
 
         // Sync trail geometry
