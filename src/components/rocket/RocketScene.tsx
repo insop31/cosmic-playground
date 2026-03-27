@@ -79,6 +79,8 @@ const ATMO_LAYERS = [
   },
 ];
 
+const EXOSPHERE_LIMIT = 62;
+
 // ─── Scene components ─────────────────────────────────────────────────────────
 
 const PlanetSurface = () => (
@@ -471,6 +473,7 @@ const CinematicCamera = ({
   const targetPos = useRef(new THREE.Vector3(0, 5, 0));
   const targetCam = useRef(new THREE.Vector3(8, 6, 20));
   const orbitBlendRef = useRef(0);
+  const exosphereLockRef = useRef<{ target: THREE.Vector3; camera: THREE.Vector3 } | null>(null);
 
   useFrame((_, delta) => {
     const controls = controlsRef.current;
@@ -486,21 +489,38 @@ const CinematicCamera = ({
     const alt = state.altitude; // same value as py
 
     if (phase === 'idle') {
+      exosphereLockRef.current = null;
       orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 0, 6, delta);
       targetPos.current.set(0, 3, 0);
       targetCam.current.set(5.5, 4.8, 13.5);
-    } else if (phase === 'launching' || phase === 'coasting') {
+    } else if (phase === 'launching' || phase === 'coasting' || (phase === 'outcome' && state.outcome === 'escape')) {
       orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 0, 6, delta);
-      // Always centre on the rocket
-      targetPos.current.set(rocketWorldX, rocketWorldY, 0);
 
-      // Smoothly blend camera offsets by normalized altitude to avoid jumps at layer edges.
-      const t = THREE.MathUtils.clamp(alt / 62, 0, 1);
-      const offsetX = THREE.MathUtils.lerp(3.2, 9.5, t);
-      const offsetY = THREE.MathUtils.lerp(1.8, 7.2, t);
-      const offsetZ = THREE.MathUtils.lerp(13.5, 34, t);
-      targetCam.current.set(rocketWorldX + offsetX, rocketWorldY + offsetY, offsetZ);
+      // Stop advancing the chase framing once the rocket exceeds the exosphere.
+      if (alt > EXOSPHERE_LIMIT && exosphereLockRef.current) {
+        targetPos.current.copy(exosphereLockRef.current.target);
+        targetCam.current.copy(exosphereLockRef.current.camera);
+      } else {
+        // Always centre on the rocket until the exosphere cap is reached.
+        targetPos.current.set(rocketWorldX, rocketWorldY, 0);
+
+        const layerSpan = EXOSPHERE_LIMIT;
+        const t = THREE.MathUtils.clamp(alt / layerSpan, 0, 1);
+        const escapeBoost = phase === 'outcome' && state.outcome === 'escape' ? 1.2 : 1;
+        const offsetX = THREE.MathUtils.lerp(3.2, 9.5, t) * escapeBoost;
+        const offsetY = THREE.MathUtils.lerp(1.8, 7.2, t) * escapeBoost;
+        const offsetZ = THREE.MathUtils.lerp(13.5, 34, t) * escapeBoost;
+        targetCam.current.set(rocketWorldX + offsetX, rocketWorldY + offsetY, offsetZ);
+
+        if (alt >= EXOSPHERE_LIMIT) {
+          exosphereLockRef.current = {
+            target: targetPos.current.clone(),
+            camera: targetCam.current.clone(),
+          };
+        }
+      }
     } else if (phase === 'outcome' && state.outcome === 'orbiting') {
+      exosphereLockRef.current = null;
       // Orbit cinematic: frame the whole planet and keep the rocket visibly circling it.
       orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 1, 2.6, delta);
       const planetCenterY = pyToWorldY(-params.planetRadius);
@@ -527,12 +547,19 @@ const CinematicCamera = ({
 
       targetPos.current.copy(launchTarget).lerp(orbitTarget, orbitBlendRef.current);
       targetCam.current.copy(launchCam).lerp(orbitCam, orbitBlendRef.current);
+    } else {
+      exosphereLockRef.current = null;
     }
 
     // Time-based damping keeps camera motion smooth and framerate independent.
     const damping = 6.5;
     const dt = Math.min(delta, 0.05);
-    const targetFov = phase === 'outcome' && state.outcome === 'orbiting' ? 66 : 42;
+    const targetFov =
+      phase === 'outcome' && state.outcome === 'orbiting'
+        ? 66
+        : phase === 'outcome' && state.outcome === 'escape'
+          ? 52
+          : 42;
     camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 4.5, dt);
     camera.updateProjectionMatrix();
     camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCam.current.x, damping, dt);
@@ -550,7 +577,11 @@ const CinematicCamera = ({
 // ─── Root Scene ──────────────────────────────────────────────────────────────
 const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketSceneProps) => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-  const userControlled = state.phase === 'outcome' && state.outcome !== 'orbiting';
+  const escapedPastExosphere =
+    state.phase === 'outcome' && state.outcome === 'escape' && state.altitude > EXOSPHERE_LIMIT;
+  const userControlled =
+    state.phase === 'outcome' && state.outcome !== 'orbiting' && state.outcome !== 'escape'
+    || escapedPastExosphere;
   const isOrbitingOutcome = state.phase === 'outcome' && state.outcome === 'orbiting';
 
   return (

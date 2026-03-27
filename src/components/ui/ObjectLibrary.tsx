@@ -91,26 +91,26 @@ const ObjectLibrary = ({
   };
 
   return (
-    <div className="glass-panel p-4 w-64 animate-fade-in">
+    <div className="glass-panel p-6 w-[400px] animate-fade-in">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Orbit size={16} className="text-primary" />
-          <h3 className="text-sm font-semibold text-foreground">Objects</h3>
+          <Orbit size={20} className="text-primary" />
+          <h3 className="text-xl font-semibold text-foreground">Objects</h3>
         </div>
-        <span className="text-xs font-mono text-muted-foreground">{bodies.length} active</span>
+        <span className="text-base font-mono text-muted-foreground">{bodies.length} active</span>
       </div>
 
       <div className="space-y-3 mb-4">
         <div className="rounded-lg bg-muted/20 border border-border/30 p-2">
           <div className="flex items-center gap-2 mb-2">
             <Circle size={15} className="text-primary" />
-            <span className="text-xs text-foreground">Planet</span>
+            <span className="text-base text-foreground">Planet</span>
           </div>
           <div className="relative mb-2">
             <select
               value={selectedPlanetName}
               onChange={(e) => setSelectedPlanetName(e.target.value)}
-              className="w-full appearance-none bg-gradient-to-r from-cyan-950/30 to-violet-950/30 text-cyan-100 rounded-md px-2 py-1.5 text-xs border border-cyan-400/25 focus:border-cyan-300/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40"
+              className="w-full appearance-none bg-gradient-to-r from-cyan-950/30 to-violet-950/30 text-cyan-100 rounded-md px-3 py-2.5 text-base border border-cyan-400/25 focus:border-cyan-300/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40"
             >
               {PLANET_PRESETS.map((planet) => (
                 <option key={planet.name} value={planet.name} className="bg-slate-950 text-cyan-100">
@@ -127,7 +127,7 @@ const ObjectLibrary = ({
             }`}
           >
             <Circle size={16} style={{ color: selectedPlanet.color }} />
-            <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">Planet</span>
+            <span className="text-base text-muted-foreground group-hover:text-foreground transition-colors">Planet</span>
           </button>
         </div>
 
@@ -143,7 +143,7 @@ const ObjectLibrary = ({
               <span className="text-muted-foreground group-hover:text-primary transition-colors" style={{ color: preset.color }}>
                 {preset.icon}
               </span>
-              <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+              <span className="text-base text-muted-foreground group-hover:text-foreground transition-colors">
                 {preset.label}
               </span>
             </button>
@@ -152,7 +152,7 @@ const ObjectLibrary = ({
       </div>
 
       <div className="border-t border-border/20 pt-3 mb-3 space-y-2">
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between text-base text-muted-foreground">
           <span>Placement velocity</span>
           <span>{velocityScale.toFixed(2)}x</span>
         </div>
@@ -165,7 +165,7 @@ const ObjectLibrary = ({
           onChange={(e) => onVelocityScaleChange(Number(e.target.value))}
           className="w-full"
         />
-        <label className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <label className="flex items-center justify-between text-base text-muted-foreground">
           <span>Realistic physics</span>
           <input
             type="checkbox"
@@ -181,7 +181,7 @@ const ObjectLibrary = ({
       {bodies.length > 0 && (
         <div className="border-t border-border/20 pt-4 mt-2">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Bodies</span>
+            <span className="text-base font-semibold text-muted-foreground uppercase tracking-wider">Active Bodies</span>
           </div>
           <div className="space-y-1.5 max-h-32 overflow-y-auto scrollbar-thin pr-1 mb-3">
             {bodies.map((body) => {
@@ -190,7 +190,7 @@ const ObjectLibrary = ({
                 <div key={body.id} className="flex items-center gap-2 justify-between p-1.5 rounded bg-muted/20 hover:bg-muted/30 transition-colors group">
                   <div className="flex items-center gap-2 overflow-hidden">
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: body.color }} />
-                    <span className="text-[11px] text-muted-foreground truncate group-hover:text-foreground">
+                    <span className="text-base text-muted-foreground truncate group-hover:text-foreground">
                       {label}
                     </span>
                     <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">
@@ -210,7 +210,7 @@ const ObjectLibrary = ({
           </div>
           <button
             onClick={onRemoveAll}
-            className="w-full text-xs py-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            className="w-full text-base py-2.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           >
             Clear All Objects
           </button>

@@ -248,6 +248,10 @@ function adaptiveDt(baseDt: number, bods: PhysicsBody[]): number {
   return Math.max(1e-5, baseDt * factor);
 }
 
+function isStaticBody(body: PhysicsBody): boolean {
+  return body.type === 'blackhole';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BodyRenderer — visual-only, writes nothing to physics state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -423,15 +427,30 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const historyRef     = useRef<WorldSnapshot[][]>([]);
   const accumRef       = useRef(0);
   const [renderList, setRenderList] = useState<CelestialBody[]>([]);
-  const [impactPopups, setImpactPopups] = useState<ImpactPopupState[]>([]);
+  const [impactQueue, setImpactQueue] = useState<ImpactPopupState[]>([]);
+  const [activeImpact, setActiveImpact] = useState<ImpactPopupState | null>(null);
+  const popupTimeoutRef = useRef<number | null>(null);
 
   const queueImpactPopups = useCallback((items: ImpactPopupState[]) => {
     if (items.length === 0) return;
-    setImpactPopups((prev) => [...prev, ...items]);
-    for (const imp of items) {
-      window.setTimeout(() => {
-        setImpactPopups((p) => p.filter((x) => x.id !== imp.id));
-      }, 10_000);
+    setImpactQueue((prev) => [...prev, ...items]);
+  }, []);
+
+  useEffect(() => {
+    if (activeImpact || impactQueue.length === 0) return;
+
+    const [nextImpact, ...rest] = impactQueue;
+    setActiveImpact(nextImpact);
+    setImpactQueue(rest);
+    popupTimeoutRef.current = window.setTimeout(() => {
+      setActiveImpact(null);
+      popupTimeoutRef.current = null;
+    }, 5_000);
+  }, [activeImpact, impactQueue]);
+
+  useEffect(() => () => {
+    if (popupTimeoutRef.current !== null) {
+      window.clearTimeout(popupTimeoutRef.current);
     }
   }, []);
 
@@ -500,11 +519,19 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     accumulateForces(bods, effectiveG);
     const aOld = new Map<string, THREE.Vector3>();
     for (const b of bods) {
-      aOld.set(b.id, b.force.clone().multiplyScalar(1 / b.mass));
+      aOld.set(
+        b.id,
+        isStaticBody(b) ? new THREE.Vector3() : b.force.clone().multiplyScalar(1 / b.mass),
+      );
     }
 
     // Stage 2: advance positions
     for (const b of bods) {
+      if (isStaticBody(b)) {
+        b.velocity.set(0, 0, 0);
+        b.force.set(0, 0, 0);
+        continue;
+      }
       const a = aOld.get(b.id)!;
       b.position.addScaledVector(b.velocity, dt);
       b.position.addScaledVector(a, 0.5 * dt * dt);
@@ -516,6 +543,11 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 
     // Stage 4: update velocities with averaged acceleration — no mutation of aOld
     for (const b of bods) {
+      if (isStaticBody(b)) {
+        b.velocity.set(0, 0, 0);
+        b.force.set(0, 0, 0);
+        continue;
+      }
       const a0 = aOld.get(b.id)!;
       const a1 = b.force.clone().multiplyScalar(1 / b.mass);
       const avgAcc = a0.clone().add(a1).multiplyScalar(0.5);
@@ -604,8 +636,12 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 
           // Volume-conserving radius: r_new = cbrt(r1³ + r2³)
           const rSurv = survivor.radius;
-          survivor.velocity.copy(newVel);
-          survivor.position.copy(newPos);
+          if (isStaticBody(survivor)) {
+            survivor.velocity.set(0, 0, 0);
+          } else {
+            survivor.velocity.copy(newVel);
+            survivor.position.copy(newPos);
+          }
           survivor.radius = Math.cbrt(rSurv ** 3 + absorbed.radius ** 3);
           survivor.mass   = mT;
           toRemove.add(absorbed.id);
@@ -784,13 +820,13 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   return (
     <>
       <ImpactCameraDirector
-        activeImpact={impactPopups[impactPopups.length - 1] ?? null}
+        activeImpact={activeImpact}
         controlsRef={controlsRef}
       />
-      {impactPopups.map((imp) => (
+      {activeImpact && (
         <Html
-          key={imp.id}
-          position={imp.position}
+          key={activeImpact.id}
+          position={activeImpact.position}
           center
           distanceFactor={18}
           style={{ pointerEvents: 'none' }}
@@ -801,14 +837,14 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
             style={{ boxShadow: '0 0 32px rgba(0, 229, 255, 0.15)' }}
           >
             <div className="text-lg font-bold uppercase tracking-[0.12em] text-primary mb-2">
-              {imp.title}
+              {activeImpact.title}
             </div>
             <div className="text-base text-foreground/90 leading-relaxed border-t border-border/50 pt-3">
-              {imp.detail}
+              {activeImpact.detail}
             </div>
           </div>
         </Html>
-      ))}
+      )}
       {renderList.map(body => (
         <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} />
       ))}

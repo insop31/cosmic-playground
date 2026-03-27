@@ -6,10 +6,13 @@ import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../com
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { Atom, Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 let nextId = 1;
 
 type AppMode = 'spacetime' | 'rocket';
+const ACTIVE_MISSION_LIMIT = 3;
+const MISSION_EXIT_DELAY_MS = 900;
 
 // Universe expansion starts after this many real seconds
 const EXPANSION_DELAY_S = 600; // 10 minutes
@@ -20,16 +23,43 @@ const REAL_GRAVITY_BOOST = 7.5e-20; // Must match PhysicsSimulator — G_eff * M
 const MIN_ORBITAL_SPEED = 0.08;
 const MAX_ORBITAL_SPEED = 3.0;
 
-const ACHIEVEMENT_CONFIG = [
-  { id: 'first-stable-orbit', name: 'First Stable Orbit', description: 'Reach orbit in the rocket simulator.', score: 120 },
-  { id: 'gravity-master', name: 'Gravity Master', description: 'Experiment broadly across the lab.', score: 140 },
-  { id: 'chaos-creator', name: 'Chaos Creator', description: 'Build a dense, unpredictable gravitational system.', score: 100 },
-  { id: 'slingshot-expert', name: 'Slingshot Expert', description: 'Launch a fast body into a strong gravity assist setup.', score: 110 },
-  { id: 'black-hole-survivor', name: 'Black Hole Survivor', description: 'Keep a living system stable around a black hole.', score: 150 },
-  { id: 'escape-velocity-achieved', name: 'Escape Velocity Achieved', description: 'Leave the atmosphere behind for good.', score: 130 },
+const MISSION_CONFIG = [
+  { id: 'gravity-master', mode: 'spacetime', name: 'Gravity Master', description: 'Run a wide range of spacetime experiments across bodies, velocity presets, and physics modes.', score: 140 },
+  { id: 'chaos-creator', mode: 'spacetime', name: 'Chaos Creator', description: 'Build a dense gravitational system with many active bodies.', score: 100 },
+  { id: 'slingshot-expert', mode: 'spacetime', name: 'Slingshot Expert', description: 'Fire an asteroid or comet into a high-speed gravity assist near a massive anchor.', score: 110 },
+  { id: 'black-hole-survivor', mode: 'spacetime', name: 'Black Hole Survivor', description: 'Keep a living system active around a static black hole long enough to stabilize.', score: 150 },
+  { id: 'time-bender', mode: 'spacetime', name: 'Time Bender', description: 'Use rewind in the spacetime lab to inspect a system backward through time.', score: 90 },
+  { id: 'system-architect', mode: 'spacetime', name: 'System Architect', description: 'Assemble a stable-feeling system with at least five active bodies in play.', score: 95 },
+  { id: 'mode-shifter', mode: 'spacetime', name: 'Mode Shifter', description: 'Switch the spacetime lab into arcade gravity mode to compare simulation styles.', score: 80 },
+  { id: 'first-stable-orbit', mode: 'rocket', name: 'First Stable Orbit', description: 'Tune the launcher well enough to achieve a stable orbit.', score: 120 },
+  { id: 'escape-velocity-achieved', mode: 'rocket', name: 'Escape Velocity Achieved', description: 'Push the rocket past the planet for a full escape trajectory.', score: 130 },
+  { id: 'storm-runner', mode: 'rocket', name: 'Storm Runner', description: 'Survive a difficult launch with strong crosswind, wind shear, and thermal load.', score: 120 },
+  { id: 'staging-specialist', mode: 'rocket', name: 'Staging Specialist', description: 'Reach orbit or escape with stage separation enabled.', score: 110 },
+  { id: 'precision-pilot', mode: 'rocket', name: 'Precision Pilot', description: 'Hit orbit or escape with a nearly level pad and light crosswind.', score: 100 },
+  { id: 'heavy-lift', mode: 'rocket', name: 'Heavy Lift', description: 'Succeed on a launch using a high-thrust, high-fuel rocket profile.', score: 105 },
+  { id: 'dense-atmosphere-run', mode: 'rocket', name: 'Dense Atmosphere Run', description: 'Complete a successful flight through thicker, higher-pressure air.', score: 95 },
 ] as const;
 
-type AchievementId = (typeof ACHIEVEMENT_CONFIG)[number]['id'];
+type MissionId = (typeof MISSION_CONFIG)[number]['id'];
+type MissionCard = { id: MissionId; phase: 'incomplete' | 'complete' };
+type MissionQueues = Record<AppMode, MissionCard[]>;
+
+const MISSIONS_BY_MODE: Record<AppMode, typeof MISSION_CONFIG> = {
+  spacetime: MISSION_CONFIG.filter((mission) => mission.mode === 'spacetime'),
+  rocket: MISSION_CONFIG.filter((mission) => mission.mode === 'rocket'),
+};
+
+const buildMissionCards = (mode: AppMode, achievements: Record<MissionId, boolean>, existing: MissionCard[] = []) => {
+  const cards = [...existing];
+  const visibleIds = new Set(cards.map((card) => card.id));
+  for (const mission of MISSIONS_BY_MODE[mode]) {
+    if (cards.length >= ACTIVE_MISSION_LIMIT) break;
+    if (achievements[mission.id] || visibleIds.has(mission.id)) continue;
+    cards.push({ id: mission.id, phase: 'incomplete' });
+    visibleIds.add(mission.id);
+  }
+  return cards;
+};
 
 const Index = () => {
   const [mode, setMode] = useState<AppMode>('spacetime');
@@ -57,15 +87,59 @@ const Index = () => {
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
   const [rocketState, setRocketState] = useState<RocketState>(INITIAL_STATE);
   const [explorationScore, setExplorationScore] = useState(0);
-  const [achievements, setAchievements] = useState<Record<AchievementId, boolean>>({
-    'first-stable-orbit': false,
+  const [achievements, setAchievements] = useState<Record<MissionId, boolean>>({
     'gravity-master': false,
     'chaos-creator': false,
     'slingshot-expert': false,
     'black-hole-survivor': false,
+    'time-bender': false,
+    'system-architect': false,
+    'mode-shifter': false,
+    'first-stable-orbit': false,
     'escape-velocity-achieved': false,
+    'storm-runner': false,
+    'staging-specialist': false,
+    'precision-pilot': false,
+    'heavy-lift': false,
+    'dense-atmosphere-run': false,
   });
+  const [missionQueues, setMissionQueues] = useState<MissionQueues>(() => ({
+    spacetime: buildMissionCards('spacetime', {
+      'gravity-master': false,
+      'chaos-creator': false,
+      'slingshot-expert': false,
+      'black-hole-survivor': false,
+      'time-bender': false,
+      'system-architect': false,
+      'mode-shifter': false,
+      'first-stable-orbit': false,
+      'escape-velocity-achieved': false,
+      'storm-runner': false,
+      'staging-specialist': false,
+      'precision-pilot': false,
+      'heavy-lift': false,
+      'dense-atmosphere-run': false,
+    }),
+    rocket: buildMissionCards('rocket', {
+      'gravity-master': false,
+      'chaos-creator': false,
+      'slingshot-expert': false,
+      'black-hole-survivor': false,
+      'time-bender': false,
+      'system-architect': false,
+      'mode-shifter': false,
+      'first-stable-orbit': false,
+      'escape-velocity-achieved': false,
+      'storm-runner': false,
+      'staging-specialist': false,
+      'precision-pilot': false,
+      'heavy-lift': false,
+      'dense-atmosphere-run': false,
+    }),
+  }));
   const experimentKeysRef = useRef<Set<string>>(new Set());
+  const achievementStateRef = useRef(achievements);
+  const missionRemovalTimersRef = useRef<Partial<Record<MissionId, number>>>({});
   const stableSystemTimerRef = useRef(0);
   const stableBlackHoleTimerRef = useRef(0);
   const previousOutcomeRef = useRef<RocketState['outcome']>('none');
@@ -74,10 +148,10 @@ const Index = () => {
     setExplorationScore((prev) => prev + points);
   }, []);
 
-  const unlockAchievement = useCallback((id: AchievementId) => {
+  const unlockAchievement = useCallback((id: MissionId) => {
     setAchievements((prev) => {
       if (prev[id]) return prev;
-      const reward = ACHIEVEMENT_CONFIG.find((achievement) => achievement.id === id)?.score ?? 0;
+      const reward = MISSION_CONFIG.find((achievement) => achievement.id === id)?.score ?? 0;
       if (reward > 0) {
         setExplorationScore((score) => score + reward);
       }
@@ -90,6 +164,54 @@ const Index = () => {
     experimentKeysRef.current.add(key);
     awardScore(points);
   }, [awardScore]);
+
+  useEffect(() => {
+    achievementStateRef.current = achievements;
+  }, [achievements]);
+
+  useEffect(() => {
+    setMissionQueues((prev) => {
+      const next: MissionQueues = {
+        spacetime: buildMissionCards('spacetime', achievements, prev.spacetime),
+        rocket: buildMissionCards('rocket', achievements, prev.rocket),
+      };
+      let changed = false;
+
+      (['spacetime', 'rocket'] as const).forEach((queueMode) => {
+        next[queueMode] = next[queueMode].map((card) => {
+          if (!achievements[card.id] || card.phase === 'complete') return card;
+          changed = true;
+          if (!missionRemovalTimersRef.current[card.id]) {
+            missionRemovalTimersRef.current[card.id] = window.setTimeout(() => {
+              delete missionRemovalTimersRef.current[card.id];
+              setMissionQueues((current) => ({
+                ...current,
+                [queueMode]: buildMissionCards(
+                  queueMode,
+                  achievementStateRef.current,
+                  current[queueMode].filter((entry) => entry.id !== card.id),
+                ),
+              }));
+            }, MISSION_EXIT_DELAY_MS);
+          }
+          return { ...card, phase: 'complete' };
+        });
+      });
+
+      if (!changed
+        && next.spacetime === prev.spacetime
+        && next.rocket === prev.rocket) {
+        return prev;
+      }
+      return next;
+    });
+  }, [achievements]);
+
+  useEffect(() => () => {
+    Object.values(missionRemovalTimersRef.current).forEach((timer) => {
+      if (timer) window.clearTimeout(timer);
+    });
+  }, []);
 
   // ─── Universe age ticker ───
   useEffect(() => {
@@ -121,6 +243,24 @@ const Index = () => {
   }, [bodies, placementVelocityScale, realisticMode, rocketParams, unlockAchievement]);
 
   useEffect(() => {
+    if (bodies.length >= 5) {
+      unlockAchievement('system-architect');
+    }
+  }, [bodies.length, unlockAchievement]);
+
+  useEffect(() => {
+    if (mode === 'spacetime' && timeScale < 0) {
+      unlockAchievement('time-bender');
+    }
+  }, [mode, timeScale, unlockAchievement]);
+
+  useEffect(() => {
+    if (!realisticMode) {
+      unlockAchievement('mode-shifter');
+    }
+  }, [realisticMode, unlockAchievement]);
+
+  useEffect(() => {
     if (rocketState.phase !== 'outcome') {
       previousOutcomeRef.current = rocketState.outcome;
       return;
@@ -138,7 +278,48 @@ const Index = () => {
       awardScore(90);
       unlockAchievement('escape-velocity-achieved');
     }
-  }, [awardScore, rocketState.outcome, rocketState.phase, unlockAchievement]);
+
+    const difficultWeather =
+      Math.abs(rocketParams.crosswind) >= 20
+      && rocketParams.windShear >= 0.5
+      && rocketParams.thermalLoad >= 0.45;
+    if (difficultWeather && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
+      unlockAchievement('storm-runner');
+    }
+
+    if (rocketParams.stageSeparation && (rocketState.outcome === 'orbiting' || rocketState.outcome === 'escape')) {
+      unlockAchievement('staging-specialist');
+    }
+
+    const preciseFlight = Math.abs(rocketParams.padTilt) <= 1 && Math.abs(rocketParams.crosswind) <= 8;
+    if (preciseFlight && (rocketState.outcome === 'orbiting' || rocketState.outcome === 'escape')) {
+      unlockAchievement('precision-pilot');
+    }
+
+    const heavyLiftConfig = rocketParams.thrustForce >= 70 && rocketParams.fuelMass >= 120;
+    if (heavyLiftConfig && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
+      unlockAchievement('heavy-lift');
+    }
+
+    const thickAtmosphere = rocketParams.atmosphericDensity >= 0.75 && rocketParams.atmosphericPressure >= 1.1;
+    if (thickAtmosphere && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
+      unlockAchievement('dense-atmosphere-run');
+    }
+  }, [
+    awardScore,
+    rocketParams.atmosphericDensity,
+    rocketParams.atmosphericPressure,
+    rocketParams.crosswind,
+    rocketParams.fuelMass,
+    rocketParams.padTilt,
+    rocketParams.stageSeparation,
+    rocketParams.thermalLoad,
+    rocketParams.thrustForce,
+    rocketParams.windShear,
+    rocketState.outcome,
+    rocketState.phase,
+    unlockAchievement,
+  ]);
 
   useEffect(() => {
     if (mode !== 'spacetime' || !isPlaying || timeScale <= 0) return;
@@ -305,7 +486,19 @@ const Index = () => {
 
   // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
-  const unlockedCount = ACHIEVEMENT_CONFIG.filter((achievement) => achievements[achievement.id]).length;
+  const modeMissions = MISSION_CONFIG.filter((mission) => mission.mode === mode);
+  const unlockedCount = modeMissions.filter((mission) => achievements[mission.id]).length;
+  const visibleMissions = missionQueues[mode].map((card) => ({
+    ...MISSION_CONFIG.find((mission) => mission.id === card.id)!,
+    phase: card.phase,
+  }));
+  const experimentCount = Array.from(experimentKeysRef.current).filter((key) => (
+    mode === 'rocket'
+      ? key.startsWith('rocket:')
+        || key.startsWith('rocket-profile:')
+      : !key.startsWith('rocket:')
+        && !key.startsWith('rocket-profile:')
+  )).length;
 
   return (
     <div className="w-full h-screen relative overflow-hidden bg-background">
@@ -414,63 +607,84 @@ const Index = () => {
         )}
       </div>
 
-      <div className="absolute right-4 top-20 z-10 w-72 pointer-events-auto">
+      <div className="absolute right-4 top-20 z-10 w-[460px] pointer-events-auto">
         <div className="glass-panel p-4 animate-fade-in">
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
               <div className="flex items-center gap-2 text-primary mb-1">
                 <Trophy size={16} />
-                <span className="text-xs font-semibold tracking-[0.18em] uppercase">Mission Progress</span>
+                <span className="text-base font-semibold tracking-[0.18em] uppercase">Mission Progress</span>
               </div>
-              <p className="text-[11px] text-muted-foreground">Experiment, orbit, and build resilient systems to unlock milestones.</p>
+              <p className="text-base text-muted-foreground">
+                {mode === 'spacetime'
+                  ? 'Shape gravity, test rewind, and build extreme systems to clear spacetime missions.'
+                  : 'Tune propulsion and weather conditions to complete rocket-launcher missions.'}
+              </p>
             </div>
             <div className="text-right">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Score</div>
+              <div className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Score</div>
               <div className="text-2xl font-semibold text-foreground">{explorationScore}</div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-4">
             <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground mb-1">
                 <Sparkles size={12} />
                 Unlocks
               </div>
-              <div className="text-lg font-semibold text-foreground">{unlockedCount}/{ACHIEVEMENT_CONFIG.length}</div>
+              <div className="text-2xl font-semibold text-foreground">{unlockedCount}/{modeMissions.length}</div>
             </div>
             <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground mb-1">
                 <Target size={12} />
-                Experiments
+                {mode === 'spacetime' ? 'Lab Runs' : 'Flight Tests'}
               </div>
-              <div className="text-lg font-semibold text-foreground">{experimentKeysRef.current.size}</div>
+              <div className="text-2xl font-semibold text-foreground">{experimentCount}</div>
             </div>
           </div>
 
-          <div className="space-y-2">
-            {ACHIEVEMENT_CONFIG.map((achievement) => {
-              const unlocked = achievements[achievement.id];
-              return (
-                <div
+          <div className="space-y-2 min-h-[248px]">
+            <AnimatePresence mode="popLayout">
+              {visibleMissions.map((achievement) => (
+                <motion.div
                   key={achievement.id}
-                  className={`rounded-xl border px-3 py-2.5 transition-colors ${
-                    unlocked
-                      ? 'border-primary/35 bg-primary/10'
-                      : 'border-border/25 bg-muted/10'
-                  }`}
+                  layout
+                  initial={{ opacity: 0, y: 18, scale: 0.97 }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                    scale: achievement.phase === 'complete' ? 0.985 : 1,
+                    borderColor: achievement.phase === 'complete' ? 'rgba(0, 229, 255, 0.35)' : 'rgba(148, 163, 184, 0.18)',
+                    backgroundColor: achievement.phase === 'complete' ? 'rgba(0, 229, 255, 0.08)' : 'rgba(148, 163, 184, 0.08)',
+                  }}
+                  exit={{ opacity: 0, x: 36, scale: 0.94, height: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0 }}
+                  transition={{ duration: 0.32, ease: 'easeOut' }}
+                  className="rounded-xl border px-3 py-2.5"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className={`text-sm font-medium ${unlocked ? 'text-primary' : 'text-foreground'}`}>{achievement.name}</div>
-                      <div className="text-[11px] text-muted-foreground">{achievement.description}</div>
+                      <div className={`text-base font-medium ${achievement.phase === 'complete' ? 'text-primary' : 'text-foreground'}`}>{achievement.name}</div>
+                      <div className="text-base text-muted-foreground">{achievement.description}</div>
                     </div>
-                    <div className={`text-[10px] font-mono uppercase tracking-[0.2em] ${unlocked ? 'text-primary' : 'text-muted-foreground/70'}`}>
-                      {unlocked ? 'Unlocked' : 'Locked'}
+                    <div className={`text-sm font-mono uppercase tracking-[0.2em] ${achievement.phase === 'complete' ? 'text-primary' : 'text-muted-foreground/70'}`}>
+                      {achievement.phase === 'complete' ? 'Complete' : 'Incomplete'}
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            {visibleMissions.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-xl border border-primary/35 bg-primary/10 px-3 py-4 text-center"
+              >
+                <div className="text-base font-medium text-primary">All {mode === 'spacetime' ? 'spacetime' : 'rocket'} missions complete</div>
+                <div className="text-base text-muted-foreground mt-1">Every mission in this queue has been cleared.</div>
+              </motion.div>
+            )}
           </div>
         </div>
       </div>
