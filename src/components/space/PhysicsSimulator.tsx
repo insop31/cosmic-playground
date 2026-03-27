@@ -1,7 +1,16 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { CelestialBody } from './SpaceScene';
+
+/** Shown as a floating message box at the impact midpoint (world space). */
+export interface ImpactPopupState {
+  id: string;
+  title: string;
+  detail: string;
+  position: [number, number, number];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Physics constants
@@ -89,7 +98,7 @@ function spawnOrbitalVelocity(
   if (dist < MIN_SPAWN_DIST) return new THREE.Vector3();
   const speed   = Math.sqrt(effectiveG * attractor.mass / dist);
   const radial  = rel.clone().normalize();
-  let tangent   = new THREE.Vector3(-radial.z, 0, radial.x);
+  const tangent = new THREE.Vector3(-radial.z, 0, radial.x);
   if (tangent.lengthSq() < 1e-10) tangent.set(1, 0, 0);
   return tangent.normalize().multiplyScalar(speed);
 }
@@ -154,6 +163,74 @@ function dominantBodyIndex(bodyIdx: number, bods: PhysicsBody[]): number {
 /**
  * Adaptive timestep: shortens when bodies are close to prevent numerical blow-up.
  */
+function midpointBetween(a: THREE.Vector3, b: THREE.Vector3): [number, number, number] {
+  return [(a.x + b.x) * 0.5, 0.75, (a.z + b.z) * 0.5];
+}
+
+function describeMergeImpact(a: PhysicsBody, b: PhysicsBody): { title: string; detail: string } {
+  const ta = a.type;
+  const tb = b.type;
+  const has = (t: string) => ta === t || tb === t;
+  const both = (t: string, u: string) => (ta === t && tb === u) || (ta === u && tb === t);
+
+  if (has('blackhole')) {
+    return { title: 'Black hole interaction', detail: 'Extreme gravity dominated this encounter.' };
+  }
+  if (both('star', 'star')) {
+    return {
+      title: 'Stellar merger',
+      detail: 'Two stars collided and fused; mass and momentum combined into one body.',
+    };
+  }
+  if (has('star') && (has('planet') || has('asteroid') || has('comet'))) {
+    return {
+      title: 'Stellar collision',
+      detail: 'A star-scale body swept up a smaller object in a high-energy impact.',
+    };
+  }
+  if (both('planet', 'planet')) {
+    return {
+      title: 'Planetary collision',
+      detail: 'Two worlds merged; material mixed into a single larger planet.',
+    };
+  }
+  if (has('neutron')) {
+    return {
+      title: 'Neutron-star impact',
+      detail: 'Ultra-dense matter collided; the survivor carries enormous binding energy.',
+    };
+  }
+  if (has('asteroid') || has('comet')) {
+    return {
+      title: 'Minor body impact',
+      detail: 'A small body hit a larger one and stuck — accretion in one stroke.',
+    };
+  }
+  return {
+    title: 'Gravitational merger',
+    detail: 'Two bodies collided and coalesced; linear momentum was conserved.',
+  };
+}
+
+function describeBlackHoleImpact(_bh: PhysicsBody, other: PhysicsBody): { title: string; detail: string } {
+  if (other.type === 'star') {
+    return {
+      title: 'Event horizon crossing',
+      detail: 'Stellar material crossed the point of no return and joined the black hole.',
+    };
+  }
+  if (other.type === 'planet') {
+    return {
+      title: 'Tidal capture',
+      detail: 'A planet was pulled past the horizon; only the black hole remains visible.',
+    };
+  }
+  return {
+    title: 'Horizon crossing',
+    detail: 'A small body crossed the event horizon — gravity wins over all other forces.',
+  };
+}
+
 function adaptiveDt(baseDt: number, bods: PhysicsBody[]): number {
   if (bods.length < 2) return baseDt;
   let minDist = Infinity;
@@ -193,8 +270,9 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
   }, []);
 
   useEffect(() => {
-    meshEntriesRef.current.set(body.id, { groupRef, meshRef, glowRef, trailLine, trailAttr });
-    return () => { meshEntriesRef.current.delete(body.id); };
+    const map = meshEntriesRef.current;
+    map.set(body.id, { groupRef, meshRef, glowRef, trailLine, trailAttr });
+    return () => { map.delete(body.id); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body.id]);
 
@@ -251,6 +329,17 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const historyRef     = useRef<WorldSnapshot[][]>([]);
   const accumRef       = useRef(0);
   const [renderList, setRenderList] = useState<CelestialBody[]>([]);
+  const [impactPopups, setImpactPopups] = useState<ImpactPopupState[]>([]);
+
+  const queueImpactPopups = useCallback((items: ImpactPopupState[]) => {
+    if (items.length === 0) return;
+    setImpactPopups((prev) => [...prev, ...items]);
+    for (const imp of items) {
+      window.setTimeout(() => {
+        setImpactPopups((p) => p.filter((x) => x.id !== imp.id));
+      }, 10_000);
+    }
+  }, []);
 
   // ── Sync incoming React bodies → physicsRef ──────────────────────────────
   useEffect(() => {
@@ -345,9 +434,13 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   // Events are DETECTED here, never forced into the integration loop.
   const detectEvents = (
     bods:       PhysicsBody[],
-    effectiveG: number,
+    _effectiveG: number,
     toRemove:   Set<string>,
-  ) => {
+  ): ImpactPopupState[] => {
+    const impacts: ImpactPopupState[] = [];
+    let impactSeq = 0;
+    const nextId = () => `impact-${Date.now()}-${impactSeq++}`;
+
     // Reset close-approach flags
     for (const b of bods) b.isCloseApproach = false;
 
@@ -374,6 +467,13 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
           const other = bh === a ? b : a;
           const horizon = bhEventHorizon(bh);
           if (dist < horizon || dist < bh.radius + other.radius) {
+            const { title, detail } = describeBlackHoleImpact(bh, other);
+            impacts.push({
+              id: nextId(),
+              title,
+              detail,
+              position: midpointBetween(bh.position, other.position),
+            });
             bh.mass    += other.mass;
             bh.radius   = Math.cbrt(bh.radius ** 3 + other.radius ** 3);
             other.motionState = 'captured';
@@ -385,6 +485,14 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         // ── General collision: merge with conservation laws ────
         // Outcome depends on mass ratio and relative velocity — same rule for all.
         if (dist < a.radius + b.radius) {
+          const { title, detail } = describeMergeImpact(a, b);
+          impacts.push({
+            id: nextId(),
+            title,
+            detail,
+            position: midpointBetween(a.position, b.position),
+          });
+
           const [survivor, absorbed] = a.mass >= b.mass ? [a, b] : [b, a];
           const mS  = survivor.mass;
           const mA  = absorbed.mass;
@@ -410,6 +518,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         }
       }
     }
+    return impacts;
   };
 
   // ── Layer 4: Energy-based bound/escape classification ─────────────────────
@@ -498,7 +607,8 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     integrate(bods, effectiveG, dt);
 
     // 2. Detect & resolve events (collisions, absorptions) — post-integration
-    detectEvents(bods, effectiveG, toRemove);
+    const stepImpacts = detectEvents(bods, effectiveG, toRemove);
+    if (stepImpacts.length) queueImpactPopups(stepImpacts);
 
     // 3. Classify each body's orbital state using mechanical energy
     classifyMotion(bods, effectiveG, toRemove);
@@ -579,6 +689,28 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 
   return (
     <>
+      {impactPopups.map((imp) => (
+        <Html
+          key={imp.id}
+          position={imp.position}
+          center
+          distanceFactor={18}
+          style={{ pointerEvents: 'none' }}
+          zIndexRange={[500, 0]}
+        >
+          <div
+            className="rounded-2xl border-2 border-primary/40 bg-background/94 backdrop-blur-md px-6 py-5 shadow-xl min-w-[300px] max-w-[440px]"
+            style={{ boxShadow: '0 0 32px rgba(0, 229, 255, 0.15)' }}
+          >
+            <div className="text-lg font-bold uppercase tracking-[0.12em] text-primary mb-2">
+              {imp.title}
+            </div>
+            <div className="text-base text-foreground/90 leading-relaxed border-t border-border/50 pt-3">
+              {imp.detail}
+            </div>
+          </div>
+        </Html>
+      ))}
       {renderList.map(body => (
         <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} />
       ))}

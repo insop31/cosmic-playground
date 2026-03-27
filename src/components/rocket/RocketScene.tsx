@@ -1,6 +1,8 @@
 import { useRef, useMemo } from 'react';
+import type { RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import RocketModel from './RocketModel';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
@@ -453,7 +455,7 @@ const CinematicCamera = ({
 }: {
   state: RocketState;
   params: RocketParams;
-  controlsRef: React.RefObject<any>;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
   userControlled: boolean;
 }) => {
   const { camera } = useThree();
@@ -538,7 +540,7 @@ const CinematicCamera = ({
 
 // ─── Root Scene ──────────────────────────────────────────────────────────────
 const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketSceneProps) => {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const userControlled = state.phase === 'outcome' && state.outcome !== 'orbiting';
   const isOrbitingOutcome = state.phase === 'outcome' && state.outcome === 'orbiting';
 
