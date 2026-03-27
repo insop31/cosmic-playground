@@ -37,7 +37,7 @@ const TimeControls = ({ timeScale, isPlaying, onPlay, onPause, onSpeedChange, on
   const isReversing = timeScale < 0;
 
   return (
-    <div className="glass-panel px-4 py-3 flex items-center gap-3">
+    <div className="glass-panel-strong px-5 py-3.5 flex items-center gap-4 hover-lift shadow-2xl">
       <button
         onClick={onReset}
         title="Reset"
@@ -58,7 +58,7 @@ const TimeControls = ({ timeScale, isPlaying, onPlay, onPause, onSpeedChange, on
 
       <button
         onClick={isPlaying ? onPause : onPlay}
-        className="p-2.5 rounded-xl bg-primary/20 text-primary hover:bg-primary/30 transition-colors glow-border"
+        className="p-3 rounded-xl bg-primary/20 text-primary hover:bg-primary/30 transition-colors glow-border hover-lift shadow-[0_0_15px_-3px_hsl(var(--primary)/0.3)] hover:shadow-[0_0_25px_-3px_hsl(var(--primary)/0.5)]"
       >
         {isPlaying ? <Pause size={18} /> : <Play size={18} />}
       </button>

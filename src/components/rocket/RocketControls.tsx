@@ -96,14 +96,14 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
       {/* Telemetry Dashboard */}
       {isActive && (
         <div className="grid grid-cols-2 gap-2">
-          <div className="p-2.5 rounded-lg bg-muted/20 border border-border/20">
+          <div className="p-2.5 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
             <div className="flex items-center gap-1 mb-1">
               <ArrowUp size={10} className="text-primary" />
               <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Altitude</p>
             </div>
             <p className="text-sm font-mono text-primary font-bold">{state.altitude.toFixed(1)}</p>
           </div>
-          <div className="p-2.5 rounded-lg bg-muted/20 border border-border/20">
+          <div className="p-2.5 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
             <div className="flex items-center gap-1 mb-1">
               <Fuel size={10} className="text-primary" />
               <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Fuel</p>
@@ -112,7 +112,7 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
               {(state.fuel * 100).toFixed(0)}%
             </p>
           </div>
-          <div className="p-2.5 rounded-lg bg-muted/20 border border-border/20">
+          <div className="p-2.5 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
             <div className="flex items-center gap-1 mb-1">
               <Activity size={10} className="text-muted-foreground" />
               <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Velocity</p>
@@ -121,7 +121,7 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
               {Math.sqrt(state.velocity[0] ** 2 + state.velocity[1] ** 2).toFixed(2)}
             </p>
           </div>
-          <div className="p-2.5 rounded-lg bg-muted/20 border border-border/20">
+          <div className="p-2.5 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
             <div className="flex items-center gap-1 mb-1">
               <Timer size={10} className="text-muted-foreground" />
               <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Time</p>
@@ -204,15 +204,15 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
         {!isActive ? (
           <button
             onClick={onLaunch}
-            className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest flex items-center justify-center gap-2 transition-all
-              bg-gradient-to-r from-primary/20 to-primary/10 text-primary
-              hover:from-primary/30 hover:to-primary/20
-              border border-primary/20 hover:border-primary/40
-              shadow-[0_0_20px_-5px_hsl(var(--primary)/0.3)]
-              hover:shadow-[0_0_30px_-5px_hsl(var(--primary)/0.5)]
+            className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest flex items-center justify-center gap-2 transition-all hover-lift
+              bg-gradient-to-r from-primary/30 via-secondary/40 to-primary/30 text-white
+              hover:from-primary/50 hover:via-secondary/60 hover:to-primary/50
+              border border-primary/40 hover:border-primary/80
+              shadow-[0_0_20px_-5px_hsl(var(--primary)/0.5)]
+              hover:shadow-[0_0_40px_-5px_hsl(var(--secondary)/0.8)]
               active:scale-[0.98]"
           >
-            <Rocket size={16} /> LAUNCH <ChevronRight size={14} />
+            <Rocket size={16} className="text-white drop-shadow-[0_0_8px_white]" /> LAUNCH <ChevronRight size={14} className="opacity-80 drop-shadow-[0_0_4px_white]" />
           </button>
         ) : (
           <button

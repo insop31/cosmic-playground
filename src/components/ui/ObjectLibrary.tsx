@@ -5,7 +5,16 @@ import { type ReactNode } from 'react';
 // Must match the G constant in PhysicsSimulator.tsx
 const G = 0.5;
 
-const OBJECT_PRESETS: { type: string; label: string; mass: number; radius: number; color: string; icon: ReactNode }[] = [
+export interface ObjectPreset {
+  type: string;
+  label: string;
+  mass: number;
+  radius: number;
+  color: string;
+  icon: ReactNode;
+}
+
+export const OBJECT_PRESETS: ObjectPreset[] = [
   { type: 'planet', label: 'Planet', mass: 3, radius: 0.8, color: '#4488ff', icon: <Circle size={16} /> },
   { type: 'star', label: 'Star', mass: 8, radius: 1.5, color: '#ffcc00', icon: <Sun size={16} /> },
   { type: 'blackhole', label: 'Black Hole', mass: 20, radius: 1.2, color: '#aa44ff', icon: <Hexagon size={16} /> },
@@ -14,47 +23,48 @@ const OBJECT_PRESETS: { type: string; label: string; mass: number; radius: numbe
   { type: 'comet', label: 'Comet', mass: 0.3, radius: 0.25, color: '#66ddff', icon: <Sparkles size={16} /> },
 ];
 
+export const createBodyFromPreset = (
+  preset: ObjectPreset,
+  bodies: CelestialBody[],
+  position: [number, number, number]
+): Omit<CelestialBody, 'id'> => {
+  // Physics-accurate circular orbit: v = sqrt(G * M_attractor / r)
+  // Tangent direction: normalize(R) × UP  →  [nx, 0, nz] × [0,1,0] = [-nz, 0, nx]
+  let vx = 0;
+  let vz = 0;
+  if (bodies.length > 0) {
+    const attractor = bodies.reduce((max, b) => (b.mass > max.mass ? b : max));
+    const rx = position[0] - attractor.position[0];
+    const rz = position[2] - attractor.position[2];
+    const orbDist = Math.sqrt(rx * rx + rz * rz);
+    if (orbDist > 0.01) {
+      const speed = Math.sqrt(G * attractor.mass / orbDist);
+      const nx = rx / orbDist;
+      const nz = rz / orbDist;
+      vx = -nz * speed;
+      vz = nx * speed;
+    }
+  }
+
+  return {
+    type: preset.type,
+    position,
+    mass: preset.mass,
+    radius: preset.radius,
+    color: preset.color,
+    velocity: [vx, 0, vz],
+  };
+};
+
 interface ObjectLibraryProps {
-  onAddObject: (body: Omit<CelestialBody, 'id'>) => void;
   bodies: CelestialBody[];
   onRemoveBody: (id: string) => void;
   onRemoveAll: () => void;
+  selectedType: string | null;
+  onSelectType: (type: string | null) => void;
 }
 
-const ObjectLibrary = ({ onAddObject, bodies, onRemoveBody, onRemoveAll }: ObjectLibraryProps) => {
-  const addObject = (preset: typeof OBJECT_PRESETS[0]) => {
-    const angle     = Math.random() * Math.PI * 2;
-    const placeDist = 4 + Math.random() * 8;
-    const x = Math.cos(angle) * placeDist;
-    const z = Math.sin(angle) * placeDist;
-
-    // Physics-accurate circular orbit: v = sqrt(G * M_attractor / r)
-    // Tangent direction: normalize(R) × UP  →  [nx, 0, nz] × [0,1,0] = [-nz, 0, nx]
-    let vx = 0, vz = 0;
-    if (bodies.length > 0) {
-      const attractor = bodies.reduce((max, b) => (b.mass > max.mass ? b : max));
-      const rx = x - attractor.position[0];
-      const rz = z - attractor.position[2];
-      const orbDist = Math.sqrt(rx * rx + rz * rz);
-      if (orbDist > 0.01) {
-        const speed = Math.sqrt(G * attractor.mass / orbDist);
-        const nx = rx / orbDist;
-        const nz = rz / orbDist;
-        vx = -nz * speed;
-        vz =  nx * speed;
-      }
-    }
-
-    onAddObject({
-      type:     preset.type,
-      position: [x, 0, z],
-      mass:     preset.mass,
-      radius:   preset.radius,
-      color:    preset.color,
-      velocity: [vx, 0, vz],
-    });
-  };
-
+const ObjectLibrary = ({ bodies, onRemoveBody, onRemoveAll, selectedType, onSelectType }: ObjectLibraryProps) => {
   return (
     <div className="glass-panel p-4 w-64 animate-fade-in">
       <div className="flex items-center justify-between mb-4">
@@ -69,8 +79,12 @@ const ObjectLibrary = ({ onAddObject, bodies, onRemoveBody, onRemoveAll }: Objec
         {OBJECT_PRESETS.map((preset) => (
           <button
             key={preset.type}
-            onClick={() => addObject(preset)}
-            className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/30 hover:bg-muted/50 border border-transparent hover:border-primary/20 transition-all group text-left"
+            onClick={() => onSelectType(selectedType === preset.type ? null : preset.type)}
+            className={`flex items-center gap-2 p-2.5 rounded-lg border transition-all group text-left hover-lift ${
+              selectedType === preset.type
+                ? 'bg-primary/15 border-primary/50'
+                : 'bg-muted/30 hover:bg-muted/50 border-transparent hover:border-primary/30'
+            }`}
           >
             <span className="text-muted-foreground group-hover:text-primary transition-colors" style={{ color: preset.color }}>
               {preset.icon}
@@ -81,6 +95,12 @@ const ObjectLibrary = ({ onAddObject, bodies, onRemoveBody, onRemoveAll }: Objec
           </button>
         ))}
       </div>
+
+      {selectedType && (
+        <div className="text-[11px] text-primary/90 bg-primary/10 border border-primary/20 rounded-lg px-2.5 py-2 mb-3">
+          Placement mode active. Click or drag on the grid to place {OBJECT_PRESETS.find((p) => p.type === selectedType)?.label}.
+        </div>
+      )}
 
       {bodies.length > 0 && (
         <div className="border-t border-border/20 pt-4 mt-2">

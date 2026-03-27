@@ -20,6 +20,8 @@ interface SpaceSceneProps {
   timeScale: number;
   onBodyRemoved: (id: string) => void;
   onBodyUpdated: (id: string, mass: number, radius: number) => void;
+  placementEnabled?: boolean;
+  onPlaceBody?: (position: [number, number, number]) => void;
   universeScale?: number;
 }
 
@@ -30,6 +32,8 @@ const SpaceScene = ({
   timeScale,
   onBodyRemoved,
   onBodyUpdated,
+  placementEnabled = false,
+  onPlaceBody,
   universeScale = 1,
 }: SpaceSceneProps) => {
   // Shared ref written by PhysicsSimulator and read by SpacetimeGrid every frame.
@@ -69,6 +73,24 @@ const SpaceScene = ({
         universeScale={universeScale}
         gridSize={GRID_SIZE}
       />
+
+      {placementEnabled && onPlaceBody && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onPlaceBody([event.point.x, 0, event.point.z]);
+          }}
+          onPointerMove={(event) => {
+            if (!(event.buttons & 1)) return;
+            event.stopPropagation();
+            onPlaceBody([event.point.x, 0, event.point.z]);
+          }}
+        >
+          <planeGeometry args={[GRID_SIZE * universeScale, GRID_SIZE * universeScale]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
 
       <OrbitControls
         enableDamping

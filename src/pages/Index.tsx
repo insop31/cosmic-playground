@@ -4,7 +4,7 @@ import RocketScene from '../components/rocket/RocketScene';
 import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
 import TimeControls from '../components/ui/TimeControls';
-import ObjectLibrary from '../components/ui/ObjectLibrary';
+import ObjectLibrary, { OBJECT_PRESETS, createBodyFromPreset } from '../components/ui/ObjectLibrary';
 import { Atom, Rocket, Orbit } from 'lucide-react';
 
 let nextId = 1;
@@ -27,6 +27,7 @@ const Index = () => {
   // timeScale can be negative for rewind (-4 … -0.5 … 0.5 … 4)
   const [timeScale, setTimeScale] = useState(1);
   const [isPlaying, setIsPlaying] = useState(true);
+  const [selectedObjectType, setSelectedObjectType] = useState<string | null>(null);
 
   // Universe expansion
   const universeAgeRef = useRef(0);
@@ -75,6 +76,13 @@ const Index = () => {
     setBodies((prev) => [...prev, { ...obj, id: `obj_${nextId++}` }]);
   }, []);
 
+  const handlePlaceSelectedBody = useCallback((position: [number, number, number]) => {
+    if (!selectedObjectType) return;
+    const preset = OBJECT_PRESETS.find((p) => p.type === selectedObjectType);
+    if (!preset) return;
+    handleAddObject(createBodyFromPreset(preset, bodies, position));
+  }, [selectedObjectType, bodies, handleAddObject]);
+
   const handleRemoveBody = useCallback((id: string) => {
     setBodies((prev) => prev.filter((b) => b.id !== id));
   }, []);
@@ -110,6 +118,7 @@ const Index = () => {
 
   return (
     <div className="w-full h-screen relative overflow-hidden bg-background">
+      <div className="bg-noise mix-blend-overlay"></div>
       {/* 3D Canvases - use visibility instead of conditional render to avoid WebGL context loss */}
       <div className="absolute inset-0" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
         <SpaceScene
@@ -117,6 +126,8 @@ const Index = () => {
           timeScale={effectiveTimeScale}
           onBodyRemoved={handleBodyRemoved}
           onBodyUpdated={handleBodyUpdated}
+          placementEnabled={Boolean(selectedObjectType)}
+          onPlaceBody={handlePlaceSelectedBody}
           universeScale={universeScale}
         />
       </div>
@@ -126,10 +137,10 @@ const Index = () => {
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-10 p-4 flex items-center justify-between pointer-events-none">
-        <div className="glass-panel px-4 py-2.5 flex items-center gap-3 pointer-events-auto">
-          <Atom size={20} className="text-primary animate-pulse-glow" />
+        <div className="glass-panel px-5 py-3 flex items-center gap-3 pointer-events-auto hover-lift">
+          <Atom size={22} className="text-primary animate-pulse w-6 h-6 drop-shadow-[0_0_8px_rgba(0,242,254,0.8)]" />
           <div>
-            <h1 className="text-sm font-bold tracking-wide text-foreground">SPACE–TIME LAB</h1>
+            <h1 className="text-base font-bold tracking-widest text-gradient-premium">SPACE–TIME LAB</h1>
             <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">
               {mode === 'spacetime' ? 'Gravity Sandbox' : 'Rocket Simulator'}
             </p>
@@ -161,8 +172,8 @@ const Index = () => {
         </div>
 
         {/* Stats */}
-        <div className="glass-panel px-3 py-2 pointer-events-auto">
-          <div className="flex items-center gap-4 text-xs font-mono">
+        <div className="glass-panel-strong px-4 py-2.5 pointer-events-auto">
+          <div className="flex items-center gap-5 text-xs font-mono">
             {mode === 'spacetime' ? (
               <>
                 <div className="text-muted-foreground">Bodies: <span className="text-primary">{bodies.length}</span></div>
@@ -191,7 +202,13 @@ const Index = () => {
       {/* Left Panel */}
       <div className="absolute left-4 top-20 bottom-20 z-10 pointer-events-auto">
         {mode === 'spacetime' ? (
-          <ObjectLibrary onAddObject={handleAddObject} bodies={bodies} onRemoveBody={handleRemoveBody} onRemoveAll={handleRemoveAll} />
+          <ObjectLibrary
+            bodies={bodies}
+            onRemoveBody={handleRemoveBody}
+            onRemoveAll={handleRemoveAll}
+            selectedType={selectedObjectType}
+            onSelectType={setSelectedObjectType}
+          />
         ) : (
           <RocketControls
             params={rocketParams}
@@ -221,7 +238,7 @@ const Index = () => {
       <div className="absolute bottom-6 right-4 z-10">
         <p className="text-[10px] font-mono text-muted-foreground/50">
           {mode === 'spacetime'
-            ? 'Drag to orbit · Scroll to zoom · Add objects to warp spacetime'
+            ? 'Select an object, then click or drag on grid to place · Scroll to zoom'
             : 'Adjust parameters · Launch · Observe trajectory'}
         </p>
       </div>
