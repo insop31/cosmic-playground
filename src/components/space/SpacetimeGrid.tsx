@@ -53,8 +53,9 @@ const SpacetimeGrid = ({
     return new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
-        uGridColor: { value: new THREE.Color(0x00e5ff) },
-        uDepthColor: { value: new THREE.Color(0xff2d95) },
+        // Stronger read on dark bg; still cyan / magenta accent family
+        uGridColor: { value: new THREE.Color(0x7ef6ff) },
+        uDepthColor: { value: new THREE.Color(0xff9fd0) },
         uGridSize: { value: gridSize },
         uUniverseScale: { value: universeScale },
       },
@@ -88,14 +89,16 @@ const SpacetimeGrid = ({
           // Depth-based color blend
           float depthFactor = smoothstep(0.0, 8.0, vDepth);
           vec3 color = mix(uGridColor, uDepthColor, depthFactor);
+          // Extra lift on lines so the mesh pops against #050a14
+          color = min(mix(color, color * 1.24, gridLine), vec3(1.0));
 
-          float alpha = gridLine * (0.15 + depthFactor * 0.6);
-          alpha = max(alpha, depthFactor * 0.08);
+          float alpha = gridLine * (0.34 + depthFactor * 0.5);
+          alpha = max(alpha, depthFactor * 0.2);
 
           // Edge fade-out — fade to transparent near grid boundary
           float halfSize = uGridSize * uUniverseScale * 0.5;
           float edgeDist = max(abs(vWorldPos.x), abs(vWorldPos.z)) / halfSize;
-          float edgeFade = 1.0 - smoothstep(0.72, 1.0, edgeDist);
+          float edgeFade = 1.0 - smoothstep(0.78, 1.0, edgeDist);
           alpha *= edgeFade;
 
           gl_FragColor = vec4(color, alpha);
