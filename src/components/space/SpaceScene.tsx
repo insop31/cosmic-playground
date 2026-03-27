@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
 import PhysicsSimulator from './PhysicsSimulator';
@@ -46,6 +47,7 @@ const SpaceScene = ({
   // Using a plain ref keeps grid deformation in sync with physics without any
   // React state updates in the hot path.
   const livePhysicsRef = useRef<Array<{ position: [number, number, number]; mass: number }>>([]);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   return (
     <Canvas
@@ -80,9 +82,11 @@ const SpaceScene = ({
         universeScale={universeScale}
         gridSize={GRID_SIZE}
         realisticMode={realisticMode}
+        controlsRef={controlsRef}
       />
 
       <OrbitControls
+        ref={controlsRef}
         enableDamping
         dampingFactor={0.05}
         minDistance={8}

@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { useFrame } from '@react-three/fiber';
+import type { RefObject } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import { CelestialBody } from './SpaceScene';
 
@@ -76,6 +78,7 @@ export interface PhysicsSimulatorProps {
   livePhysicsRef: React.MutableRefObject<Array<{ position: [number, number, number]; mass: number }>>;
   universeScale?: number;
   gridSize?: number;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,6 +256,12 @@ interface BodyRendererProps {
   meshEntriesRef: React.MutableRefObject<Map<string, MeshEntry>>;
 }
 
+interface CameraSnapshot {
+  position: THREE.Vector3;
+  target: THREE.Vector3;
+  fov: number;
+}
+
 const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => {
   const groupRef = useRef<THREE.Group | null>(null);
   const meshRef  = useRef<THREE.Mesh  | null>(null);
@@ -311,6 +320,90 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
   );
 };
 
+const ImpactCameraDirector = ({
+  activeImpact,
+  controlsRef,
+}: {
+  activeImpact: ImpactPopupState | null;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+}) => {
+  const { camera } = useThree();
+  const snapshotRef = useRef<CameraSnapshot | null>(null);
+  const focusTargetRef = useRef(new THREE.Vector3());
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    if (activeImpact) {
+      if (!snapshotRef.current) {
+        snapshotRef.current = {
+          position: camera.position.clone(),
+          target: controls.target.clone(),
+          fov: camera.fov,
+        };
+      }
+      focusTargetRef.current.set(...activeImpact.position);
+    }
+  }, [activeImpact, camera, controlsRef]);
+
+  useFrame((_, delta) => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const dt = Math.min(delta, 0.05);
+    const damping = 5.5;
+    const minDistance = controls.minDistance ?? 8;
+    const maxDistance = controls.maxDistance ?? 200;
+
+    if (activeImpact) {
+      const snapshot = snapshotRef.current;
+      if (!snapshot) return;
+
+      const direction = snapshot.position.clone().sub(snapshot.target);
+      if (direction.lengthSq() < 1e-6) direction.set(0, 1, 1);
+      direction.normalize();
+
+      const desiredDistance = THREE.MathUtils.clamp(12, minDistance + 1, Math.min(maxDistance, 18));
+      const desiredPosition = focusTargetRef.current.clone().addScaledVector(direction, desiredDistance);
+      const desiredFov = 42;
+
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, desiredPosition.x, damping, dt);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, desiredPosition.y + 1.25, damping, dt);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredPosition.z, damping, dt);
+      controls.target.x = THREE.MathUtils.damp(controls.target.x, focusTargetRef.current.x, damping, dt);
+      controls.target.y = THREE.MathUtils.damp(controls.target.y, focusTargetRef.current.y, damping, dt);
+      controls.target.z = THREE.MathUtils.damp(controls.target.z, focusTargetRef.current.z, damping, dt);
+      camera.fov = THREE.MathUtils.damp(camera.fov, desiredFov, 4.5, dt);
+      camera.updateProjectionMatrix();
+      controls.update();
+      return;
+    }
+
+    const snapshot = snapshotRef.current;
+    if (!snapshot) return;
+
+    camera.position.x = THREE.MathUtils.damp(camera.position.x, snapshot.position.x, damping, dt);
+    camera.position.y = THREE.MathUtils.damp(camera.position.y, snapshot.position.y, damping, dt);
+    camera.position.z = THREE.MathUtils.damp(camera.position.z, snapshot.position.z, damping, dt);
+    controls.target.x = THREE.MathUtils.damp(controls.target.x, snapshot.target.x, damping, dt);
+    controls.target.y = THREE.MathUtils.damp(controls.target.y, snapshot.target.y, damping, dt);
+    controls.target.z = THREE.MathUtils.damp(controls.target.z, snapshot.target.z, damping, dt);
+    camera.fov = THREE.MathUtils.damp(camera.fov, snapshot.fov, 4.5, dt);
+    camera.updateProjectionMatrix();
+    controls.update();
+
+    const settled =
+      camera.position.distanceTo(snapshot.position) < 0.05 &&
+      controls.target.distanceTo(snapshot.target) < 0.05 &&
+      Math.abs(camera.fov - snapshot.fov) < 0.1;
+
+    if (settled) snapshotRef.current = null;
+  });
+
+  return null;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PhysicsSimulator
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,6 +416,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   livePhysicsRef,
   universeScale = 1,
   gridSize = 120,
+  controlsRef,
 }) => {
   const physicsRef     = useRef<PhysicsBody[]>([]);
   const meshEntriesRef = useRef(new Map<string, MeshEntry>());
@@ -689,6 +783,10 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 
   return (
     <>
+      <ImpactCameraDirector
+        activeImpact={impactPopups[impactPopups.length - 1] ?? null}
+        controlsRef={controlsRef}
+      />
       {impactPopups.map((imp) => (
         <Html
           key={imp.id}
