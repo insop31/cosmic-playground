@@ -5,7 +5,8 @@ import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary, { OBJECT_PRESETS, createBodyFromPreset } from '../components/ui/ObjectLibrary';
-import { Atom, Rocket, Orbit } from 'lucide-react';
+import { Atom, Rocket, Orbit, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 let nextId = 1;
 
@@ -117,10 +118,10 @@ const Index = () => {
   const effectiveTimeScale = isPlaying ? timeScale : 0;
 
   return (
-    <div className="w-full h-screen relative overflow-hidden bg-background">
+    <div className="w-screen h-screen relative overflow-hidden bg-background">
       <div className="bg-noise mix-blend-overlay"></div>
       {/* 3D Canvases - use visibility instead of conditional render to avoid WebGL context loss */}
-      <div className="absolute inset-0" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
+      <div className="absolute inset-0 z-0 pointer-events-auto" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
         <SpaceScene
           bodies={bodies}
           timeScale={effectiveTimeScale}
@@ -131,117 +132,152 @@ const Index = () => {
           universeScale={universeScale}
         />
       </div>
-      <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
+      <div className="absolute inset-0 z-0 pointer-events-auto" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
         <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} />
       </div>
 
-      {/* Top Bar */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 flex items-center justify-between pointer-events-none">
-        <div className="glass-panel px-5 py-3 flex items-center gap-3 pointer-events-auto hover-lift">
-          <Atom size={22} className="text-primary animate-pulse w-6 h-6 drop-shadow-[0_0_8px_rgba(0,242,254,0.8)]" />
-          <div>
-            <h1 className="text-base font-bold tracking-widest text-gradient-premium">SPACE–TIME LAB</h1>
-            <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">
-              {mode === 'spacetime' ? 'Gravity Sandbox' : 'Rocket Simulator'}
-            </p>
+      {/* Absolute UI Overlay (z-10) */}
+      <div className="absolute inset-0 z-10 pointer-events-none flex flex-col">
+        {/* Top Navigation Bar */}
+        <motion.div 
+          className="p-6 flex items-start justify-between"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        >
+          {/* Logo / Brand */}
+          <div className="glass-panel px-5 py-3 flex items-center gap-4 pointer-events-auto group">
+            <div className="relative flex items-center justify-center">
+              <Sparkles size={24} className="text-secondary opacity-70 absolute scale-150 blur-[10px] group-hover:opacity-100 transition-opacity" />
+              <Atom size={24} className="text-primary animate-pulse-glow relative z-10" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold tracking-widest text-foreground glow-text uppercase">COSMIC PLAYGROUND</h1>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-[0.2em] uppercase">
+                {mode === 'spacetime' ? 'Gravity Sandbox' : 'Rocket Flight System'}
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Mode Switcher */}
-        <div className="glass-panel p-1 flex gap-1 pointer-events-auto">
-          <button
-            onClick={() => setMode('spacetime')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              mode === 'spacetime'
-                ? 'bg-primary/20 text-primary glow-border'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
-            }`}
-          >
-            <Orbit size={14} /> Spacetime
-          </button>
-          <button
-            onClick={() => setMode('rocket')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              mode === 'rocket'
-                ? 'bg-primary/20 text-primary glow-border'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
-            }`}
-          >
-            <Rocket size={14} /> Rocket
-          </button>
-        </div>
+          {/* Elegant Pill Toggles */}
+          <div className="glass-panel p-1.5 flex gap-1 pointer-events-auto rounded-full">
+            <button
+              onClick={() => setMode('spacetime')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-xs font-semibold tracking-wide transition-all ${
+                mode === 'spacetime'
+                  ? 'bg-primary/20 text-primary glow-border shadow-[inset_0_0_15px_rgba(139,92,246,0.1)]'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+              }`}
+            >
+              <Orbit size={16} strokeWidth={1.5} /> Spacetime
+            </button>
+            <button
+              onClick={() => setMode('rocket')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-xs font-semibold tracking-wide transition-all ${
+                mode === 'rocket'
+                  ? 'bg-secondary/20 text-secondary border border-secondary/30 shadow-[inset_0_0_15px_rgba(139,92,246,0.1)]'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+              }`}
+            >
+              <Rocket size={16} strokeWidth={1.5} /> Rocket
+            </button>
+          </div>
 
-        {/* Stats */}
-        <div className="glass-panel-strong px-4 py-2.5 pointer-events-auto">
-          <div className="flex items-center gap-5 text-xs font-mono">
-            {mode === 'spacetime' ? (
-              <>
-                <div className="text-muted-foreground">Bodies: <span className="text-primary">{bodies.length}</span></div>
-                <div className="text-muted-foreground">
-                  Speed: <span className={timeScale < 0 ? 'text-amber-400' : 'text-primary'}>
-                    {timeScale < 0 ? `◀ ${Math.abs(timeScale)}x` : `${timeScale}x`}
-                  </span>
-                </div>
-                {universeScale > 1.001 && (
+          {/* Minimalist Stats */}
+          <div className="glass-panel px-4 py-3 pointer-events-auto min-w-[12rem] flex flex-col justify-center items-end">
+             {mode === 'spacetime' ? (
+                <div className="flex flex-col items-end gap-1 text-[11px] font-mono tracking-wider">
+                  <div className="text-muted-foreground">ACTIVE BODIES <span className="text-primary ml-2">{bodies.length}</span></div>
+                  {universeScale > 1.001 && (
+                    <div className="text-muted-foreground">
+                      EXPANSION <span className="text-secondary ml-2">{(universeScale - 1).toFixed(4)}x</span>
+                    </div>
+                  )}
                   <div className="text-muted-foreground">
-                    ∿ Scale: <span className="text-violet-400">{universeScale.toFixed(3)}x</span>
+                    TIME DILATION <span className={`ml-2 ${timeScale < 0 ? 'text-amber-400' : 'text-primary'}`}>
+                      {timeScale < 0 ? `◀ ${Math.abs(timeScale)}x` : `${timeScale}x`}
+                    </span>
                   </div>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="text-muted-foreground">Alt: <span className="text-primary">{rocketState.altitude.toFixed(1)}</span></div>
-                <div className="text-muted-foreground">Fuel: <span className="text-primary">{(rocketState.fuel * 100).toFixed(0)}%</span></div>
-                <div className="text-muted-foreground">Phase: <span className="text-primary capitalize">{rocketState.phase}</span></div>
-              </>
-            )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-end gap-1 text-[11px] font-mono tracking-wider">
+                  <div className="text-muted-foreground">ALTITUDE <span className="text-primary ml-2">{rocketState.altitude.toFixed(1)} km</span></div>
+                  <div className="text-muted-foreground">FUEL LEVEL <span className="text-secondary ml-2">{(rocketState.fuel * 100).toFixed(0)}%</span></div>
+                </div>
+              )}
           </div>
+        </motion.div>
+
+        {/* Main Interface Areas */}
+        <div className="flex-1 relative">
+          {/* Left Panel */}
+          <AnimatePresence mode="wait">
+            <motion.div 
+              key={mode} /* Key triggers re-animation when mode changes */
+              className="absolute left-6 top-0 bottom-6 z-10 pointer-events-auto"
+              initial={{ opacity: 0, x: -30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+            >
+              {mode === 'spacetime' ? (
+                <ObjectLibrary
+                  bodies={bodies}
+                  onRemoveBody={handleRemoveBody}
+                  onRemoveAll={handleRemoveAll}
+                  selectedType={selectedObjectType}
+                  onSelectType={setSelectedObjectType}
+                />
+              ) : (
+                <RocketControls
+                  params={rocketParams}
+                  state={rocketState}
+                  onParamChange={handleRocketParamChange}
+                  onLaunch={handleLaunch}
+                  onReset={handleRocketReset}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Bottom Center - Time Controls (spacetime mode only) */}
+          <AnimatePresence>
+            {mode === 'spacetime' && (
+              <motion.div 
+                className="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 pointer-events-auto"
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ duration: 0.6, ease: "easeOut", delay: 0.2 }}
+              >
+                <TimeControls
+                  timeScale={timeScale}
+                  isPlaying={isPlaying}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onSpeedChange={setTimeScale}
+                  onReset={handleResetSpacetime}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Bottom Right - Immersive Hint */}
+          <motion.div 
+            className="absolute bottom-6 right-6 z-10 pointer-events-none"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1, duration: 1 }}
+          >
+            <p className="text-[10px] font-mono text-white/30 tracking-widest uppercase selection:bg-transparent">
+              {mode === 'spacetime'
+                ? 'LMB: Orbit • RMB: Pan • Scroll: Zoom'
+                : 'Adjust Flight Parameters • Deploy • Monitor'}
+            </p>
+          </motion.div>
         </div>
       </div>
 
-      {/* Left Panel */}
-      <div className="absolute left-4 top-20 bottom-20 z-10 pointer-events-auto">
-        {mode === 'spacetime' ? (
-          <ObjectLibrary
-            bodies={bodies}
-            onRemoveBody={handleRemoveBody}
-            onRemoveAll={handleRemoveAll}
-            selectedType={selectedObjectType}
-            onSelectType={setSelectedObjectType}
-          />
-        ) : (
-          <RocketControls
-            params={rocketParams}
-            state={rocketState}
-            onParamChange={handleRocketParamChange}
-            onLaunch={handleLaunch}
-            onReset={handleRocketReset}
-          />
-        )}
-      </div>
-
-      {/* Bottom Center - Time Controls (spacetime mode only) */}
-      {mode === 'spacetime' && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-          <TimeControls
-            timeScale={timeScale}
-            isPlaying={isPlaying}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            onSpeedChange={setTimeScale}
-            onReset={handleResetSpacetime}
-          />
-        </div>
-      )}
-
-      {/* Bottom Right - Hint */}
-      <div className="absolute bottom-6 right-4 z-10">
-        <p className="text-[10px] font-mono text-muted-foreground/50">
-          {mode === 'spacetime'
-            ? 'Select an object, then click or drag on grid to place · Scroll to zoom'
-            : 'Adjust parameters · Launch · Observe trajectory'}
-        </p>
-      </div>
     </div>
   );
 };
