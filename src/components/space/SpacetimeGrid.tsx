@@ -54,7 +54,7 @@ const SpacetimeGrid = ({
       uniforms: {
         uTime: { value: 0 },
         uGridColor: { value: new THREE.Color(0x00e5ff) },
-        uDepthColor: { value: new THREE.Color(0x7c3aed) },
+        uDepthColor: { value: new THREE.Color(0xff2d95) },
         uGridSize: { value: gridSize },
         uUniverseScale: { value: universeScale },
       },
@@ -121,6 +121,15 @@ const SpacetimeGrid = ({
     // over React state positions (only updated on body add/remove)
     const liveBods = livePhysicsRef?.current?.length ? livePhysicsRef.current : bodies;
     const vertexCount = posArray.length / 3;
+    const VERTICAL_SCALE = 0.72;
+    const PARABOLA_DEPTH_GAIN = 1.7;
+    const PARABOLA_SOFTNESS = 4.2;
+    const MASS_LOG_MIN = 22.0;
+    const MASS_LOG_MAX = 31.0;
+    const MASS_VISUAL_MIN = 1.2;
+    const MASS_VISUAL_MAX = 40.0;
+    const MASS_CURVE = 1.55;
+    const MASS_STRENGTH_EXP = 1.22;
 
     for (let i = 0; i < vertexCount; i++) {
       const x = posArray[i * 3];
@@ -134,14 +143,26 @@ const SpacetimeGrid = ({
         // SI masses (e.g. 1.989e30) would blow up the formula directly.
         // Log-normalize anything above the arcade range so the grid stays visible
         // regardless of whether realistic or arcade mode is active.
-        const visualMass = body.mass > 1000
-          ? Math.max(0.5, (Math.log10(body.mass) - 10) * 1.5)
+        const visualMassBase = body.mass > 1000
+          ? (() => {
+              const logMass = Math.log10(body.mass);
+              const normalizedMass = THREE.MathUtils.clamp(
+                (logMass - MASS_LOG_MIN) / (MASS_LOG_MAX - MASS_LOG_MIN),
+                0,
+                1,
+              );
+              const curvedMass = Math.pow(normalizedMass, MASS_CURVE);
+              return THREE.MathUtils.lerp(MASS_VISUAL_MIN, MASS_VISUAL_MAX, curvedMass);
+            })()
           : body.mass;
-        const influence = (visualMass * 2) / (dist * dist + 1.5);
+        const superMassBoost = body.mass >= 4e30 ? 1.35 : body.mass >= 2e30 ? 1.15 : 1.0;
+        const visualMass = visualMassBase * superMassBoost;
+        // Smooth parabolic well: stronger center curvature without a hard tip clamp.
+        const influence = (Math.pow(visualMass, MASS_STRENGTH_EXP) * PARABOLA_DEPTH_GAIN) / (dist * dist + PARABOLA_SOFTNESS);
         totalDisplacement += influence;
       }
 
-      posArray[i * 3 + 1] = -totalDisplacement;
+      posArray[i * 3 + 1] = -(totalDisplacement * VERTICAL_SCALE);
     }
   // livePhysicsRef is a stable ref object — its .current is read at call time,
   // so it does not need to be in deps. bodies is included for the initial frame.
