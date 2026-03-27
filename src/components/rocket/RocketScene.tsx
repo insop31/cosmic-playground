@@ -255,6 +255,7 @@ const OrbitRocketMarker = ({ position }: { position: [number, number, number] })
   );
 };
 
+
 const Atmosphere = ({ density }: { density: number }) => (
   <mesh position={[0, 0, 0]}>
     <sphereGeometry args={[100, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2]} />

@@ -103,14 +103,19 @@ const outcomeConfig: Record<LaunchOutcome, { text: string; emoji: string; colorC
   burnup: { text: 'BURN-UP', emoji: 'Heat', colorClass: 'text-destructive border-destructive/30 bg-destructive/10' },
 };
 
-const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: RocketControlsProps) => {
+const RocketControls = ({
+  params,
+  state,
+  onParamChange,
+  onLaunch,
+  onReset,
+}: RocketControlsProps) => {
   const isActive = state.phase !== 'idle';
   const showOutcome = state.phase === 'outcome';
   const outcome = outcomeConfig[state.outcome];
   const hintScenario = useMemo(() => deriveHintScenario(params, state), [params, state]);
   const hintIndexRef = useRef<Record<HintScenario, number>>({} as Record<HintScenario, number>);
   const [activeHint, setActiveHint] = useState(AI_HINTS[hintScenario][0]);
-  const [hintTick, setHintTick] = useState(0);
 
   const planetTheme = {
     '--primary': '216 64% 57%',
@@ -131,7 +136,6 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
       }
       hintIndexRef.current[hintScenario] = nextIndex;
       setActiveHint(options[nextIndex]);
-      setHintTick((tick) => tick + 1);
     };
 
     advanceHint();
@@ -300,6 +304,7 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
               }`} />
             </button>
           </div>
+
         </div>
 
         <div className="pt-5 mt-2 border-t border-white/10 shrink-0">
