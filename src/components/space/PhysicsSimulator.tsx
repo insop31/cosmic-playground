@@ -348,6 +348,12 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         const entry = meshEntriesRef.current.get(body.id);
         if (entry?.groupRef.current) entry.groupRef.current.position.copy(body.position);
       }
+
+      // Keep grid deformation synced while rewinding as well.
+      livePhysicsRef.current = physicsRef.current.map(b => ({
+        position: [b.position.x, 0, b.position.z] as [number, number, number],
+        mass: b.mass,
+      }));
       return;
     }
 
