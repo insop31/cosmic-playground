@@ -16,7 +16,7 @@ const EXPANSION_DELAY_S = 600; // 10 minutes
 const DEFAULT_STAR_MASS = 1.989e30;
 const MASSIVE_ATTRACTOR_THRESHOLD = 1e27;
 const REAL_G = 6.674e-11;
-const REAL_GRAVITY_BOOST = 1.2e20;
+const REAL_GRAVITY_BOOST = 7.5e-20; // Must match PhysicsSimulator — G_eff * M_sun ≈ 10 at scene scale
 const MIN_ORBITAL_SPEED = 0.08;
 const MAX_ORBITAL_SPEED = 3.0;
 
@@ -208,20 +208,24 @@ const Index = () => {
   const handlePlaceOnGrid = useCallback((position: [number, number, number]) => {
     if (!pendingPlacement) return;
     setBodies((prev) => {
-      const attractor = prev.length > 0 ? prev.reduce((max, b) => (b.mass > max.mass ? b : max)) : null;
-      let spawnPos = position;
-      if (attractor) {
-        const dx = position[0] - attractor.position[0];
-        const dz = position[2] - attractor.position[2];
+      let spawnPos: [number, number, number] = [...position] as [number, number, number];
+      const newRadius = pendingPlacement.radius ?? 0.3;
+
+      // Enforce minimum safe distance from EVERY existing body, not just the heaviest.
+      // This prevents the extreme close-range gravitational forces that shoot bodies off-screen.
+      for (const existing of prev) {
+        const dx = spawnPos[0] - existing.position[0];
+        const dz = spawnPos[2] - existing.position[2];
         const dist = Math.sqrt(dx * dx + dz * dz);
-        const minSafeDistance = (attractor.radius ?? 0.5) + (pendingPlacement.radius ?? 0.3) + 0.7;
-        if (dist < minSafeDistance) {
+        // Buffer: sum of radii × 2.5 + 2.0 extra units of breathing room
+        const minSafe = (existing.radius + newRadius) * 2.5 + 2.0;
+        if (dist < minSafe) {
           const ux = dist > 1e-6 ? dx / dist : 1;
           const uz = dist > 1e-6 ? dz / dist : 0;
           spawnPos = [
-            attractor.position[0] + ux * minSafeDistance,
+            existing.position[0] + ux * minSafe,
             0,
-            attractor.position[2] + uz * minSafeDistance,
+            existing.position[2] + uz * minSafe,
           ];
         }
       }

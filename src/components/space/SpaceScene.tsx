@@ -30,7 +30,8 @@ interface SpaceSceneProps {
   universeScale?: number;
 }
 
-const GRID_SIZE = 120;
+// Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
+const GRID_SIZE = 220;
 
 const SpaceScene = ({
   bodies,
@@ -48,12 +49,12 @@ const SpaceScene = ({
 
   return (
     <Canvas
-      camera={{ position: [0, 25, 25], fov: 60, near: 0.1, far: 500 }}
+      camera={{ position: [0, 45, 45], fov: 55, near: 0.1, far: 800 }}
       gl={{ antialias: true, alpha: false }}
       style={{ background: 'black' }}
     >
       <color attach="background" args={['#050a14']} />
-      <fog attach="fog" args={['#050a14', 80, 200]} />
+      <fog attach="fog" args={['#050a14', 120, 350]} />
 
       <ambientLight intensity={0.15} />
       <pointLight position={[20, 30, 20]} intensity={0.5} color="#00e5ff" />
@@ -65,7 +66,7 @@ const SpaceScene = ({
         bodies={bodies}
         livePhysicsRef={livePhysicsRef}
         gridSize={GRID_SIZE}
-        gridResolution={120}
+        gridResolution={160}
         universeScale={universeScale}
         onGridClick={onGridClick}
       />
@@ -84,8 +85,8 @@ const SpaceScene = ({
       <OrbitControls
         enableDamping
         dampingFactor={0.05}
-        minDistance={5}
-        maxDistance={120}
+        minDistance={8}
+        maxDistance={200}
         maxPolarAngle={Math.PI / 2.1}
       />
     </Canvas>
