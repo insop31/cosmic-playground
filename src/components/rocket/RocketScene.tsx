@@ -71,7 +71,7 @@ const ATMO_LAYERS = [
     sublabel: 'Satellites & Space',
     icon: '🛰️',
     altRange: '600 km+',
-    color: '#0f172a',    // dark slate
+    color: '#4c1d95',    // deep violet
     borderColor: '#475569',
     alpha: 0.2,
     pyMin: 45,
@@ -285,7 +285,7 @@ const PlanetGlobe = ({ planetRadius, atmosphericDensity }: { planetRadius: numbe
 
 // ─── Atmospheric Layers ───────────────────────────────────────────────────────
 // Keep labels away from right-side UI panels.
-const RULER_X = 5.5; // world-X of the altitude ruler line
+const TRAJECTORY_LABEL_GAP = 1.25;
 
 const LayerBand = ({
   color,
@@ -328,7 +328,13 @@ const LayerBand = ({
   );
 };
 
-const AtmosphericLayers = ({ planetRadius }: { planetRadius: number }) => {
+const AtmosphericLayers = ({
+  planetRadius,
+  params,
+}: {
+  planetRadius: number;
+  params: RocketParams;
+}) => {
   void planetRadius;
   // Precompute all boundary world-Y values
   const boundaries = [
@@ -340,41 +346,44 @@ const AtmosphericLayers = ({ planetRadius }: { planetRadius: number }) => {
   const rulerBottom = boundaries[0];
   const rulerTop = boundaries[boundaries.length - 1];
   const rulerHeight = rulerTop - rulerBottom;
+  const effectiveLaunchAngle = params.launchAngle + params.padTilt;
+  const angleRad = (effectiveLaunchAngle * Math.PI) / 180;
+  const trajectoryDir = Math.sign(Math.sin(angleRad)) || 1;
+  const trajectorySlope = Math.tan(angleRad);
 
   return (
     <group>
-      {/* ── Vertical altitude ruler ── */}
-      <mesh position={[RULER_X, rulerBottom + rulerHeight / 2, 2]}>
-        <boxGeometry args={[0.08, rulerHeight, 0.08]} />
-        <meshBasicMaterial color="#ffffff" transparent opacity={0.25} />
+      <mesh position={[0, rulerBottom + rulerHeight / 2, -0.7]}>
+        <boxGeometry args={[0.04, rulerHeight, 0.04]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.12} />
       </mesh>
 
       {ATMO_LAYERS.map((layer, i) => {
         const yMin = pyToWorldY(layer.pyMin);
         const yMax = pyToWorldY(layer.pyMax);
-        const height = yMax - yMin;
-        const centerY = (yMin + yMax) / 2;
+        const trajectoryX = THREE.MathUtils.clamp((layer.pyMax * trajectorySlope) * 2, -60, 60);
+        const labelX = trajectoryX + TRAJECTORY_LABEL_GAP * trajectoryDir;
 
         return (
           <group key={layer.name}>
             {/* ── Seamless Shader Gradient Band ── */}
             <LayerBand color={layer.color} opacity={layer.alpha} yMin={yMin} yMax={yMax} planetCenterY={hemisphereBaseY} />
 
-            {/* ── Ruler tick at boundary ── */}
-            <mesh position={[RULER_X, yMax, 2]}>
-              <boxGeometry args={[1.2, 0.1, 0.1]} />
-              <meshBasicMaterial color={layer.borderColor} transparent opacity={0.8} />
+            {/* Trajectory anchor marker */}
+            <mesh position={[trajectoryX, yMax, 0]}>
+              <sphereGeometry args={[0.07, 10, 10]} />
+              <meshBasicMaterial color={layer.borderColor} />
             </mesh>
 
-            {/* ── Connector line from ruler to label card ── */}
-            <mesh position={[RULER_X + 1.8, yMax, 2]}>
-              <boxGeometry args={[2.6, 0.06, 0.06]} />
+            {/* Connector line from trajectory to label card */}
+            <mesh position={[(trajectoryX + labelX) / 2, yMax, 0.7]}>
+              <boxGeometry args={[Math.max(0.2, Math.abs(labelX - trajectoryX)), 0.05, 0.05]} />
               <meshBasicMaterial color={layer.color} transparent opacity={0.45} />
             </mesh>
 
-            {/* ── Html label card anchored at top boundary ── */}
+            {/* ── Html label card anchored near trajectory ── */}
             <Html
-              position={[RULER_X + 3.2, yMax, 2]}
+              position={[labelX, yMax, 1.3]}
               center={false}
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
@@ -391,7 +400,7 @@ const AtmosphericLayers = ({ planetRadius }: { planetRadius: number }) => {
                   backdropFilter: 'blur(10px)',
                   WebkitBackdropFilter: 'blur(10px)',
                   boxShadow: `0 0 14px ${layer.color}25, 0 2px 8px rgba(0,0,0,0.6)`,
-                  transform: 'translateY(-50%)',
+                  transform: `translateY(-50%) translateX(${trajectoryDir > 0 ? '0' : '-100%'})`,
                 }}
               >
                 {/* Row 1: icon + name */}
@@ -565,7 +574,7 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
       ) : (
         <>
           <PlanetSurface />
-          <AtmosphericLayers planetRadius={params.planetRadius} />
+          <AtmosphericLayers planetRadius={params.planetRadius} params={params} />
           <Atmosphere density={params.atmosphericDensity} />
         </>
       )}
