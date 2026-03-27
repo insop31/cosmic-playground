@@ -169,6 +169,12 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
         <div className="space-y-3">
           <SliderRow label="Drag Coeff" value={params.dragCoefficient} min={0} max={1} step={0.05} unit="" onChange={(v) => onParamChange('dragCoefficient', v)} disabled={isActive} />
           <SliderRow label="Atmo Density" value={params.atmosphericDensity} min={0} max={1} step={0.05} unit="" onChange={(v) => onParamChange('atmosphericDensity', v)} disabled={isActive} />
+          <SliderRow label="Crosswind" value={params.crosswind} min={-60} max={60} step={1} unit=" m/s" onChange={(v) => onParamChange('crosswind', v)} disabled={isActive} />
+          <SliderRow label="Wind Shear" value={params.windShear} min={0} max={1} step={0.05} unit="" onChange={(v) => onParamChange('windShear', v)} disabled={isActive} />
+          <SliderRow label="Thermal Load" value={params.thermalLoad} min={0} max={1} step={0.05} unit="" onChange={(v) => onParamChange('thermalLoad', v)} disabled={isActive} />
+          <SliderRow label="Ambient Temp" value={params.ambientTemperature} min={-60} max={60} step={1} unit=" °C" onChange={(v) => onParamChange('ambientTemperature', v)} disabled={isActive} />
+          <SliderRow label="Atmo Pressure" value={params.atmosphericPressure} min={0.6} max={1.4} step={0.02} unit=" atm" onChange={(v) => onParamChange('atmosphericPressure', v)} disabled={isActive} />
+          <SliderRow label="Pad Tilt" value={params.padTilt} min={-8} max={8} step={0.5} unit=" °" onChange={(v) => onParamChange('padTilt', v)} disabled={isActive} />
         </div>
       </div>
 

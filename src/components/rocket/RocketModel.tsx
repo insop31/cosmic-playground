@@ -32,6 +32,14 @@ const computeRocketAngle = (vx: number, vy: number) => {
   return Math.atan2(vx, safeVy);
 };
 
+const smoothRotateZ = (current: number, target: number, factor: number) => {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + delta * factor;
+};
+
+const smoothMove = (current: number, target: number, smoothing: number, dt: number) =>
+  THREE.MathUtils.damp(current, target, smoothing, dt);
+
 const buildOrbitPath = (
   px: number,
   py: number,
@@ -158,7 +166,9 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     if (historyRef.current.length > 3600) historyRef.current.shift();
 
     const dt = Math.min(delta * timeScale, 0.1); // clamp delta for stable integration
-    const angleRad = (params.launchAngle * Math.PI) / 180;
+    const renderDt = Math.min(delta, 0.05);
+    const effectiveLaunchAngle = params.launchAngle + params.padTilt;
+    const angleRad = (effectiveLaunchAngle * Math.PI) / 180;
     let [vx, vy] = velocityRef.current;
     let [px, py] = posRef.current;
     let fuel = fuelRef.current;
@@ -184,12 +194,18 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
       velocityRef.current = [vx, vy];
       posRef.current = [px, py];
 
-      groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
+      const targetX = px * 2;
+      const targetY = 1.2 + py * 2;
+      groupRef.current.position.set(
+        smoothMove(groupRef.current.position.x, targetX, 18, renderDt),
+        smoothMove(groupRef.current.position.y, targetY, 18, renderDt),
+        smoothMove(groupRef.current.position.z, 0, 18, renderDt),
+      );
       const rocketAngle = computeRocketAngle(vx, vy);
-      groupRef.current.rotation.z = THREE.MathUtils.lerp(
+      groupRef.current.rotation.z = smoothRotateZ(
         groupRef.current.rotation.z,
         -rocketAngle,
-        Math.min(1, dt * 8)
+        Math.min(1, renderDt * 10),
       );
 
       onUpdateState((prev) => ({
@@ -210,7 +226,19 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
       px += vx * dt;
       py += vy * dt;
       posRef.current = [px, py];
-      groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
+      const targetX = px * 2;
+      const targetY = 1.2 + py * 2;
+      groupRef.current.position.set(
+        smoothMove(groupRef.current.position.x, targetX, 16, renderDt),
+        smoothMove(groupRef.current.position.y, targetY, 16, renderDt),
+        smoothMove(groupRef.current.position.z, 0, 16, renderDt),
+      );
+      const rocketAngle = computeRocketAngle(vx, vy);
+      groupRef.current.rotation.z = smoothRotateZ(
+        groupRef.current.rotation.z,
+        -rocketAngle,
+        Math.min(1, renderDt * 9),
+      );
       onUpdateState((prev) => ({
         ...prev,
         position: [px, py, 0],
@@ -223,7 +251,10 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
 
     if (fuel > 0 && state.phase === 'launching') {
       const currentMass = params.dryMass + fuel * params.fuelMass;
-      const thrustAcc = params.thrustForce / currentMass;
+      const pressureFactor = THREE.MathUtils.clamp(1.04 - (params.atmosphericPressure - 1) * 0.22, 0.78, 1.14);
+      const temperatureFactor = THREE.MathUtils.clamp(1 - (params.ambientTemperature - 15) * 0.0024, 0.82, 1.08);
+      const thrustEnvironmentFactor = pressureFactor * temperatureFactor;
+      const thrustAcc = (params.thrustForce * thrustEnvironmentFactor) / currentMass;
       vx += Math.sin(angleRad) * thrustAcc * dt;
       vy += Math.cos(angleRad) * thrustAcc * dt;
       fuel -= dt / params.burnDuration;
@@ -240,7 +271,12 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     // Drag
     const speed = Math.sqrt(vx * vx + vy * vy);
     const atmosphereFactor = Math.max(0, 1 - py * 0.015) * params.atmosphericDensity;
-    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.003;
+    const shearWave = Math.sin((state.elapsed + dt) * 0.9 + py * 0.35) * params.windShear;
+    const wind = params.crosswind * (1 + shearWave) * atmosphereFactor;
+    vx += wind * dt * 0.0011;
+
+    const thermalPenalty = 1 + params.thermalLoad * Math.max(0, speed - 0.3) * atmosphereFactor * 1.8;
+    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.003 * thermalPenalty;
     if (speed > 0.001) {
       vx -= (vx / speed) * dragForce * dt;
       vy -= (vy / speed) * dragForce * dt;
@@ -306,12 +342,18 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     }
 
     // Update visual position
-    groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
+    const targetX = px * 2;
+    const targetY = 1.2 + py * 2;
+    groupRef.current.position.set(
+      smoothMove(groupRef.current.position.x, targetX, 16, renderDt),
+      smoothMove(groupRef.current.position.y, targetY, 16, renderDt),
+      smoothMove(groupRef.current.position.z, 0, 16, renderDt),
+    );
     const rocketAngle = computeRocketAngle(vx, vy);
-    groupRef.current.rotation.z = THREE.MathUtils.lerp(
+    groupRef.current.rotation.z = smoothRotateZ(
       groupRef.current.rotation.z,
       -rocketAngle,
-      Math.min(1, dt * 10)
+      Math.min(1, renderDt * 12),
     );
 
     onUpdateState((prev) => ({

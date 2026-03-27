@@ -213,6 +213,44 @@ const OrbitPath = ({ orbit }: { orbit: OrbitPathState }) => {
   return <primitive object={line} />;
 };
 
+const OrbitRocketMarker = ({ position }: { position: [number, number, number] }) => {
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  useFrame((state) => {
+    if (!ringRef.current) return;
+    const pulse = 1 + Math.sin(state.clock.elapsedTime * 4.2) * 0.16;
+    ringRef.current.scale.setScalar(pulse);
+  });
+
+  return (
+    <group position={position}>
+      <mesh ref={ringRef}>
+        <ringGeometry args={[0.7, 1.0, 40]} />
+        <meshBasicMaterial color="#facc15" transparent opacity={0.9} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <pointLight color="#fde047" intensity={1.8} distance={18} />
+      <Html position={[0, 1.4, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <div
+          style={{
+            fontSize: '10px',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: '#fde047',
+            background: 'rgba(0,0,0,0.55)',
+            border: '1px solid rgba(250,204,21,0.45)',
+            borderRadius: '6px',
+            padding: '2px 6px',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          Rocket
+        </div>
+      </Html>
+    </group>
+  );
+};
+
 const Atmosphere = ({ density }: { density: number }) => (
   <mesh position={[0, 0, 0]}>
     <sphereGeometry args={[100, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2]} />
@@ -220,68 +258,83 @@ const Atmosphere = ({ density }: { density: number }) => (
   </mesh>
 );
 
-// ─── Atmospheric Layers ───────────────────────────────────────────────────────
-const RULER_X = 12; // world-X of the altitude ruler line
-
-const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: number; yMin: number; yMax: number }) => {
-  const height = yMax - yMin;
-  const centerY = (yMin + yMax) / 2;
-  const bandOpacity = Math.min(opacity * 4.2, 0.42);
-  const capOpacity = Math.min(opacity * 2.4, 0.24);
-  
+const PlanetGlobe = ({ planetRadius, atmosphericDensity }: { planetRadius: number; atmosphericDensity: number }) => {
+  const worldRadius = planetRadius * 2;
+  const centerY = pyToWorldY(-planetRadius);
   return (
     <group>
-      {/* Main volumetric band wall */}
       <mesh position={[0, centerY, 0]}>
-        <cylinderGeometry args={[250, 250, height, 256, 1, true]} />
-        <meshBasicMaterial 
-          color={color} 
-          transparent 
-          opacity={bandOpacity}
-          depthWrite={false} 
-          depthTest={true}
-          side={THREE.BackSide}
-          blending={THREE.NormalBlending}
-        />
+        <sphereGeometry args={[worldRadius, 72, 72]} />
+        <meshStandardMaterial color="#173c68" roughness={0.9} metalness={0.06} />
       </mesh>
-      
-      {/* Top cap */}
-      <mesh position={[0, yMax, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[250, 192]} />
-        <meshBasicMaterial 
-          color={color} 
-          transparent 
-          opacity={capOpacity}
-          depthTest={true}
-          depthWrite={false} 
-          side={THREE.DoubleSide}
-          blending={THREE.NormalBlending}
-        />
-      </mesh>
-
-      {/* Bottom cap - completes upper layers visually */}
-      <mesh position={[0, yMin, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[250, 192]} />
+      <mesh position={[0, centerY, 0]}>
+        <sphereGeometry args={[worldRadius * 1.04, 64, 64]} />
         <meshBasicMaterial
-          color={color}
+          color="#4fb5ff"
           transparent
-          opacity={capOpacity * 0.9}
-          depthTest={true}
+          opacity={THREE.MathUtils.clamp(atmosphericDensity * 0.18, 0.05, 0.24)}
+          side={THREE.BackSide}
           depthWrite={false}
-          side={THREE.DoubleSide}
-          blending={THREE.NormalBlending}
         />
       </mesh>
     </group>
   );
 };
 
-const AtmosphericLayers = () => {
+// ─── Atmospheric Layers ───────────────────────────────────────────────────────
+// Keep labels away from right-side UI panels.
+const RULER_X = 5.5; // world-X of the altitude ruler line
+
+const LayerBand = ({
+  color,
+  opacity,
+  yMin,
+  yMax,
+  planetCenterY,
+}: {
+  color: string;
+  opacity: number;
+  yMin: number;
+  yMax: number;
+  planetCenterY: number;
+}) => {
+  const radiusMin = Math.max(1, yMin - planetCenterY);
+  const radiusMax = Math.max(radiusMin + 0.01, yMax - planetCenterY);
+  const shellOpacity = Math.min(opacity * 1.25, 0.14);
+  const edgeOpacity = Math.min(opacity * 1.7, 0.2);
+
+  return (
+    <group>
+      {/* Subtle spherical layer fill */}
+      <mesh position={[0, planetCenterY, 0]}>
+        <sphereGeometry args={[radiusMax, 56, 36, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshBasicMaterial color={color} transparent opacity={shellOpacity} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Thin outer boundary arc */}
+      <mesh position={[0, planetCenterY, 0]}>
+        <sphereGeometry args={[radiusMax + 0.15, 56, 36, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshBasicMaterial color={color} transparent opacity={edgeOpacity} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Very faint inner boundary for layer separation */}
+      <mesh position={[0, planetCenterY, 0]}>
+        <sphereGeometry args={[radiusMin, 48, 28, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshBasicMaterial color={color} transparent opacity={edgeOpacity * 0.35} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+};
+
+const AtmosphericLayers = ({ planetRadius }: { planetRadius: number }) => {
+  void planetRadius;
   // Precompute all boundary world-Y values
   const boundaries = [
     ...ATMO_LAYERS.map((l) => pyToWorldY(l.pyMin)),
     pyToWorldY(ATMO_LAYERS[ATMO_LAYERS.length - 1].pyMax),
   ];
+  // Keep hemisphere base aligned with the launch base.
+  const hemisphereBaseY = 0;
   const rulerBottom = boundaries[0];
   const rulerTop = boundaries[boundaries.length - 1];
   const rulerHeight = rulerTop - rulerBottom;
@@ -303,7 +356,7 @@ const AtmosphericLayers = () => {
         return (
           <group key={layer.name}>
             {/* ── Seamless Shader Gradient Band ── */}
-            <LayerBand color={layer.color} opacity={layer.alpha} yMin={yMin} yMax={yMax} />
+            <LayerBand color={layer.color} opacity={layer.alpha} yMin={yMin} yMax={yMax} planetCenterY={hemisphereBaseY} />
 
             {/* ── Ruler tick at boundary ── */}
             <mesh position={[RULER_X, yMax, 2]}>
@@ -312,14 +365,14 @@ const AtmosphericLayers = () => {
             </mesh>
 
             {/* ── Connector line from ruler to label card ── */}
-            <mesh position={[RULER_X + 2.5, yMax, 2]}>
-              <boxGeometry args={[4, 0.06, 0.06]} />
+            <mesh position={[RULER_X + 1.8, yMax, 2]}>
+              <boxGeometry args={[2.6, 0.06, 0.06]} />
               <meshBasicMaterial color={layer.color} transparent opacity={0.45} />
             </mesh>
 
             {/* ── Html label card anchored at top boundary ── */}
             <Html
-              position={[RULER_X + 4.5, yMax, 2]}
+              position={[RULER_X + 3.2, yMax, 2]}
               center={false}
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
@@ -394,16 +447,19 @@ const AtmosphericLayers = () => {
 // ─── Cinematic Camera ─────────────────────────────────────────────────────────
 const CinematicCamera = ({
   state,
+  params,
   controlsRef,
   userControlled,
 }: {
   state: RocketState;
+  params: RocketParams;
   controlsRef: React.RefObject<any>;
   userControlled: boolean;
 }) => {
   const { camera } = useThree();
   const targetPos = useRef(new THREE.Vector3(0, 5, 0));
   const targetCam = useRef(new THREE.Vector3(8, 6, 20));
+  const orbitBlendRef = useRef(0);
 
   useFrame((_, delta) => {
     const controls = controlsRef.current;
@@ -419,9 +475,11 @@ const CinematicCamera = ({
     const alt = state.altitude; // same value as py
 
     if (phase === 'idle') {
+      orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 0, 6, delta);
       targetPos.current.set(0, 3, 0);
       targetCam.current.set(5.5, 4.8, 13.5);
-    } else if (phase === 'launching' || phase === 'coasting' || (phase === 'outcome' && state.outcome === 'orbiting')) {
+    } else if (phase === 'launching' || phase === 'coasting') {
+      orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 0, 6, delta);
       // Always centre on the rocket
       targetPos.current.set(rocketWorldX, rocketWorldY, 0);
 
@@ -431,11 +489,41 @@ const CinematicCamera = ({
       const offsetY = THREE.MathUtils.lerp(1.8, 7.2, t);
       const offsetZ = THREE.MathUtils.lerp(13.5, 34, t);
       targetCam.current.set(rocketWorldX + offsetX, rocketWorldY + offsetY, offsetZ);
+    } else if (phase === 'outcome' && state.outcome === 'orbiting') {
+      // Orbit cinematic: frame the whole planet and keep the rocket visibly circling it.
+      orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 1, 2.6, delta);
+      const planetCenterY = pyToWorldY(-params.planetRadius);
+      const worldRadius = params.planetRadius * 2;
+      const toRocket = new THREE.Vector3(rocketWorldX, rocketWorldY - planetCenterY, 0);
+      if (toRocket.lengthSq() < 1e-6) toRocket.set(1, 0, 0);
+      toRocket.normalize();
+      const tangent = new THREE.Vector3(-toRocket.y, toRocket.x, 0).normalize();
+
+      const launchTarget = new THREE.Vector3(rocketWorldX, rocketWorldY, 0);
+      const launchCam = new THREE.Vector3(rocketWorldX + 9.0, rocketWorldY + 6.4, 30.0);
+      // Lock the view around the rocket while retaining enough radial distance
+      // to keep the planet in frame.
+      const orbitTarget = new THREE.Vector3(
+        rocketWorldX * 0.9,
+        rocketWorldY * 0.9 + planetCenterY * 0.1,
+        0,
+      );
+      const orbitCam = new THREE.Vector3(
+        rocketWorldX + toRocket.x * worldRadius * 1.45 + tangent.x * worldRadius * 0.65,
+        rocketWorldY + toRocket.y * worldRadius * 1.45 + tangent.y * worldRadius * 0.65,
+        worldRadius * 1.95,
+      );
+
+      targetPos.current.copy(launchTarget).lerp(orbitTarget, orbitBlendRef.current);
+      targetCam.current.copy(launchCam).lerp(orbitCam, orbitBlendRef.current);
     }
 
     // Time-based damping keeps camera motion smooth and framerate independent.
     const damping = 6.5;
     const dt = Math.min(delta, 0.05);
+    const targetFov = phase === 'outcome' && state.outcome === 'orbiting' ? 66 : 42;
+    camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 4.5, dt);
+    camera.updateProjectionMatrix();
     camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCam.current.x, damping, dt);
     camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCam.current.y, damping, dt);
     camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCam.current.z, damping, dt);
@@ -452,6 +540,7 @@ const CinematicCamera = ({
 const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketSceneProps) => {
   const controlsRef = useRef<any>(null);
   const userControlled = state.phase === 'outcome' && state.outcome !== 'orbiting';
+  const isOrbitingOutcome = state.phase === 'outcome' && state.outcome === 'orbiting';
 
   return (
     <Canvas
@@ -469,17 +558,28 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
 
       <Stars radius={150} depth={60} count={3000} factor={4} saturation={0.3} fade speed={0.5} />
 
-      <PlanetSurface />
-      <AtmosphericLayers />
-      <Atmosphere density={params.atmosphericDensity} />
+      {isOrbitingOutcome ? (
+        <PlanetGlobe planetRadius={params.planetRadius} atmosphericDensity={params.atmosphericDensity} />
+      ) : (
+        <>
+          <PlanetSurface />
+          <AtmosphericLayers planetRadius={params.planetRadius} />
+          <Atmosphere density={params.atmosphericDensity} />
+        </>
+      )}
 
       {state.phase === 'idle' && <TrajectoryArc params={params} />}
       {state.outcome === 'orbiting' && state.orbit && <OrbitPath orbit={state.orbit} />}
+      {state.outcome === 'orbiting' && (
+        <OrbitRocketMarker
+          position={[state.position[0] * 2, pyToWorldY(state.position[1]), 0]}
+        />
+      )}
       {state.trajectory.length > 1 && <TrajectoryTrail trajectory={state.trajectory} />}
 
       <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
 
-      <CinematicCamera state={state} controlsRef={controlsRef} userControlled={userControlled} />
+      <CinematicCamera state={state} params={params} controlsRef={controlsRef} userControlled={userControlled} />
 
       <OrbitControls
         ref={controlsRef}

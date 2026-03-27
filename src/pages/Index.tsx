@@ -275,7 +275,10 @@ const Index = () => {
     setRocketParams((prev) => {
       const next = { ...prev, [key]: value };
       registerExperiment(`rocket:${key}:${String(value)}`);
-      registerExperiment(`rocket-profile:${next.launchAngle}-${next.thrustForce}-${next.fuelMass}-${next.dragCoefficient}-${next.gravity}-${next.stageSeparation ? 1 : 0}`, 10);
+      registerExperiment(
+        `rocket-profile:${next.launchAngle}-${next.thrustForce}-${next.fuelMass}-${next.dragCoefficient}-${next.gravity}-${next.crosswind}-${next.windShear}-${next.thermalLoad}-${next.ambientTemperature}-${next.atmosphericPressure}-${next.padTilt}-${next.stageSeparation ? 1 : 0}`,
+        10,
+      );
       return next;
     });
   }, [registerExperiment]);

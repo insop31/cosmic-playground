@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 export interface RocketParams {
   launchAngle: number;       // degrees from vertical (0 = straight up)
   thrustForce: number;       // kN
@@ -8,6 +10,12 @@ export interface RocketParams {
   gravity: number;           // m/s²
   planetRadius: number;      // km (visual)
   atmosphericDensity: number; // 0-1 scale
+  crosswind: number;         // m/s lateral wind baseline
+  windShear: number;         // 0-1 altitude/time wind variance
+  thermalLoad: number;       // 0-1 extra drag/heating penalty
+  ambientTemperature: number; // °C ambient temperature at launch
+  atmosphericPressure: number; // 0.6-1.4 relative pressure
+  padTilt: number;           // degrees offset from ideal launch pad alignment
   stageSeparation: boolean;
 }
 
@@ -21,6 +29,12 @@ export const DEFAULT_PARAMS: RocketParams = {
   gravity: 9.8,
   planetRadius: 50,
   atmosphericDensity: 0.5,
+  crosswind: 0,
+  windShear: 0.25,
+  thermalLoad: 0.2,
+  ambientTemperature: 18,
+  atmosphericPressure: 1,
+  padTilt: 0,
   stageSeparation: false,
 };
 
@@ -68,7 +82,8 @@ export const INITIAL_STATE: RocketState = {
 export function computeTrajectoryPreview(params: RocketParams): [number, number][] {
   const points: [number, number][] = [];
   const dt = 0.1;
-  const angleRad = (params.launchAngle * Math.PI) / 180;
+  const effectiveLaunchAngle = params.launchAngle + params.padTilt;
+  const angleRad = (effectiveLaunchAngle * Math.PI) / 180;
   let vx = Math.sin(angleRad) * 0;
   let vy = 0;
   let x = 0;
@@ -82,7 +97,10 @@ export function computeTrajectoryPreview(params: RocketParams): [number, number]
     const massRatio = currentMass / totalMass;
 
     if (fuel > 0) {
-      const thrustAcc = params.thrustForce / massRatio;
+      const pressureFactor = THREE.MathUtils.clamp(1.04 - (params.atmosphericPressure - 1) * 0.22, 0.78, 1.14);
+      const temperatureFactor = THREE.MathUtils.clamp(1 - (params.ambientTemperature - 15) * 0.0024, 0.82, 1.08);
+      const thrustEnvironmentFactor = pressureFactor * temperatureFactor;
+      const thrustAcc = (params.thrustForce * thrustEnvironmentFactor) / massRatio;
       vx += Math.sin(angleRad) * thrustAcc * dt * 0.01;
       vy += Math.cos(angleRad) * thrustAcc * dt * 0.01;
       fuel -= burnRate * dt;
@@ -91,7 +109,13 @@ export function computeTrajectoryPreview(params: RocketParams): [number, number]
     vy -= params.gravity * dt * 0.01;
 
     const speed = Math.sqrt(vx * vx + vy * vy);
-    const dragForce = 0.5 * params.dragCoefficient * params.atmosphericDensity * speed * speed * 0.001;
+    const atmosphereFactor = Math.max(0, 1 - y * 0.015) * params.atmosphericDensity;
+    const shearWave = Math.sin(t * 0.9 + y * 0.35) * params.windShear;
+    const wind = params.crosswind * (1 + shearWave) * atmosphereFactor;
+    vx += wind * dt * 0.0009;
+
+    const thermalPenalty = 1 + params.thermalLoad * Math.max(0, speed - 0.3) * atmosphereFactor * 1.8;
+    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.001 * thermalPenalty;
     if (speed > 0) {
       vx -= (vx / speed) * dragForce * dt;
       vy -= (vy / speed) * dragForce * dt;
