@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FlameParticles, SmokeParticles } from './Particles';
-import { RocketParams, RocketState } from './rocketTypes';
+import { OrbitPathState, RocketParams, RocketState } from './rocketTypes';
 
 interface RocketModelProps {
   params: RocketParams;
@@ -12,6 +12,74 @@ interface RocketModelProps {
 }
 
 const ROCKET_SCALE = 1.75;
+const TRAJECTORY_LIMIT = 2400;
+const ESCAPE_VELOCITY = 1.1;
+const MIN_ORBITAL_SPEED = 0.32;
+const ORBIT_ALTITUDE_THRESHOLD = 45;
+
+const appendTrajectoryPoint = (trajectory: [number, number][], point: [number, number]) => {
+  const next = [...trajectory, point];
+  return next.length > TRAJECTORY_LIMIT ? next.slice(next.length - TRAJECTORY_LIMIT) : next;
+};
+
+const normalizeVector = (x: number, y: number): [number, number] => {
+  const length = Math.hypot(x, y) || 1;
+  return [x / length, y / length];
+};
+
+const computeRocketAngle = (vx: number, vy: number) => {
+  const safeVy = Math.abs(vy) < 0.001 ? (vy >= 0 ? 0.001 : -0.001) : vy;
+  return Math.atan2(vx, safeVy);
+};
+
+const buildOrbitPath = (
+  px: number,
+  py: number,
+  vx: number,
+  vy: number,
+  planetRadius: number
+): OrbitPathState | null => {
+  const focus: [number, number] = [0, -planetRadius];
+  const rx = px - focus[0];
+  const ry = py - focus[1];
+  const radius = Math.hypot(rx, ry);
+  if (radius < planetRadius + 10) return null;
+
+  const axisDirection = normalizeVector(rx, ry);
+  const tangentSeed: [number, number] = [-axisDirection[1], axisDirection[0]];
+  const tangentDot = vx * tangentSeed[0] + vy * tangentSeed[1];
+  const tangentSign = tangentDot >= 0 ? 1 : -1;
+  const perpendicularDirection: [number, number] = [tangentSeed[0] * tangentSign, tangentSeed[1] * tangentSign];
+
+  const totalSpeed = Math.hypot(vx, vy);
+  const tangentialSpeed = Math.abs(vx * perpendicularDirection[0] + vy * perpendicularDirection[1]);
+  const radialSpeed = Math.abs(vx * axisDirection[0] + vy * axisDirection[1]);
+  const speedRatio = THREE.MathUtils.clamp(tangentialSpeed / ESCAPE_VELOCITY, 0.45, 0.92);
+  const eccentricity = THREE.MathUtils.clamp(
+    0.62 - (speedRatio - 0.55) * 0.9 + (radialSpeed / Math.max(totalSpeed, 0.001)) * 0.28,
+    0.16,
+    0.72
+  );
+  const semiMajorAxis = radius / (1 - eccentricity);
+  const semiMinorAxis = semiMajorAxis * Math.sqrt(1 - eccentricity * eccentricity);
+  const center: [number, number] = [
+    focus[0] - axisDirection[0] * semiMajorAxis * eccentricity,
+    focus[1] - axisDirection[1] * semiMajorAxis * eccentricity,
+  ];
+
+  return {
+    center,
+    focus,
+    semiMajorAxis,
+    semiMinorAxis,
+    eccentricity,
+    axisDirection,
+    perpendicularDirection,
+    angle: 0,
+    angularSpeed: THREE.MathUtils.clamp(tangentialSpeed / Math.max(radius, 1), 0.18, 0.52),
+  };
+};
+
 const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelProps) => {
   const groupRef = useRef<THREE.Group>(null);
   const velocityRef = useRef<[number, number]>([0, 0]);
@@ -65,7 +133,7 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
         fuelRef.current = lastSnap.fuel;
         
         groupRef.current.position.set(lastSnap.px * 2, 1.2 + lastSnap.py * 2, 0);
-        const rocketAngle = Math.atan2(lastSnap.vx, Math.max(lastSnap.vy, 0.001));
+        const rocketAngle = computeRocketAngle(lastSnap.vx, lastSnap.vy);
         groupRef.current.rotation.z = -rocketAngle;
         
         onUpdateState(() => lastSnap.uiState);
@@ -74,7 +142,8 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     }
 
     const isEscaping = state.phase === 'outcome' && state.outcome === 'escape';
-    if (state.phase !== 'launching' && state.phase !== 'coasting' && !isEscaping) {
+    const isOrbiting = state.phase === 'outcome' && state.outcome === 'orbiting' && state.orbit;
+    if (state.phase !== 'launching' && state.phase !== 'coasting' && !isEscaping && !isOrbiting) {
       return;
     }
 
@@ -94,6 +163,48 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     let [px, py] = posRef.current;
     let fuel = fuelRef.current;
 
+    if (isOrbiting && state.orbit) {
+      const currentOrbit = state.orbit;
+      const [axisX, axisY] = currentOrbit.axisDirection;
+      const [perpX, perpY] = currentOrbit.perpendicularDirection;
+      const relFocusX = px - currentOrbit.focus[0];
+      const relFocusY = py - currentOrbit.focus[1];
+      const focusRadius = Math.max(Math.hypot(relFocusX, relFocusY), 1);
+      const orbitalRate = currentOrbit.angularSpeed * THREE.MathUtils.clamp(currentOrbit.semiMajorAxis / focusRadius, 0.75, 1.8);
+      const nextAngle = currentOrbit.angle + dt * orbitalRate;
+      const cosTheta = Math.cos(nextAngle);
+      const sinTheta = Math.sin(nextAngle);
+
+      px = currentOrbit.center[0] + axisX * currentOrbit.semiMajorAxis * cosTheta + perpX * currentOrbit.semiMinorAxis * sinTheta;
+      py = currentOrbit.center[1] + axisY * currentOrbit.semiMajorAxis * cosTheta + perpY * currentOrbit.semiMinorAxis * sinTheta;
+
+      vx = (-axisX * currentOrbit.semiMajorAxis * sinTheta + perpX * currentOrbit.semiMinorAxis * cosTheta) * orbitalRate;
+      vy = (-axisY * currentOrbit.semiMajorAxis * sinTheta + perpY * currentOrbit.semiMinorAxis * cosTheta) * orbitalRate;
+
+      velocityRef.current = [vx, vy];
+      posRef.current = [px, py];
+
+      groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
+      const rocketAngle = computeRocketAngle(vx, vy);
+      groupRef.current.rotation.z = THREE.MathUtils.lerp(
+        groupRef.current.rotation.z,
+        -rocketAngle,
+        Math.min(1, dt * 8)
+      );
+
+      onUpdateState((prev) => ({
+        ...prev,
+        altitude: py,
+        maxAltitude: Math.max(prev.maxAltitude, py),
+        velocity: [vx, vy],
+        elapsed: prev.elapsed + dt,
+        position: [px, py, 0],
+        orbit: prev.orbit ? { ...prev.orbit, angle: nextAngle } : prev.orbit,
+        trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
+      }));
+      return;
+    }
+
     if (isEscaping) {
       // Just keep flying linearly out of the camera's view, but still update the trajectory trail!
       px += vx * dt;
@@ -105,7 +216,7 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
         position: [px, py, 0],
         altitude: py,
         maxAltitude: Math.max(prev.maxAltitude, py),
-        trajectory: [...prev.trajectory, [px, py]],
+        trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
       }));
       return;
     }
@@ -145,33 +256,58 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     // Check crash
     if (py < 0 && (vx !== 0 || vy !== 0)) {
       py = 0;
-      const maxAlt = Math.max(state.maxAltitude, py);
       onUpdateState((prev) => ({
         ...prev,
         phase: 'outcome',
         outcome: prev.maxAltitude > 25 ? 'suborbital' : 'crashed',
         position: [px, 0, 0],
         altitude: 0,
+        orbit: null,
       }));
       return;
     }
 
     // Escape / orbit detection
-    if (py > 50) {
+    if (py > ORBIT_ALTITUDE_THRESHOLD) {
       const totalSpeed = Math.sqrt(vx * vx + vy * vy);
-      const escapeVel = 0.8;
-      onUpdateState((prev) => ({
-        ...prev,
-        phase: 'outcome',
-        outcome: totalSpeed > escapeVel ? 'escape' : 'orbiting',
-        position: [px, py, 0],
-      }));
-      return;
+      const focusY = -params.planetRadius;
+      const [radialX, radialY] = normalizeVector(px, py - focusY);
+      const tangentialX = -radialY;
+      const tangentialY = radialX;
+      const tangentialSpeed = Math.abs(vx * tangentialX + vy * tangentialY);
+      const tangentialRatio = tangentialSpeed / Math.max(totalSpeed, 0.001);
+
+      if (tangentialRatio > 0.64 && tangentialSpeed > MIN_ORBITAL_SPEED && totalSpeed <= ESCAPE_VELOCITY) {
+        const orbit = buildOrbitPath(px, py, vx, vy, params.planetRadius);
+        if (orbit) {
+          onUpdateState((prev) => ({
+            ...prev,
+            phase: 'outcome',
+            outcome: 'orbiting',
+            position: [px, py, 0],
+            velocity: [vx, vy],
+            orbit,
+            trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
+          }));
+          return;
+        }
+      }
+
+      if (totalSpeed > ESCAPE_VELOCITY) {
+        onUpdateState((prev) => ({
+          ...prev,
+          phase: 'outcome',
+          outcome: 'escape',
+          position: [px, py, 0],
+          orbit: null,
+        }));
+        return;
+      }
     }
 
     // Update visual position
     groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
-    const rocketAngle = Math.atan2(vx, Math.max(vy, 0.001));
+    const rocketAngle = computeRocketAngle(vx, vy);
     groupRef.current.rotation.z = THREE.MathUtils.lerp(
       groupRef.current.rotation.z,
       -rocketAngle,
@@ -186,7 +322,8 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
       velocity: [vx, vy],
       elapsed: prev.elapsed + dt,
       position: [px, py, 0],
-      trajectory: [...prev.trajectory, [px, py]],
+      orbit: null,
+      trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
     }));
   });
 

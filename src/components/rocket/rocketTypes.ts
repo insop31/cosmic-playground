@@ -26,6 +26,18 @@ export const DEFAULT_PARAMS: RocketParams = {
 
 export type LaunchOutcome = 'none' | 'orbiting' | 'suborbital' | 'escape' | 'crashed' | 'burnup';
 
+export interface OrbitPathState {
+  center: [number, number];
+  focus: [number, number];
+  semiMajorAxis: number;
+  semiMinorAxis: number;
+  eccentricity: number;
+  axisDirection: [number, number];
+  perpendicularDirection: [number, number];
+  angle: number;
+  angularSpeed: number;
+}
+
 export interface RocketState {
   position: [number, number, number];
   velocity: [number, number];
@@ -36,6 +48,7 @@ export interface RocketState {
   elapsed: number;
   maxAltitude: number;
   trajectory: [number, number][];
+  orbit: OrbitPathState | null;
 }
 
 export const INITIAL_STATE: RocketState = {
@@ -48,6 +61,7 @@ export const INITIAL_STATE: RocketState = {
   elapsed: 0,
   maxAltitude: 0,
   trajectory: [],
+  orbit: null,
 };
 
 // Compute predicted trajectory arc for preview

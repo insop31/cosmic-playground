@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import RocketModel from './RocketModel';
-import { RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
+import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
 
 interface RocketSceneProps {
   params: RocketParams;
@@ -174,6 +174,42 @@ const TrajectoryTrail = ({ trajectory }: { trajectory: [number, number][] }) => 
   }, [trajectory]);
 
   if (!line) return null;
+  return <primitive object={line} />;
+};
+
+const OrbitPath = ({ orbit }: { orbit: OrbitPathState }) => {
+  const line = useMemo(() => {
+    const segments = 160;
+    const positions = new Float32Array((segments + 1) * 3);
+    const [axisX, axisY] = orbit.axisDirection;
+    const [perpX, perpY] = orbit.perpendicularDirection;
+
+    for (let i = 0; i <= segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      const cosTheta = Math.cos(theta);
+      const sinTheta = Math.sin(theta);
+      const px = orbit.center[0] + axisX * orbit.semiMajorAxis * cosTheta + perpX * orbit.semiMinorAxis * sinTheta;
+      const py = orbit.center[1] + axisY * orbit.semiMajorAxis * cosTheta + perpY * orbit.semiMinorAxis * sinTheta;
+
+      positions[i * 3] = px * 2;
+      positions[i * 3 + 1] = pyToWorldY(py);
+      positions[i * 3 + 2] = -0.35;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.LineDashedMaterial({
+      color: '#7dd3fc',
+      transparent: true,
+      opacity: 0.78,
+      dashSize: 0.8,
+      gapSize: 0.42,
+    });
+    const orbitLine = new THREE.Line(geometry, material);
+    orbitLine.computeLineDistances();
+    return orbitLine;
+  }, [orbit]);
+
   return <primitive object={line} />;
 };
 
@@ -385,7 +421,7 @@ const CinematicCamera = ({
     if (phase === 'idle') {
       targetPos.current.set(0, 3, 0);
       targetCam.current.set(5.5, 4.8, 13.5);
-    } else if (phase === 'launching' || phase === 'coasting') {
+    } else if (phase === 'launching' || phase === 'coasting' || (phase === 'outcome' && state.outcome === 'orbiting')) {
       // Always centre on the rocket
       targetPos.current.set(rocketWorldX, rocketWorldY, 0);
 
@@ -415,7 +451,7 @@ const CinematicCamera = ({
 // ─── Root Scene ──────────────────────────────────────────────────────────────
 const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketSceneProps) => {
   const controlsRef = useRef<any>(null);
-  const userControlled = state.phase === 'outcome';
+  const userControlled = state.phase === 'outcome' && state.outcome !== 'orbiting';
 
   return (
     <Canvas
@@ -438,6 +474,7 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
       <Atmosphere density={params.atmosphericDensity} />
 
       {state.phase === 'idle' && <TrajectoryArc params={params} />}
+      {state.outcome === 'orbiting' && state.orbit && <OrbitPath orbit={state.orbit} />}
       {state.trajectory.length > 1 && <TrajectoryTrail trajectory={state.trajectory} />}
 
       <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
