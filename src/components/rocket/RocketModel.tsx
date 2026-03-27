@@ -11,6 +11,7 @@ interface RocketModelProps {
   timeScale: number;
 }
 
+const ROCKET_SCALE = 1.75;
 const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelProps) => {
   const groupRef = useRef<THREE.Group>(null);
   const velocityRef = useRef<[number, number]>([0, 0]);
@@ -192,38 +193,38 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
   const isThrusting = state.phase === 'launching' && fuelRef.current > 0;
 
   return (
-    <group ref={groupRef} position={[0, 1.2, 0]}>
+    <group ref={groupRef} position={[0, 1.2, 0]} scale={[ROCKET_SCALE, ROCKET_SCALE, ROCKET_SCALE]}>
       {/* Rocket body */}
       <mesh position={[0, 0.8, 0]}>
         <cylinderGeometry args={[0.12, 0.18, 1.6, 12]} />
-        <meshStandardMaterial color="#cccccc" metalness={0.8} roughness={0.2} />
+        <meshStandardMaterial color="#f5f7fa" emissive="#1f2937" emissiveIntensity={0.16} metalness={0.65} roughness={0.18} />
       </mesh>
 
       {/* Nose cone */}
       <mesh position={[0, 1.8, 0]}>
         <coneGeometry args={[0.12, 0.5, 12]} />
-        <meshStandardMaterial color="#ff3333" metalness={0.6} roughness={0.3} />
+        <meshStandardMaterial color="#ff5a5a" emissive="#7f1d1d" emissiveIntensity={0.22} metalness={0.45} roughness={0.28} />
       </mesh>
 
       {/* Fins */}
       {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((rot, i) => (
         <mesh key={i} position={[Math.sin(rot) * 0.18, 0.1, Math.cos(rot) * 0.18]} rotation={[0, rot, 0]}>
           <boxGeometry args={[0.02, 0.3, 0.2]} />
-          <meshStandardMaterial color="#ff3333" metalness={0.5} roughness={0.4} />
+          <meshStandardMaterial color="#ff4d4d" emissive="#7f1d1d" emissiveIntensity={0.16} metalness={0.4} roughness={0.34} />
         </mesh>
       ))}
 
       {/* Engine nozzle */}
       <mesh position={[0, -0.1, 0]}>
         <cylinderGeometry args={[0.08, 0.15, 0.2, 12]} />
-        <meshStandardMaterial color="#333333" metalness={0.9} roughness={0.1} />
+        <meshStandardMaterial color="#2b3442" emissive="#111827" emissiveIntensity={0.15} metalness={0.85} roughness={0.12} />
       </mesh>
 
       {/* Stage separator line */}
       {params.stageSeparation && (
         <mesh position={[0, 0.4, 0]}>
           <torusGeometry args={[0.19, 0.01, 8, 24]} />
-          <meshStandardMaterial color="#ffcc00" emissive="#ffcc00" emissiveIntensity={0.5} />
+          <meshStandardMaterial color="#ffd166" emissive="#ffcc00" emissiveIntensity={0.75} />
         </mesh>
       )}
 

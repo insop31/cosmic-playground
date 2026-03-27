@@ -203,7 +203,7 @@ const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: num
           transparent 
           opacity={bandOpacity}
           depthWrite={false} 
-          depthTest={false}
+          depthTest={true}
           side={THREE.BackSide}
           blending={THREE.NormalBlending}
         />
@@ -216,7 +216,7 @@ const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: num
           color={color} 
           transparent 
           opacity={capOpacity}
-          depthTest={false}
+          depthTest={true}
           depthWrite={false} 
           side={THREE.DoubleSide}
           blending={THREE.NormalBlending}
@@ -230,7 +230,7 @@ const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: num
           color={color}
           transparent
           opacity={capOpacity * 0.9}
-          depthTest={false}
+          depthTest={true}
           depthWrite={false}
           side={THREE.DoubleSide}
           blending={THREE.NormalBlending}
@@ -384,16 +384,16 @@ const CinematicCamera = ({
 
     if (phase === 'idle') {
       targetPos.current.set(0, 3, 0);
-      targetCam.current.set(8, 5, 20);
+      targetCam.current.set(5.5, 4.8, 13.5);
     } else if (phase === 'launching' || phase === 'coasting') {
       // Always centre on the rocket
       targetPos.current.set(rocketWorldX, rocketWorldY, 0);
 
       // Smoothly blend camera offsets by normalized altitude to avoid jumps at layer edges.
       const t = THREE.MathUtils.clamp(alt / 62, 0, 1);
-      const offsetX = THREE.MathUtils.lerp(4, 11, t);
-      const offsetY = THREE.MathUtils.lerp(2, 8, t);
-      const offsetZ = THREE.MathUtils.lerp(20, 44, t);
+      const offsetX = THREE.MathUtils.lerp(3.2, 9.5, t);
+      const offsetY = THREE.MathUtils.lerp(1.8, 7.2, t);
+      const offsetZ = THREE.MathUtils.lerp(13.5, 34, t);
       targetCam.current.set(rocketWorldX + offsetX, rocketWorldY + offsetY, offsetZ);
     }
 
@@ -419,7 +419,7 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
 
   return (
     <Canvas
-      camera={{ position: [8, 5, 20], fov: 50, near: 0.1, far: 20000 }}
+      camera={{ position: [5.5, 4.8, 13.5], fov: 42, near: 0.1, far: 20000 }}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       style={{ background: '#050a14' }}
     >
@@ -427,9 +427,9 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
       {/* Push fog incredibly far so zooming out from orbit isn't blocked */}
       <fog attach="fog" args={['#050a14', 2000, 8000]} />
 
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[10, 20, 10]} intensity={0.8} color="#aaccff" />
-      <pointLight position={[0, 10, 0]} intensity={0.4} color="#00e5ff" />
+      <ambientLight intensity={0.72} />
+      <directionalLight position={[10, 20, 10]} intensity={1.05} color="#dbeafe" />
+      <pointLight position={[0, 10, 0]} intensity={0.7} color="#8be9fd" />
 
       <Stars radius={150} depth={60} count={3000} factor={4} saturation={0.3} fade speed={0.5} />
 
