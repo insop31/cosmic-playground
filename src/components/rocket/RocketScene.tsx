@@ -9,6 +9,7 @@ interface RocketSceneProps {
   params: RocketParams;
   state: RocketState;
   onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
+  timeScale?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -24,9 +25,9 @@ const ATMO_LAYERS = [
     sublabel: 'Weather & Clouds',
     icon: '🌧️',
     altRange: '0 – 12 km',
-    color: '#4FC3F7',
-    borderColor: '#81D4FA',
-    alpha: 0.08,
+    color: '#38bdf8',    // sky blue
+    borderColor: '#7dd3fc',
+    alpha: 0.12,
     pyMin: 0,
     pyMax: 8,
   },
@@ -35,9 +36,9 @@ const ATMO_LAYERS = [
     sublabel: 'Ozone Layer',
     icon: '🛡️',
     altRange: '12 – 50 km',
-    color: '#CE93D8',
-    borderColor: '#E040FB',
-    alpha: 0.09,
+    color: '#3b82f6',    // solid blue
+    borderColor: '#60a5fa',
+    alpha: 0.12,
     pyMin: 8,
     pyMax: 20,
   },
@@ -46,9 +47,9 @@ const ATMO_LAYERS = [
     sublabel: 'Burns Meteors',
     icon: '☄️',
     altRange: '50 – 80 km',
-    color: '#42A5F5',
-    borderColor: '#64B5F6',
-    alpha: 0.10,
+    color: '#1d4ed8',    // deep blue
+    borderColor: '#3b82f6',
+    alpha: 0.15,
     pyMin: 20,
     pyMax: 33,
   },
@@ -57,9 +58,9 @@ const ATMO_LAYERS = [
     sublabel: 'Auroras',
     icon: '🌌',
     altRange: '80 – 600 km',
-    color: '#FF7043',
-    borderColor: '#FF8A65',
-    alpha: 0.09,
+    color: '#1e3a8a',    // navy
+    borderColor: '#2563eb',
+    alpha: 0.18,
     pyMin: 33,
     pyMax: 45,
   },
@@ -68,9 +69,9 @@ const ATMO_LAYERS = [
     sublabel: 'Satellites & Space',
     icon: '🛰️',
     altRange: '600 km+',
-    color: '#CE93D8',
-    borderColor: '#E040FB',
-    alpha: 0.05,
+    color: '#0f172a',    // dark slate
+    borderColor: '#475569',
+    alpha: 0.2,
     pyMin: 45,
     pyMax: 62,
   },
@@ -204,7 +205,7 @@ const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: num
           depthWrite={false} 
           depthTest={false}
           side={THREE.BackSide}
-          blending={THREE.AdditiveBlending}
+          blending={THREE.NormalBlending}
         />
       </mesh>
       
@@ -218,7 +219,7 @@ const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: num
           depthTest={false}
           depthWrite={false} 
           side={THREE.DoubleSide}
-          blending={THREE.AdditiveBlending}
+          blending={THREE.NormalBlending}
         />
       </mesh>
 
@@ -232,7 +233,7 @@ const LayerBand = ({ color, opacity, yMin, yMax }: { color: string; opacity: num
           depthTest={false}
           depthWrite={false}
           side={THREE.DoubleSide}
-          blending={THREE.AdditiveBlending}
+          blending={THREE.NormalBlending}
         />
       </mesh>
     </group>
@@ -412,7 +413,7 @@ const CinematicCamera = ({
 };
 
 // ─── Root Scene ──────────────────────────────────────────────────────────────
-const RocketScene = ({ params, state, onUpdateState }: RocketSceneProps) => {
+const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketSceneProps) => {
   const controlsRef = useRef<any>(null);
   const userControlled = state.phase === 'outcome';
 
@@ -439,7 +440,7 @@ const RocketScene = ({ params, state, onUpdateState }: RocketSceneProps) => {
       {state.phase === 'idle' && <TrajectoryArc params={params} />}
       {state.trajectory.length > 1 && <TrajectoryTrail trajectory={state.trajectory} />}
 
-      <RocketModel params={params} state={state} onUpdateState={onUpdateState} />
+      <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
 
       <CinematicCamera state={state} controlsRef={controlsRef} userControlled={userControlled} />
 

@@ -8,20 +8,23 @@ interface RocketModelProps {
   params: RocketParams;
   state: RocketState;
   onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
+  timeScale: number;
 }
 
-const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
+const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelProps) => {
   const groupRef = useRef<THREE.Group>(null);
   const velocityRef = useRef<[number, number]>([0, 0]);
   const posRef = useRef<[number, number]>([0, 0]);
   const fuelRef = useRef(1);
   const prevPhaseRef = useRef(state.phase);
+  const historyRef = useRef<{vx: number, vy: number, px: number, py: number, fuel: number, uiState: RocketState}[]>([]);
 
   // Reset refs when state resets to idle
   if (state.phase === 'idle' && prevPhaseRef.current !== 'idle') {
     velocityRef.current = [0, 0];
     posRef.current = [0, 0];
     fuelRef.current = 1;
+    historyRef.current = [];
     if (groupRef.current) {
       groupRef.current.position.set(0, 1.2, 0);
       groupRef.current.rotation.set(0, 0, 0);
@@ -32,6 +35,7 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     velocityRef.current = [0, 0];
     posRef.current = [0, 0];
     fuelRef.current = 1;
+    historyRef.current = [];
     if (groupRef.current) {
       groupRef.current.position.set(0, 1.2, 0);
       groupRef.current.rotation.set(0, 0, 0);
@@ -41,13 +45,49 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
+    if (timeScale === 0) return;
+
+    if (timeScale < 0) {
+      if (state.phase === 'idle') return;
+      
+      const steps = Math.max(1, Math.round(Math.abs(timeScale)));
+      let lastSnap = null;
+      for (let s = 0; s < steps; s++) {
+        const snap = historyRef.current.pop();
+        if (!snap) break;
+        lastSnap = snap;
+      }
+      
+      if (lastSnap) {
+        velocityRef.current = [lastSnap.vx, lastSnap.vy];
+        posRef.current = [lastSnap.px, lastSnap.py];
+        fuelRef.current = lastSnap.fuel;
+        
+        groupRef.current.position.set(lastSnap.px * 2, 1.2 + lastSnap.py * 2, 0);
+        const rocketAngle = Math.atan2(lastSnap.vx, Math.max(lastSnap.vy, 0.001));
+        groupRef.current.rotation.z = -rocketAngle;
+        
+        onUpdateState(() => lastSnap.uiState);
+      }
+      return;
+    }
 
     const isEscaping = state.phase === 'outcome' && state.outcome === 'escape';
     if (state.phase !== 'launching' && state.phase !== 'coasting' && !isEscaping) {
       return;
     }
 
-    const dt = Math.min(delta, 0.05); // clamp delta for stable integration
+    historyRef.current.push({
+      vx: velocityRef.current[0],
+      vy: velocityRef.current[1],
+      px: posRef.current[0],
+      py: posRef.current[1],
+      fuel: fuelRef.current,
+      uiState: state
+    });
+    if (historyRef.current.length > 3600) historyRef.current.shift();
+
+    const dt = Math.min(delta * timeScale, 0.1); // clamp delta for stable integration
     const angleRad = (params.launchAngle * Math.PI) / 180;
     let [vx, vy] = velocityRef.current;
     let [px, py] = posRef.current;

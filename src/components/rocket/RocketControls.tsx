@@ -68,8 +68,14 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
   const showOutcome = state.phase === 'outcome';
   const outcome = outcomeConfig[state.outcome];
 
+  const planetTheme = {
+    '--primary': '216 64% 57%', // Earth blue
+    '--secondary': '216 64% 75%', // Lighter Earth blue
+    '--cyan-dim': '216 64% 30%',
+  } as React.CSSProperties;
+
   return (
-    <div className="glass-panel-strong p-5 w-[300px] h-[calc(100vh-140px)] flex flex-col border border-white/10 shadow-[0_0_30px_rgba(139,92,246,0.15)]">
+    <div style={planetTheme} className="glass-panel-strong p-5 w-[300px] h-[calc(100vh-140px)] flex flex-col border border-white/10 shadow-[0_0_30px_rgba(45,55,72,0.5)]">
       <div className="flex-1 overflow-y-auto space-y-5 pr-2 scrollbar-thin">
       {/* Header */}
       <div className="flex items-center gap-3 pb-4 border-b border-white/10">
@@ -211,7 +217,7 @@ const RocketControls = ({ params, state, onParamChange, onLaunch, onReset }: Roc
               bg-gradient-to-r from-secondary/30 to-secondary/10 text-secondary
               hover:from-secondary/40 hover:to-secondary/20
               border border-secondary/30 hover:border-secondary/50
-              shadow-[0_0_20px_rgba(192,38,211,0.2)] hover:shadow-[0_0_30px_rgba(192,38,211,0.3)]
+              shadow-[0_0_20px_rgba(45,55,72,0.4)] hover:shadow-[0_0_30px_rgba(45,55,72,0.6)]
               relative overflow-hidden group"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-[100%] group-hover:animate-[shimmer_1.5s_infinite]" />

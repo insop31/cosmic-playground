@@ -127,7 +127,7 @@ const Index = () => {
         ...pendingPlacement,
         id: `obj_${nextId++}`,
         position: spawnPos,
-        velocity,
+        velocity: velocity as [number, number, number],
       }];
     });
     setPendingPlacement(null);
@@ -182,7 +182,7 @@ const Index = () => {
         />
       </div>
       <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
-        <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} />
+        <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} timeScale={effectiveTimeScale} />
       </div>
 
       {/* Top Bar */}
@@ -274,19 +274,17 @@ const Index = () => {
         )}
       </div>
 
-      {/* Bottom Center - Time Controls (spacetime mode only) */}
-      {mode === 'spacetime' && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-          <TimeControls
-            timeScale={timeScale}
-            isPlaying={isPlaying}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            onSpeedChange={setTimeScale}
-            onReset={handleResetSpacetime}
-          />
-        </div>
-      )}
+      {/* Bottom Center - Time Controls */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
+        <TimeControls
+          timeScale={timeScale}
+          isPlaying={isPlaying}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onSpeedChange={setTimeScale}
+          onReset={mode === 'spacetime' ? handleResetSpacetime : handleRocketReset}
+        />
+      </div>
 
       {/* Bottom Right - Hint */}
       <div className="absolute bottom-6 right-4 z-10">
