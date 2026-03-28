@@ -996,31 +996,32 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const historyRef     = useRef<WorldSnapshot[][]>([]);
   const accumRef       = useRef(0);
   const [renderList, setRenderList] = useState<CelestialBody[]>([]);
-  const [impactQueue, setImpactQueue] = useState<ImpactPopupState[]>([]);
   const [activeImpact, setActiveImpact] = useState<ImpactPopupState | null>(null);
-  const popupTimeoutRef = useRef<number | null>(null);
+  const [hasPendingImpact, setHasPendingImpact] = useState(false);
+  // Holds the most recent collision that arrived while a popup was already showing.
+  // At most one item — always replaced by the newest so the queue never grows unbounded.
+  const pendingImpactRef = useRef<ImpactPopupState | null>(null);
+  const activeImpactRef  = useRef<ImpactPopupState | null>(null);
 
   const queueImpactPopups = useCallback((items: ImpactPopupState[]) => {
     if (items.length === 0) return;
-    setImpactQueue((prev) => [...prev, ...items]);
+    const latest = items[items.length - 1];
+    if (!activeImpactRef.current) {
+      activeImpactRef.current = latest;
+      setActiveImpact(latest);
+    } else {
+      // Replace pending with newest — prevents unbounded queue buildup
+      pendingImpactRef.current = latest;
+      setHasPendingImpact(true);
+    }
   }, []);
 
-  useEffect(() => {
-    if (activeImpact || impactQueue.length === 0) return;
-
-    const [nextImpact, ...rest] = impactQueue;
-    setActiveImpact(nextImpact);
-    setImpactQueue(rest);
-    popupTimeoutRef.current = window.setTimeout(() => {
-      setActiveImpact(null);
-      popupTimeoutRef.current = null;
-    }, 5_000);
-  }, [activeImpact, impactQueue]);
-
-  useEffect(() => () => {
-    if (popupTimeoutRef.current !== null) {
-      window.clearTimeout(popupTimeoutRef.current);
-    }
+  const dismissImpact = useCallback(() => {
+    const next = pendingImpactRef.current;
+    pendingImpactRef.current = null;
+    activeImpactRef.current = next;
+    setHasPendingImpact(false);
+    setActiveImpact(next);
   }, []);
 
   // ── Sync incoming React bodies → physicsRef ──────────────────────────────
@@ -1403,14 +1404,30 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         >
           <div
             className="rounded-2xl border-2 border-primary/40 bg-background/94 backdrop-blur-md px-6 py-5 shadow-xl min-w-[300px] max-w-[440px]"
-            style={{ boxShadow: '0 0 32px rgba(0, 229, 255, 0.15)' }}
+            style={{ boxShadow: '0 0 32px rgba(0, 229, 255, 0.15)', pointerEvents: 'auto' }}
           >
-            <div className="text-lg font-bold uppercase tracking-[0.12em] text-primary mb-2">
-              {activeImpact.title}
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="text-lg font-bold uppercase tracking-[0.12em] text-primary">
+                {activeImpact.title}
+              </div>
+              <button
+                onClick={dismissImpact}
+                className="shrink-0 mt-0.5 w-6 h-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+                title="Dismiss"
+              >
+                <svg width="12" height="12" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.5571 2.99385 11.193 2.99385 10.9685 3.2184L7.50005 6.68682L4.03164 3.2184C3.80708 2.99385 3.44301 2.99385 3.21846 3.2184C2.99391 3.44295 2.99391 3.80702 3.21846 4.03157L6.68688 7.50001L3.21846 10.9684C2.99391 11.193 2.99391 11.5571 3.21846 11.7816C3.44301 12.0061 3.80708 12.0061 4.03164 11.7816L7.50005 8.31319L10.9685 11.7816C11.193 12.0061 11.5571 12.0061 11.7816 11.7816C12.0062 11.5571 12.0062 11.193 11.7816 10.9684L8.31322 7.50001L11.7816 4.03157Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd" />
+                </svg>
+              </button>
             </div>
             <div className="text-base text-foreground/90 leading-relaxed border-t border-border/50 pt-3">
               {activeImpact.detail}
             </div>
+            {hasPendingImpact && (
+              <div className="mt-3 text-[11px] text-primary/60 font-mono">
+                +1 more collision — dismiss to view
+              </div>
+            )}
           </div>
         </Html>
       )}
