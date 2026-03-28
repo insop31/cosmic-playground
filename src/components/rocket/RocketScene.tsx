@@ -6,12 +6,15 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import RocketModel from './RocketModel';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
+import type { WeatherConditionId } from './weatherPresets';
+import { WeatherEnvironment, WeatherShakeGroup, createLightningStrikeState } from './WeatherEffects';
 
 interface RocketSceneProps {
   params: RocketParams;
   state: RocketState;
   onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
   timeScale?: number;
+  activeWeather?: Set<WeatherConditionId>;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -576,14 +579,22 @@ const CinematicCamera = ({
 };
 
 // ─── Root Scene ──────────────────────────────────────────────────────────────
-const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketSceneProps) => {
+const RocketScene = ({
+  params, state, onUpdateState, timeScale = 1,
+  activeWeather = new Set<WeatherConditionId>(),
+}: RocketSceneProps) => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const lightningStrikeRef = useRef(createLightningStrikeState());
   const escapedPastExosphere =
     state.phase === 'outcome' && state.outcome === 'escape' && state.altitude > EXOSPHERE_LIMIT;
   const userControlled =
     state.phase === 'outcome' && state.outcome !== 'orbiting' && state.outcome !== 'escape'
     || escapedPastExosphere;
   const isOrbitingOutcome = state.phase === 'outcome' && state.outcome === 'orbiting';
+
+  // Rocket world-space position for weather effects
+  const rocketWorldX = state.position[0] * 2;
+  const rocketWorldY = pyToWorldY(state.position[1]);
 
   return (
     <Canvas
@@ -595,7 +606,8 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
       {/* Push fog incredibly far so zooming out from orbit isn't blocked */}
       <fog attach="fog" args={['#050a14', 2000, 8000]} />
 
-      <ambientLight intensity={0.72} />
+      {/* Weather controls its own ambient; base lights provide fallback */}
+      {activeWeather.size === 0 && <ambientLight intensity={0.72} />}
       <directionalLight position={[10, 20, 10]} intensity={1.05} color="#dbeafe" />
       <pointLight position={[0, 10, 0]} intensity={0.7} color="#8be9fd" />
 
@@ -611,16 +623,34 @@ const RocketScene = ({ params, state, onUpdateState, timeScale = 1 }: RocketScen
         </>
       )}
 
+      {/* Weather environment: atmosphere overlays, particles, lightning, HUD */}
+      <WeatherEnvironment
+        activeWeather={activeWeather}
+        rocketWorldX={rocketWorldX}
+        rocketWorldY={rocketWorldY}
+        altitude={state.altitude}
+        phase={state.phase}
+        lightningStrike={lightningStrikeRef.current}
+      />
+
       {state.phase === 'idle' && <TrajectoryArc params={params} />}
       {state.outcome === 'orbiting' && state.orbit && <OrbitPath orbit={state.orbit} />}
       {state.outcome === 'orbiting' && (
         <OrbitRocketMarker
-          position={[state.position[0] * 2, pyToWorldY(state.position[1]), 0]}
+          position={[rocketWorldX, rocketWorldY, 0]}
         />
       )}
       {state.trajectory.length > 1 && <TrajectoryTrail trajectory={state.trajectory} />}
 
-      <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
+      {/* Weather shake wrapper around the rocket */}
+      <WeatherShakeGroup
+        activeWeather={activeWeather}
+        altitude={state.altitude}
+        phase={state.phase}
+        lightningStrike={lightningStrikeRef.current}
+      >
+        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
+      </WeatherShakeGroup>
 
       <CinematicCamera state={state} params={params} controlsRef={controlsRef} userControlled={userControlled} />
 
