@@ -1,8 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import SpaceScene, { CelestialBody } from '../components/space/SpaceScene';
 import RocketScene from '../components/rocket/RocketScene';
 import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
+import { WeatherConditionId, applyWeatherToParams } from '../components/rocket/weatherPresets';
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
@@ -87,6 +88,12 @@ const Index = () => {
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
   const [rocketState, setRocketState] = useState<RocketState>(INITIAL_STATE);
+  const [activeWeather, setActiveWeather] = useState<Set<WeatherConditionId>>(new Set());
+
+  const effectiveRocketParams = useMemo(
+    () => applyWeatherToParams(rocketParams, activeWeather),
+    [rocketParams, activeWeather],
+  );
   const [explorationScore, setExplorationScore] = useState(0);
   const [achievements, setAchievements] = useState<Record<MissionId, boolean>>({
     'gravity-master': false,
@@ -281,9 +288,9 @@ const Index = () => {
     }
 
     const difficultWeather =
-      Math.abs(rocketParams.crosswind) >= 20
-      && rocketParams.windShear >= 0.5
-      && rocketParams.thermalLoad >= 0.45;
+      Math.abs(effectiveRocketParams.crosswind) >= 20
+      && effectiveRocketParams.windShear >= 0.5
+      && effectiveRocketParams.thermalLoad >= 0.45;
     if (difficultWeather && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
       unlockAchievement('storm-runner');
     }
@@ -495,6 +502,14 @@ const Index = () => {
     previousOutcomeRef.current = 'none';
   }, []);
 
+  const handleWeatherChange = useCallback((id: WeatherConditionId) => {
+    setActiveWeather((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
   const handleVelocityScaleChange = useCallback((value: number) => {
     setPlacementVelocityScale(value);
     registerExperiment(`velocity-scale:${value.toFixed(2)}`);
@@ -536,7 +551,7 @@ const Index = () => {
         />
       </div>
       <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
-        <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} timeScale={effectiveTimeScale} />
+        <RocketScene params={effectiveRocketParams} state={rocketState} onUpdateState={setRocketState} timeScale={effectiveTimeScale} activeWeather={activeWeather} />
       </div>
 
       {/* Top Bar */}
@@ -625,6 +640,8 @@ const Index = () => {
             onParamChange={handleRocketParamChange}
             onLaunch={handleLaunch}
             onReset={handleRocketReset}
+            activeWeather={activeWeather}
+            onWeatherChange={handleWeatherChange}
           />
         )}
       </div>
