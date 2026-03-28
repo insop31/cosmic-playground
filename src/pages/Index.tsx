@@ -7,7 +7,7 @@ import { WeatherConditionId, applyWeatherToParams } from '../components/rocket/w
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
-import { Atom, Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
+import { Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   deleteRocketPreset,
@@ -655,10 +655,14 @@ const Index = () => {
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-10 p-4 flex items-center justify-between pointer-events-none">
-        <div className="glass-panel px-4 py-2.5 flex items-center gap-3 pointer-events-auto">
-          <Atom size={20} className="text-primary animate-pulse-glow" />
+        <div className="glass-panel px-4 py-2.5 flex items-center gap-3 pointer-events-auto min-w-[280px]">
+          <img
+            src="/cosmic-playground-logo.png"
+            alt="Cosmic Playground logo"
+            className="h-12 w-auto object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.2)]"
+          />
           <div>
-            <h1 className="text-sm font-bold tracking-wide text-foreground">SPACE–TIME LAB</h1>
+            <h1 className="text-sm font-bold tracking-wide text-foreground">COSMIC PLAYGROUND</h1>
             <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">
               {mode === 'spacetime' ? 'Gravity Sandbox' : 'Rocket Simulator'}
             </p>
