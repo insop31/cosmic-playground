@@ -14,22 +14,22 @@ interface PlanetPreset {
 }
 
 const PLANET_PRESETS: PlanetPreset[] = [
-  { name: 'Mercury', mass: 3.30e23, physicalRadius: 2_439_700, bodyClass: 'rocky', color: '#b5aea2', atmosphere: false },
-  { name: 'Venus', mass: 4.87e24, physicalRadius: 6_051_800, bodyClass: 'rocky', color: '#d9b38c', atmosphere: true },
-  { name: 'Earth', mass: 5.97e24, physicalRadius: 6_371_000, bodyClass: 'rocky', color: '#4b84d8', atmosphere: true },
-  { name: 'Mars', mass: 6.42e23, physicalRadius: 3_389_500, bodyClass: 'rocky', color: '#c96b4b', atmosphere: true },
-  { name: 'Jupiter', mass: 1.90e27, physicalRadius: 69_911_000, bodyClass: 'gas', color: '#d2b48c', atmosphere: true },
-  { name: 'Saturn', mass: 5.68e26, physicalRadius: 58_232_000, bodyClass: 'gas', color: '#d8c58f', atmosphere: true },
-  { name: 'Uranus', mass: 8.68e25, physicalRadius: 25_362_000, bodyClass: 'ice', color: '#7fd1d8', atmosphere: true },
-  { name: 'Neptune', mass: 1.02e26, physicalRadius: 24_622_000, bodyClass: 'ice', color: '#4f79de', atmosphere: true },
+  { name: 'Mercury', mass: 3.30e23, physicalRadius: 2_439_700, bodyClass: 'rocky', color: '#c8c2b6', atmosphere: false },
+  { name: 'Venus',   mass: 4.87e24, physicalRadius: 6_051_800, bodyClass: 'rocky', color: '#e8c898', atmosphere: true },
+  { name: 'Earth',   mass: 5.97e24, physicalRadius: 6_371_000, bodyClass: 'rocky', color: '#5b9ee8', atmosphere: true },
+  { name: 'Mars',    mass: 6.42e23, physicalRadius: 3_389_500, bodyClass: 'rocky', color: '#dd7755', atmosphere: true },
+  { name: 'Jupiter', mass: 1.90e27, physicalRadius: 69_911_000, bodyClass: 'gas',  color: '#e0c090', atmosphere: true },
+  { name: 'Saturn',  mass: 5.68e26, physicalRadius: 58_232_000, bodyClass: 'gas',  color: '#f0d898', atmosphere: true },
+  { name: 'Uranus',  mass: 8.68e25, physicalRadius: 25_362_000, bodyClass: 'ice',  color: '#88dde4', atmosphere: true },
+  { name: 'Neptune', mass: 1.02e26, physicalRadius: 24_622_000, bodyClass: 'ice',  color: '#6699ff', atmosphere: true },
 ];
 
 const OTHER_PRESETS: { type: string; label: string; mass: number; radius: number; color: string; icon: ReactNode }[] = [
-  { type: 'star', label: 'Star', mass: 1.989e30, radius: 2.4, color: '#ffcc00', icon: <Sun size={16} /> },
-  { type: 'blackhole', label: 'Black Hole', mass: 5.0e30, radius: 1.4, color: '#aa44ff', icon: <Hexagon size={16} /> },
-  { type: 'asteroid', label: 'Asteroid', mass: 1.0e16, radius: 0.28, color: '#888888', icon: <Star size={16} /> },
-  { type: 'neutron', label: 'Neutron Star', mass: 2.8e30, radius: 0.7, color: '#00ffcc', icon: <Zap size={16} /> },
-  { type: 'comet', label: 'Comet', mass: 2.0e14, radius: 0.22, color: '#66ddff', icon: <Sparkles size={16} /> },
+  { type: 'star',      label: 'Star',         mass: 1.989e30, radius: 2.4,  color: '#ffcc00', icon: <Sun size={16} /> },
+  { type: 'blackhole', label: 'Black Hole',   mass: 5.0e30,   radius: 1.4,  color: '#cc66ff', icon: <Hexagon size={16} /> },
+  { type: 'asteroid',  label: 'Asteroid',     mass: 1.0e16,   radius: 0.28, color: '#b0a898', icon: <Star size={16} /> },
+  { type: 'neutron',   label: 'Neutron Star', mass: 2.8e30,   radius: 0.7,  color: '#00ffcc', icon: <Zap size={16} /> },
+  { type: 'comet',     label: 'Comet',        mass: 2.0e14,   radius: 0.22, color: '#88eeff', icon: <Sparkles size={16} /> },
 ];
 
 const MASS_FORMATTER = new Intl.NumberFormat('en-US', { notation: 'scientific', maximumFractionDigits: 2 });
@@ -171,10 +171,11 @@ const ObjectLibrary = ({
                 value={selectedPlanetName}
                 onChange={(e) => setSelectedPlanetName(e.target.value)}
                 className="w-full appearance-none bg-gradient-to-r from-cyan-950/30 to-violet-950/30 text-cyan-100 rounded-md px-3 py-2.5 text-base border border-cyan-400/25 focus:border-cyan-300/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40"
+                style={{ fontSize: '15px' }}
               >
                 {PLANET_PRESETS.map((planet) => (
                   <option key={planet.name} value={planet.name} className="bg-slate-950 text-cyan-100">
-                    {`${planet.name} -------- ${MASS_FORMATTER.format(planet.mass)} kg`}
+                    {`${planet.name}   (${MASS_FORMATTER.format(planet.mass)} kg)`}
                   </option>
                 ))}
               </select>

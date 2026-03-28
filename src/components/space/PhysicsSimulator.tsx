@@ -253,6 +253,283 @@ function isStaticBody(body: PhysicsBody): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Procedural canvas textures — generated once per body, never on every render
+// ─────────────────────────────────────────────────────────────────────────────
+function makeStarTexture(color: string): THREE.CanvasTexture {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, S, S);
+  // Sunspot patches
+  for (let i = 0; i < 14; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 8 + Math.random() * 22;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,0.55)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  // Bright granulation
+  for (let i = 0; i < 50; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 3 + Math.random() * 9;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,220,0.18)');
+    g.addColorStop(1, 'rgba(255,255,220,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeGasBandsTexture(name: string): THREE.CanvasTexture {
+  const W = 512, H = 256;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d')!;
+
+  const jupBands: [number, number, string][] = [
+    [0,    0.07, '#c88b4c'], [0.07, 0.05, '#f0e2b0'], [0.12, 0.08, '#b8703a'],
+    [0.20, 0.10, '#e0c87a'], [0.30, 0.06, '#f5f0dc'], [0.36, 0.08, '#c07838'],
+    [0.44, 0.06, '#e8c890'], [0.50, 0.08, '#b06030'], [0.58, 0.06, '#d4a060'],
+    [0.64, 0.10, '#c07838'], [0.74, 0.08, '#e8c890'], [0.82, 0.07, '#b8703a'],
+    [0.89, 0.05, '#f0e2b0'], [0.94, 0.06, '#c88b4c'],
+  ];
+  const satBands: [number, number, string][] = [
+    [0,    0.10, '#c8a84e'], [0.10, 0.08, '#d4b862'], [0.18, 0.12, '#f0e098'],
+    [0.30, 0.05, '#c09540'], [0.35, 0.15, '#f8ecca'], [0.50, 0.08, '#c09540'],
+    [0.58, 0.12, '#f0e098'], [0.70, 0.08, '#d4b862'], [0.78, 0.12, '#c8a84e'],
+    [0.90, 0.10, '#b89438'],
+  ];
+  const bands = name === 'Saturn' ? satBands : jupBands;
+  for (const [pct, h, col] of bands) {
+    ctx.fillStyle = col;
+    ctx.fillRect(0, pct * H, W, h * H + 2);
+  }
+  // Wavy band edges
+  for (let y = 0; y < H; y += 18) {
+    for (let x = 0; x < W; x += 6) {
+      const wave = Math.sin((x / W) * Math.PI * 8 + y * 0.1) * 3;
+      const g = ctx.createLinearGradient(x, y + wave, x, y + wave + 5);
+      g.addColorStop(0, 'rgba(0,0,0,0.04)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y + wave, 6, 5);
+    }
+  }
+  // Jupiter: Great Red Spot
+  if (name !== 'Saturn') {
+    const sx = W * 0.32, sy = H * 0.61;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, 30);
+    g.addColorStop(0, 'rgba(160,50,25,0.85)');
+    g.addColorStop(0.5, 'rgba(190,70,35,0.45)');
+    g.addColorStop(1, 'rgba(200,80,40,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(sx, sy, 30, 19, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeEarthTexture(): THREE.CanvasTexture {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = '#1a6fa8'; ctx.fillRect(0, 0, S, S); // ocean
+  // Continents
+  const lands: [number, number, number, number, number, string][] = [
+    [S*.54, S*.38, 52, 95, 0.18, '#2d8a4e'],  // Africa/Europe
+    [S*.24, S*.38, 46, 84, -0.1, '#3a8a50'],   // Americas
+    [S*.76, S*.33, 68, 58, 0,    '#2e7a44'],   // Asia
+    [S*.80, S*.66, 26, 22, 0,    '#3d9455'],   // Australia
+    [S*.90, S*.55, 16, 14, 0,    '#c4a660'],   // Southeast Asia islands
+  ];
+  for (const [x, y, rx, ry, rot, col] of lands) {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); ctx.fill();
+  }
+  // Desert patches
+  ctx.fillStyle = '#c8a05a';
+  ctx.beginPath(); ctx.ellipse(S*.60, S*.43, 22, 32, 0, 0, Math.PI * 2); ctx.fill();
+  // Ice caps
+  ctx.fillStyle = 'rgba(230,245,255,0.85)';
+  ctx.fillRect(0, 0, S, S * 0.07);
+  ctx.fillRect(0, S * 0.93, S, S * 0.07);
+  // Cloud swirls
+  for (let i = 0; i < 10; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 28 + Math.random() * 55;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeRockyTexture(baseColor: string, craterCount = 18): THREE.CanvasTexture {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, S, S);
+  // Dark basins
+  for (let i = 0; i < Math.floor(craterCount * 0.4); i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 30 + Math.random() * 55;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,0.3)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  // Craters (dark center + bright rim)
+  for (let i = 0; i < craterCount; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 4 + Math.random() * 18;
+    const g = ctx.createRadialGradient(x, y, r * 0.1, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,0.55)');
+    g.addColorStop(0.7, 'rgba(0,0,0,0.2)');
+    g.addColorStop(0.85, 'rgba(220,210,200,0.35)');
+    g.addColorStop(1, 'rgba(220,210,200,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  // Bright highland patches
+  for (let i = 0; i < 7; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 20 + Math.random() * 40;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,240,220,0.20)');
+    g.addColorStop(1, 'rgba(255,240,220,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeMarsTexture(): THREE.CanvasTexture {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = '#dd7755'; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 8; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 35 + Math.random() * 60;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(110,45,18,0.40)');
+    g.addColorStop(1, 'rgba(110,45,18,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  for (let i = 0; i < 6; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 15 + Math.random() * 38;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(215,120,75,0.50)');
+    g.addColorStop(1, 'rgba(215,120,75,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  // Olympus Mons region (lighter circular area)
+  const g2 = ctx.createRadialGradient(S*.3, S*.35, 0, S*.3, S*.35, 45);
+  g2.addColorStop(0, 'rgba(200,100,60,0.6)'); g2.addColorStop(1, 'rgba(200,100,60,0)');
+  ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(S*.3, S*.35, 45, 0, Math.PI * 2); ctx.fill();
+  // Polar caps
+  ctx.fillStyle = 'rgba(240,245,255,0.80)';
+  ctx.fillRect(0, 0, S, S * 0.055); ctx.fillRect(0, S * 0.945, S, S * 0.055);
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeIceGiantTexture(baseColor: string, hasStorm: boolean): THREE.CanvasTexture {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 5; i++) {
+    const y = S * 0.1 + Math.random() * S * 0.8, h = 12 + Math.random() * 22;
+    const g = ctx.createLinearGradient(0, y - h, 0, y + h);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.14)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, y - h, S, h * 2);
+  }
+  if (hasStorm) {
+    const sx = S * 0.42, sy = S * 0.52;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, 32);
+    g.addColorStop(0, 'rgba(10,30,110,0.72)');
+    g.addColorStop(1, 'rgba(10,30,110,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(sx, sy, 32, 20, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeNeutronTexture(): THREE.CanvasTexture {
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = '#d0f8ff'; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 8; i++) {
+    const x = S * 0.5 + (Math.random() - 0.5) * S * 0.7, y = Math.random() * S;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 18);
+    g.addColorStop(0, 'rgba(0,200,255,0.55)'); g.addColorStop(1, 'rgba(0,200,255,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 18, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeAsteroidTexture(): THREE.CanvasTexture {
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = '#9a9088'; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 6 + Math.random() * 22;
+    const g = ctx.createRadialGradient(x, y, r * 0.1, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,0.50)'); g.addColorStop(0.75, 'rgba(0,0,0,0.15)');
+    g.addColorStop(0.88, 'rgba(160,148,136,0.30)'); g.addColorStop(1, 'rgba(160,148,136,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  for (let i = 0; i < 8; i++) {
+    const x = Math.random() * S, y = Math.random() * S;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 4 + Math.random() * 8);
+    g.addColorStop(0, 'rgba(160,148,130,0.40)'); g.addColorStop(1, 'rgba(160,148,130,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeCometTexture(): THREE.CanvasTexture {
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = '#4a5870'; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 12; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 5 + Math.random() * 16;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(180,230,255,0.72)'); g.addColorStop(1, 'rgba(180,230,255,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+function createBodyTexture(body: CelestialBody): THREE.CanvasTexture | null {
+  if (body.type === 'star')    return makeStarTexture(body.color);
+  if (body.type === 'neutron') return makeNeutronTexture();
+  if (body.type === 'asteroid') return makeAsteroidTexture();
+  if (body.type === 'comet')   return makeCometTexture();
+  if (body.type === 'planet') {
+    if (body.bodyClass === 'gas') return makeGasBandsTexture(body.name ?? '');
+    if (body.name === 'Earth')   return makeEarthTexture();
+    if (body.name === 'Mars')    return makeMarsTexture();
+    if (body.name === 'Venus')   return makeRockyTexture('#d9b38c', 4);
+    if (body.name === 'Mercury') return makeRockyTexture('#b5aea2', 26);
+    if (body.bodyClass === 'ice') {
+      const isNep = body.name === 'Neptune';
+      return makeIceGiantTexture(body.color, isNep);
+    }
+    return makeRockyTexture(body.color, 14);
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BodyRenderer — visual-only, writes nothing to physics state
 // ─────────────────────────────────────────────────────────────────────────────
 interface BodyRendererProps {
@@ -267,9 +544,13 @@ interface CameraSnapshot {
 }
 
 const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => {
-  const groupRef = useRef<THREE.Group | null>(null);
-  const meshRef  = useRef<THREE.Mesh  | null>(null);
-  const glowRef  = useRef<THREE.Mesh  | null>(null);
+  const groupRef   = useRef<THREE.Group | null>(null);
+  const meshRef    = useRef<THREE.Mesh  | null>(null);
+  const glowRef    = useRef<THREE.Mesh  | null>(null);
+  const coronaRef  = useRef<THREE.Mesh  | null>(null);
+  const diskRef    = useRef<THREE.Group | null>(null);
+  const beamRef    = useRef<THREE.Group | null>(null);
+  const animT      = useRef(Math.random() * Math.PI * 2);
 
   const { trailLine, trailAttr } = useMemo(() => {
     const geo  = new THREE.BufferGeometry();
@@ -289,36 +570,284 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body.id]);
 
-  const glowColor        = useMemo(() => new THREE.Color(body.color), [body.color]);
-  const isBlackHole      = body.type === 'blackhole';
-  const emissiveIntensity = body.type === 'star' ? 2 : isBlackHole ? 0.1 : 0.5;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const bodyTexture = useMemo(() => createBodyTexture(body), [body.type, body.name, body.bodyClass]);
+
+  const isStar    = body.type === 'star';
+  const isBH      = body.type === 'blackhole';
+  const isNS      = body.type === 'neutron';
+  const isComet   = body.type === 'comet';
+  const isAst     = body.type === 'asteroid';
+  const isPlanet  = body.type === 'planet';
+  const isSaturn  = body.name === 'Saturn';
+  const isUranus  = body.name === 'Uranus';
+
+  useFrame((_, delta) => {
+    animT.current += delta;
+    const t = animT.current;
+
+    // --- Surface rotation ---
+    if (meshRef.current) {
+      let spd = 0.25;
+      if (isBH)   spd = 0;
+      else if (isNS)  spd = 2.0;
+      else if (isStar) spd = 0.06;
+      else if (body.bodyClass === 'gas')  spd = 0.55;
+      else if (body.bodyClass === 'ice')  spd = 0.40;
+      else if (isComet) spd = 0.12;
+      meshRef.current.rotation.y += delta * spd;
+      if (isAst) meshRef.current.rotation.x += delta * 0.18;
+    }
+
+    // --- Star: corona pulse ---
+    if (coronaRef.current) {
+      const pulse = 1 + Math.sin(t * 1.4) * 0.045;
+      coronaRef.current.scale.setScalar(body.radius * 1.85 * pulse);
+      const mat = coronaRef.current.material as THREE.MeshBasicMaterial;
+      if (mat) mat.opacity = 0.09 + Math.sin(t * 0.75) * 0.03;
+    }
+
+    // --- Black hole: accretion disk spin ---
+    if (diskRef.current) diskRef.current.rotation.z += delta * 0.22;
+
+    // --- Neutron star: magnetic beam spin ---
+    if (beamRef.current) beamRef.current.rotation.y += delta * 4.2;
+  });
+
+  const r = body.radius;
 
   return (
     <>
       <primitive object={trailLine} />
       <group ref={groupRef} position={body.position}>
-        <mesh ref={meshRef} scale={body.radius}>
-          <sphereGeometry args={[1, 32, 32]} />
+
+        {/* ── Main surface sphere ─────────────────────────────────────────── */}
+        <mesh ref={meshRef} scale={r}>
+          <sphereGeometry args={[1, 64, 64]} />
           <meshStandardMaterial
-            color={isBlackHole ? '#000000' : body.color}
-            emissive={body.color}
-            emissiveIntensity={emissiveIntensity}
-            roughness={0.3}
-            metalness={0.7}
+            color={isBH ? '#050508' : bodyTexture ? '#ffffff' : body.color}
+            emissive={isBH ? '#000000' : body.color}
+            emissiveIntensity={isStar ? 1.4 : isNS ? 0.65 : isBH ? 0 : isComet ? 0.55 : isAst ? 0.45 : 0.30}
+            roughness={isBH ? 0.0 : isAst ? 0.92 : isStar ? 0.55 : 0.50}
+            metalness={isBH ? 0.95 : isStar ? 0.05 : isAst ? 0.05 : 0.25}
+            map={bodyTexture}
           />
         </mesh>
-        {!isBlackHole && (
-          <mesh ref={glowRef} scale={body.radius * 1.8}>
+
+        {/* ── STAR: layered animated corona ──────────────────────────────── */}
+        {isStar && <>
+          <mesh ref={coronaRef} scale={r * 1.85}>
             <sphereGeometry args={[1, 16, 16]} />
-            <meshBasicMaterial color={glowColor} transparent opacity={0.08} side={THREE.BackSide} />
+            <meshBasicMaterial color={body.color} transparent opacity={0.10} side={THREE.BackSide} />
+          </mesh>
+          <mesh scale={r * 2.7}>
+            <sphereGeometry args={[1, 12, 12]} />
+            <meshBasicMaterial color={body.color} transparent opacity={0.04} side={THREE.BackSide} />
+          </mesh>
+          <mesh scale={r * 4.0}>
+            <sphereGeometry args={[1, 8, 8]} />
+            <meshBasicMaterial color={body.color} transparent opacity={0.015} side={THREE.BackSide} />
+          </mesh>
+          {/* glowRef — physics drives opacity to indicate motion state */}
+          <mesh ref={glowRef} scale={r * 1.8}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color={body.color} transparent opacity={0.08} side={THREE.BackSide} />
+          </mesh>
+        </>}
+
+        {/* ── BLACK HOLE: photon sphere + animated accretion disk ─────────── */}
+        {isBH && <>
+          {/* Purple photon-sphere halo */}
+          <mesh scale={r * 1.30}>
+            <sphereGeometry args={[1, 32, 32]} />
+            <meshBasicMaterial color="#cc44ff" transparent opacity={0.20} side={THREE.BackSide} />
+          </mesh>
+          {/* Relativistic jet glow along poles */}
+          <mesh scale={r * 2.2}>
+            <sphereGeometry args={[1, 8, 8]} />
+            <meshBasicMaterial color="#6600cc" transparent opacity={0.06} side={THREE.BackSide} />
+          </mesh>
+          {/* Accretion disk — tilted ~17° from equatorial, slowly spinning */}
+          <group ref={diskRef} rotation={[Math.PI / 2 - 0.30, 0, 0]}>
+            {/* Inner: blue-white (extreme temp ~millions K) */}
+            <mesh>
+              <ringGeometry args={[r * 1.22, r * 1.60, 128]} />
+              <meshBasicMaterial color="#e8f0ff" transparent opacity={0.82} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Mid-inner: yellow-white */}
+            <mesh>
+              <ringGeometry args={[r * 1.60, r * 2.05, 128]} />
+              <meshBasicMaterial color="#ffdd88" transparent opacity={0.65} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Mid: orange (~10,000 K) */}
+            <mesh>
+              <ringGeometry args={[r * 2.05, r * 2.60, 128]} />
+              <meshBasicMaterial color="#ff7722" transparent opacity={0.42} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Outer: deep red */}
+            <mesh>
+              <ringGeometry args={[r * 2.60, r * 3.30, 128]} />
+              <meshBasicMaterial color="#bb2200" transparent opacity={0.22} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Outermost: faint dark haze */}
+            <mesh>
+              <ringGeometry args={[r * 3.30, r * 4.20, 128]} />
+              <meshBasicMaterial color="#440800" transparent opacity={0.08} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+          <mesh ref={glowRef} scale={r * 1.8}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color="#cc44ff" transparent opacity={0.08} side={THREE.BackSide} />
+          </mesh>
+        </>}
+
+        {/* ── NEUTRON STAR: magnetar jet beams + tight glow ───────────────── */}
+        {isNS && <>
+          {/* Tight X-ray glow */}
+          <mesh scale={r * 2.2}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color="#00ffee" transparent opacity={0.14} side={THREE.BackSide} />
+          </mesh>
+          {/* Rotating polar jets */}
+          <group ref={beamRef}>
+            <mesh position={new THREE.Vector3(0, r * 2.8, 0)}>
+              <coneGeometry args={[r * 0.18, r * 5.5, 12]} />
+              <meshBasicMaterial color="#44ffee" transparent opacity={0.38} />
+            </mesh>
+            <mesh position={new THREE.Vector3(0, -r * 2.8, 0)} rotation={[Math.PI, 0, 0]}>
+              <coneGeometry args={[r * 0.18, r * 5.5, 12]} />
+              <meshBasicMaterial color="#44ffee" transparent opacity={0.38} />
+            </mesh>
+          </group>
+          <mesh ref={glowRef} scale={r * 1.8}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color="#00ffcc" transparent opacity={0.08} side={THREE.BackSide} />
+          </mesh>
+        </>}
+
+        {/* ── SATURN: iconic tilted multi-band ring system ─────────────────── */}
+        {isSaturn && (
+          <group rotation={[Math.PI / 2 - 0.455, 0, 0.18]}>
+            {/* C ring (inner crepe ring — translucent) */}
+            <mesh>
+              <ringGeometry args={[r * 1.24, r * 1.52, 160]} />
+              <meshBasicMaterial color="#cfc080" transparent opacity={0.30} side={THREE.DoubleSide} />
+            </mesh>
+            {/* B ring (bright & opaque) */}
+            <mesh>
+              <ringGeometry args={[r * 1.52, r * 1.95, 160]} />
+              <meshBasicMaterial color="#f2e9b8" transparent opacity={0.78} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Cassini division (dark gap) */}
+            <mesh>
+              <ringGeometry args={[r * 1.95, r * 2.02, 160]} />
+              <meshBasicMaterial color="#12100a" transparent opacity={0.55} side={THREE.DoubleSide} />
+            </mesh>
+            {/* A ring */}
+            <mesh>
+              <ringGeometry args={[r * 2.02, r * 2.42, 160]} />
+              <meshBasicMaterial color="#e0d5a0" transparent opacity={0.58} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Encke gap in A ring */}
+            <mesh>
+              <ringGeometry args={[r * 2.30, r * 2.34, 160]} />
+              <meshBasicMaterial color="#12100a" transparent opacity={0.30} side={THREE.DoubleSide} />
+            </mesh>
+            {/* F ring (narrow, bright) */}
+            <mesh>
+              <ringGeometry args={[r * 2.52, r * 2.58, 160]} />
+              <meshBasicMaterial color="#f8f0cc" transparent opacity={0.45} side={THREE.DoubleSide} />
+            </mesh>
+            {/* E ring (wide, diffuse outer haze) */}
+            <mesh>
+              <ringGeometry args={[r * 2.65, r * 3.10, 160]} />
+              <meshBasicMaterial color="#c8bc8a" transparent opacity={0.14} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+        )}
+
+        {/* ── URANUS: near-polar rings (axial tilt ~98°) ──────────────────── */}
+        {isUranus && (
+          <group rotation={[0, 0, Math.PI / 2 - 0.06]}>
+            <mesh>
+              <ringGeometry args={[r * 1.50, r * 1.58, 80]} />
+              <meshBasicMaterial color="#b0e8f0" transparent opacity={0.22} side={THREE.DoubleSide} />
+            </mesh>
+            <mesh>
+              <ringGeometry args={[r * 1.62, r * 1.68, 80]} />
+              <meshBasicMaterial color="#90d8e8" transparent opacity={0.18} side={THREE.DoubleSide} />
+            </mesh>
+            <mesh>
+              <ringGeometry args={[r * 1.72, r * 1.76, 80]} />
+              <meshBasicMaterial color="#b0e8f0" transparent opacity={0.12} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+        )}
+
+        {/* ── PLANET: atmosphere halo ──────────────────────────────────────── */}
+        {isPlanet && !isSaturn && !isUranus && (
+          <mesh ref={glowRef} scale={r * 1.10}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial
+              color={body.bodyClass === 'ice' ? '#88ddee' : body.bodyClass === 'gas' ? '#f0d890' : body.color}
+              transparent
+              opacity={0.07}
+              side={THREE.BackSide}
+            />
           </mesh>
         )}
-        {isBlackHole && (
-          <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[1.5, 3, 64]} />
-            <meshBasicMaterial color="#ff6600" transparent opacity={0.4} side={THREE.DoubleSide} />
+        {/* Saturn / Uranus still get a glowRef for physics state tracking */}
+        {(isSaturn || isUranus) && (
+          <mesh ref={glowRef} scale={r * 1.10}>
+            <sphereGeometry args={[1, 8, 8]} />
+            <meshBasicMaterial color={body.color} transparent opacity={0.07} side={THREE.BackSide} />
           </mesh>
         )}
+
+        {/* ── COMET: icy coma + directional dust/ion tail ──────────────────── */}
+        {isComet && <>
+          {/* Coma (fuzzy glowing head) */}
+          <mesh scale={r * 4.5}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color="#aaeeff" transparent opacity={0.14} side={THREE.BackSide} />
+          </mesh>
+          {/* Inner brighter coma */}
+          <mesh scale={r * 2.2}>
+            <sphereGeometry args={[1, 12, 12]} />
+            <meshBasicMaterial color="#ddf4ff" transparent opacity={0.22} side={THREE.BackSide} />
+          </mesh>
+          {/* Dust tail (yellowish, broad) */}
+          <mesh position={new THREE.Vector3(r * 6, 0, 0)} rotation={new THREE.Euler(0, 0, -Math.PI / 2)}>
+            <coneGeometry args={[r * 1.2, r * 12, 20, 1, true]} />
+            <meshBasicMaterial color="#ddcc88" transparent opacity={0.12} side={THREE.DoubleSide} />
+          </mesh>
+          {/* Ion tail (bluish, narrower, pointing radially) */}
+          <mesh position={new THREE.Vector3(r * 5, 0, 0)} rotation={new THREE.Euler(0, 0, -Math.PI / 2)}>
+            <coneGeometry args={[r * 0.5, r * 9, 14, 1, true]} />
+            <meshBasicMaterial color="#88ccff" transparent opacity={0.16} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh ref={glowRef} scale={r * 1.8}>
+            <sphereGeometry args={[1, 12, 12]} />
+            <meshBasicMaterial color="#aaeeff" transparent opacity={0.08} side={THREE.BackSide} />
+          </mesh>
+        </>}
+
+        {/* ── ASTEROID: minimal glow ───────────────────────────────────────── */}
+        {isAst && (
+          <mesh ref={glowRef} scale={r * 1.5}>
+            <sphereGeometry args={[1, 8, 8]} />
+            <meshBasicMaterial color="#c8c0b4" transparent opacity={0.18} side={THREE.BackSide} />
+          </mesh>
+        )}
+
+        {/* ── Generic fallback glow (unknown types) ───────────────────────── */}
+        {!isStar && !isBH && !isNS && !isComet && !isAst && !isPlanet && (
+          <mesh ref={glowRef} scale={r * 1.8}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color={body.color} transparent opacity={0.08} side={THREE.BackSide} />
+          </mesh>
+        )}
+
       </group>
     </>
   );
@@ -334,12 +863,20 @@ const ImpactCameraDirector = ({
   const { camera } = useThree();
   const snapshotRef = useRef<CameraSnapshot | null>(null);
   const focusTargetRef = useRef(new THREE.Vector3());
+  /** True once auto framing has converged; then OrbitControls (scroll/drag) can move the camera. */
+  const settledOnImpactRef = useRef(false);
+  /** If the user moves the camera during the popup, do not snap back when the popup timer ends. */
+  const userAdjustedDuringPopupRef = useRef(false);
+  const scratchDir = useRef(new THREE.Vector3());
+  const scratchDesiredPos = useRef(new THREE.Vector3());
 
   useEffect(() => {
     const controls = controlsRef.current;
     if (!controls) return;
 
     if (activeImpact) {
+      settledOnImpactRef.current = false;
+      userAdjustedDuringPopupRef.current = false;
       if (!snapshotRef.current) {
         snapshotRef.current = {
           position: camera.position.clone(),
@@ -364,28 +901,60 @@ const ImpactCameraDirector = ({
       const snapshot = snapshotRef.current;
       if (!snapshot) return;
 
-      const direction = snapshot.position.clone().sub(snapshot.target);
+      const direction = scratchDir.current.copy(snapshot.position).sub(snapshot.target);
       if (direction.lengthSq() < 1e-6) direction.set(0, 1, 1);
       direction.normalize();
 
       const desiredDistance = THREE.MathUtils.clamp(12, minDistance + 1, Math.min(maxDistance, 18));
-      const desiredPosition = focusTargetRef.current.clone().addScaledVector(direction, desiredDistance);
+      const desiredPosition = scratchDesiredPos.current
+        .copy(focusTargetRef.current)
+        .addScaledVector(direction, desiredDistance);
       const desiredFov = 42;
+      const desiredCamY = desiredPosition.y + 1.25;
 
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, desiredPosition.x, damping, dt);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, desiredPosition.y + 1.25, damping, dt);
-      camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredPosition.z, damping, dt);
-      controls.target.x = THREE.MathUtils.damp(controls.target.x, focusTargetRef.current.x, damping, dt);
-      controls.target.y = THREE.MathUtils.damp(controls.target.y, focusTargetRef.current.y, damping, dt);
-      controls.target.z = THREE.MathUtils.damp(controls.target.z, focusTargetRef.current.z, damping, dt);
-      camera.fov = THREE.MathUtils.damp(camera.fov, desiredFov, 4.5, dt);
-      camera.updateProjectionMatrix();
-      controls.update();
+      if (!settledOnImpactRef.current) {
+        camera.position.x = THREE.MathUtils.damp(camera.position.x, desiredPosition.x, damping, dt);
+        camera.position.y = THREE.MathUtils.damp(camera.position.y, desiredCamY, damping, dt);
+        camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredPosition.z, damping, dt);
+        controls.target.x = THREE.MathUtils.damp(controls.target.x, focusTargetRef.current.x, damping, dt);
+        controls.target.y = THREE.MathUtils.damp(controls.target.y, focusTargetRef.current.y, damping, dt);
+        controls.target.z = THREE.MathUtils.damp(controls.target.z, focusTargetRef.current.z, damping, dt);
+        camera.fov = THREE.MathUtils.damp(camera.fov, desiredFov, 4.5, dt);
+        camera.updateProjectionMatrix();
+        controls.update();
+
+        const dx = camera.position.x - desiredPosition.x;
+        const dy = camera.position.y - desiredCamY;
+        const dz = camera.position.z - desiredPosition.z;
+        const posOk = dx * dx + dy * dy + dz * dz < 0.08;
+        const targetOk = controls.target.distanceTo(focusTargetRef.current) < 0.14;
+        const fovOk = Math.abs(camera.fov - desiredFov) < 0.45;
+        if (posOk && targetOk && fovOk) settledOnImpactRef.current = true;
+        return;
+      }
+
+      // Framing done: release camera so the user can zoom/pan while the popup stays for its time limit.
+      if (!userAdjustedDuringPopupRef.current) {
+        const dx2 = camera.position.x - desiredPosition.x;
+        const dy2 = camera.position.y - desiredCamY;
+        const dz2 = camera.position.z - desiredPosition.z;
+        const stillAtImpact =
+          dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < 0.2
+          && controls.target.distanceTo(focusTargetRef.current) < 0.22
+          && Math.abs(camera.fov - desiredFov) < 0.65;
+        if (!stillAtImpact) userAdjustedDuringPopupRef.current = true;
+      }
       return;
     }
 
     const snapshot = snapshotRef.current;
     if (!snapshot) return;
+
+    if (userAdjustedDuringPopupRef.current) {
+      snapshotRef.current = null;
+      userAdjustedDuringPopupRef.current = false;
+      return;
+    }
 
     camera.position.x = THREE.MathUtils.damp(camera.position.x, snapshot.position.x, damping, dt);
     camera.position.y = THREE.MathUtils.damp(camera.position.y, snapshot.position.y, damping, dt);
