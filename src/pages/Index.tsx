@@ -8,10 +8,24 @@ import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
 import { Atom, Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import {
+  deleteRocketPreset,
+  deleteSpacetimeScenario,
+  listSavedRocketPresets,
+  listSavedSpacetimeScenarios,
+  saveRocketPreset,
+  saveSpacetimeScenario,
+  type SavedRocketPreset,
+  type SavedSpacetimeScenario,
+} from '../lib/scenarioStorage';
+import {
+  ALL_MISSIONS,
+  CHALLENGE_PACKS,
+  type AppMode,
+  type ChallengePack,
+} from '../lib/challengePacks';
 
 let nextId = 1;
-
-type AppMode = 'spacetime' | 'rocket';
 const ACTIVE_MISSION_LIMIT = 3;
 const MISSION_EXIT_DELAY_MS = 900;
 
@@ -24,36 +38,34 @@ const REAL_GRAVITY_BOOST = 7.5e-20; // Must match PhysicsSimulator — G_eff * M
 const MIN_ORBITAL_SPEED = 0.08;
 const MAX_ORBITAL_SPEED = 3.0;
 
-const MISSION_CONFIG = [
-  { id: 'gravity-master', mode: 'spacetime', name: 'Gravity Master', description: 'Run a wide range of spacetime experiments across bodies, velocity presets, and physics modes.', score: 140 },
-  { id: 'chaos-creator', mode: 'spacetime', name: 'Chaos Creator', description: 'Build a dense gravitational system with many active bodies.', score: 100 },
-  { id: 'slingshot-expert', mode: 'spacetime', name: 'Slingshot Expert', description: 'Fire an asteroid or comet into a high-speed gravity assist near a massive anchor.', score: 110 },
-  { id: 'black-hole-survivor', mode: 'spacetime', name: 'Black Hole Survivor', description: 'Keep a living system active around a static black hole long enough to stabilize.', score: 150 },
-  { id: 'time-bender', mode: 'spacetime', name: 'Time Bender', description: 'Use rewind in the spacetime lab to inspect a system backward through time.', score: 90 },
-  { id: 'system-architect', mode: 'spacetime', name: 'System Architect', description: 'Assemble a stable-feeling system with at least five active bodies in play.', score: 95 },
-  { id: 'mode-shifter', mode: 'spacetime', name: 'Mode Shifter', description: 'Switch the spacetime lab into arcade gravity mode to compare simulation styles.', score: 80 },
-  { id: 'first-stable-orbit', mode: 'rocket', name: 'First Stable Orbit', description: 'Tune the launcher well enough to achieve a stable orbit.', score: 120 },
-  { id: 'escape-velocity-achieved', mode: 'rocket', name: 'Escape Velocity Achieved', description: 'Push the rocket past the planet for a full escape trajectory.', score: 130 },
-  { id: 'storm-runner', mode: 'rocket', name: 'Storm Runner', description: 'Survive a difficult launch with strong crosswind, wind shear, and thermal load.', score: 120 },
-  { id: 'staging-specialist', mode: 'rocket', name: 'Staging Specialist', description: 'Reach orbit or escape with stage separation enabled.', score: 110 },
-  { id: 'precision-pilot', mode: 'rocket', name: 'Precision Pilot', description: 'Hit orbit or escape with a nearly level pad and light crosswind.', score: 100 },
-  { id: 'heavy-lift', mode: 'rocket', name: 'Heavy Lift', description: 'Succeed on a launch using a high-thrust, high-fuel rocket profile.', score: 105 },
-  { id: 'dense-atmosphere-run', mode: 'rocket', name: 'Dense Atmosphere Run', description: 'Complete a successful flight through thicker, higher-pressure air.', score: 95 },
-] as const;
-
-type MissionId = (typeof MISSION_CONFIG)[number]['id'];
+type MissionId = (typeof ALL_MISSIONS)[number]['id'];
 type MissionCard = { id: MissionId; phase: 'incomplete' | 'complete' };
 type MissionQueues = Record<AppMode, MissionCard[]>;
 
-const MISSIONS_BY_MODE: Record<AppMode, typeof MISSION_CONFIG> = {
-  spacetime: MISSION_CONFIG.filter((mission) => mission.mode === 'spacetime'),
-  rocket: MISSION_CONFIG.filter((mission) => mission.mode === 'rocket'),
+const PACKS_BY_MODE: Record<AppMode, ChallengePack[]> = {
+  spacetime: CHALLENGE_PACKS.filter((pack) => pack.mode === 'spacetime'),
+  rocket: CHALLENGE_PACKS.filter((pack) => pack.mode === 'rocket'),
 };
 
-const buildMissionCards = (mode: AppMode, achievements: Record<MissionId, boolean>, existing: MissionCard[] = []) => {
+const DEFAULT_PACK_BY_MODE: Record<AppMode, string> = {
+  spacetime: PACKS_BY_MODE.spacetime[0].id,
+  rocket: PACKS_BY_MODE.rocket[0].id,
+};
+
+const findMission = (id: MissionId) => ALL_MISSIONS.find((mission) => mission.id === id);
+
+const getActivePack = (mode: AppMode, packId: string) => (
+  PACKS_BY_MODE[mode].find((pack) => pack.id === packId) ?? PACKS_BY_MODE[mode][0]
+);
+
+const buildMissionCards = (
+  pack: ChallengePack,
+  achievements: Record<MissionId, boolean>,
+  existing: MissionCard[] = [],
+) => {
   const cards = [...existing];
   const visibleIds = new Set(cards.map((card) => card.id));
-  for (const mission of MISSIONS_BY_MODE[mode]) {
+  for (const mission of pack.missions) {
     if (cards.length >= ACTIVE_MISSION_LIMIT) break;
     if (achievements[mission.id] || visibleIds.has(mission.id)) continue;
     cards.push({ id: mission.id, phase: 'incomplete' });
@@ -62,8 +74,14 @@ const buildMissionCards = (mode: AppMode, achievements: Record<MissionId, boolea
   return cards;
 };
 
+const cloneBodiesForScene = (savedBodies: CelestialBody[]) => savedBodies.map((body, index) => ({
+  ...body,
+  id: `saved_${nextId++}_${index}`,
+}));
+
 const Index = () => {
   const [mode, setMode] = useState<AppMode>('spacetime');
+  const [activePacks, setActivePacks] = useState<Record<AppMode, string>>(DEFAULT_PACK_BY_MODE);
 
   // ─── Spacetime state ───
   const [bodies, setBodies] = useState<CelestialBody[]>([
@@ -87,6 +105,8 @@ const Index = () => {
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
   const [rocketState, setRocketState] = useState<RocketState>(INITIAL_STATE);
+  const [savedScenarios, setSavedScenarios] = useState<SavedSpacetimeScenario[]>([]);
+  const [savedRocketPresets, setSavedRocketPresets] = useState<SavedRocketPreset[]>([]);
   const [explorationScore, setExplorationScore] = useState(0);
   const [achievements, setAchievements] = useState<Record<MissionId, boolean>>({
     'gravity-master': false,
@@ -105,7 +125,7 @@ const Index = () => {
     'dense-atmosphere-run': false,
   });
   const [missionQueues, setMissionQueues] = useState<MissionQueues>(() => ({
-    spacetime: buildMissionCards('spacetime', {
+    spacetime: buildMissionCards(getActivePack('spacetime', DEFAULT_PACK_BY_MODE.spacetime), {
       'gravity-master': false,
       'chaos-creator': false,
       'slingshot-expert': false,
@@ -121,7 +141,7 @@ const Index = () => {
       'heavy-lift': false,
       'dense-atmosphere-run': false,
     }),
-    rocket: buildMissionCards('rocket', {
+    rocket: buildMissionCards(getActivePack('rocket', DEFAULT_PACK_BY_MODE.rocket), {
       'gravity-master': false,
       'chaos-creator': false,
       'slingshot-expert': false,
@@ -152,7 +172,7 @@ const Index = () => {
   const unlockAchievement = useCallback((id: MissionId) => {
     setAchievements((prev) => {
       if (prev[id]) return prev;
-      const reward = MISSION_CONFIG.find((achievement) => achievement.id === id)?.score ?? 0;
+      const reward = findMission(id)?.score ?? 0;
       if (reward > 0) {
         setExplorationScore((score) => score + reward);
       }
@@ -167,14 +187,21 @@ const Index = () => {
   }, [awardScore]);
 
   useEffect(() => {
+    setSavedScenarios(listSavedSpacetimeScenarios());
+    setSavedRocketPresets(listSavedRocketPresets());
+  }, []);
+
+  useEffect(() => {
     achievementStateRef.current = achievements;
   }, [achievements]);
 
   useEffect(() => {
     setMissionQueues((prev) => {
+      const activeSpacetimePack = getActivePack('spacetime', activePacks.spacetime);
+      const activeRocketPack = getActivePack('rocket', activePacks.rocket);
       const next: MissionQueues = {
-        spacetime: buildMissionCards('spacetime', achievements, prev.spacetime),
-        rocket: buildMissionCards('rocket', achievements, prev.rocket),
+        spacetime: buildMissionCards(activeSpacetimePack, achievements, prev.spacetime),
+        rocket: buildMissionCards(activeRocketPack, achievements, prev.rocket),
       };
       let changed = false;
 
@@ -188,7 +215,7 @@ const Index = () => {
               setMissionQueues((current) => ({
                 ...current,
                 [queueMode]: buildMissionCards(
-                  queueMode,
+                  getActivePack(queueMode, activePacks[queueMode]),
                   achievementStateRef.current,
                   current[queueMode].filter((entry) => entry.id !== card.id),
                 ),
@@ -206,6 +233,17 @@ const Index = () => {
       }
       return next;
     });
+  }, [achievements, activePacks]);
+
+  const handleChallengePackChange = useCallback((modeKey: AppMode, packId: string) => {
+    setActivePacks((prev) => ({
+      ...prev,
+      [modeKey]: packId,
+    }));
+    setMissionQueues((prev) => ({
+      ...prev,
+      [modeKey]: buildMissionCards(getActivePack(modeKey, packId), achievements),
+    }));
   }, [achievements]);
 
   useEffect(() => () => {
@@ -472,6 +510,40 @@ const Index = () => {
     stableBlackHoleTimerRef.current = 0;
   }, []);
 
+  const handleSaveCurrentScenario = useCallback((name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return false;
+
+    setSavedScenarios(saveSpacetimeScenario({
+      name: trimmedName,
+      bodies,
+      placementVelocityScale,
+      realisticMode,
+    }));
+    return true;
+  }, [bodies, placementVelocityScale, realisticMode]);
+
+  const handleLoadScenario = useCallback((scenarioId: string) => {
+    const scenario = savedScenarios.find((entry) => entry.id === scenarioId);
+    if (!scenario) return;
+
+    setBodies(cloneBodiesForScene(scenario.bodies));
+    setPlacementVelocityScale(scenario.placementVelocityScale);
+    setRealisticMode(scenario.realisticMode);
+    setPendingPlacement(null);
+    setTimeScale(1);
+    setIsPlaying(true);
+    universeAgeRef.current = 0;
+    setUniverseScale(1);
+    stableSystemTimerRef.current = 0;
+    stableBlackHoleTimerRef.current = 0;
+    registerExperiment(`saved-scenario:${scenario.id}`, 20);
+  }, [registerExperiment, savedScenarios]);
+
+  const handleDeleteScenario = useCallback((scenarioId: string) => {
+    setSavedScenarios(deleteSpacetimeScenario(scenarioId));
+  }, []);
+
   // ─── Rocket handlers ───
   const handleRocketParamChange = useCallback((key: keyof RocketParams, value: number | boolean) => {
     setRocketParams((prev) => {
@@ -495,6 +567,31 @@ const Index = () => {
     previousOutcomeRef.current = 'none';
   }, []);
 
+  const handleSaveRocketPreset = useCallback((name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return false;
+
+    setSavedRocketPresets(saveRocketPreset({
+      name: trimmedName,
+      params: rocketParams,
+    }));
+    return true;
+  }, [rocketParams]);
+
+  const handleLoadRocketPreset = useCallback((presetId: string) => {
+    const preset = savedRocketPresets.find((entry) => entry.id === presetId);
+    if (!preset) return;
+
+    setRocketParams(preset.params);
+    setRocketState({ ...INITIAL_STATE });
+    previousOutcomeRef.current = 'none';
+    registerExperiment(`saved-rocket:${preset.id}`, 16);
+  }, [registerExperiment, savedRocketPresets]);
+
+  const handleDeleteRocketPreset = useCallback((presetId: string) => {
+    setSavedRocketPresets(deleteRocketPreset(presetId));
+  }, []);
+
   const handleVelocityScaleChange = useCallback((value: number) => {
     setPlacementVelocityScale(value);
     registerExperiment(`velocity-scale:${value.toFixed(2)}`);
@@ -507,10 +604,12 @@ const Index = () => {
 
   // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
-  const modeMissions = MISSION_CONFIG.filter((mission) => mission.mode === mode);
+  const activePack = getActivePack(mode, activePacks[mode]);
+  const modePacks = PACKS_BY_MODE[mode];
+  const modeMissions = activePack.missions;
   const unlockedCount = modeMissions.filter((mission) => achievements[mission.id]).length;
   const visibleMissions = missionQueues[mode].map((card) => ({
-    ...MISSION_CONFIG.find((mission) => mission.id === card.id)!,
+    ...findMission(card.id)!,
     phase: card.phase,
   }));
   const experimentCount = Array.from(experimentKeysRef.current).filter((key) => (
@@ -617,6 +716,10 @@ const Index = () => {
             onVelocityScaleChange={handleVelocityScaleChange}
             realisticMode={realisticMode}
             onRealisticModeChange={handleRealisticModeChange}
+            savedScenarios={savedScenarios}
+            onSaveScenario={handleSaveCurrentScenario}
+            onLoadScenario={handleLoadScenario}
+            onDeleteScenario={handleDeleteScenario}
           />
         ) : (
           <RocketControls
@@ -625,6 +728,10 @@ const Index = () => {
             onParamChange={handleRocketParamChange}
             onLaunch={handleLaunch}
             onReset={handleRocketReset}
+            savedPresets={savedRocketPresets}
+            onSavePreset={handleSaveRocketPreset}
+            onLoadPreset={handleLoadRocketPreset}
+            onDeletePreset={handleDeleteRocketPreset}
           />
         )}
       </div>
@@ -637,16 +744,33 @@ const Index = () => {
                 <Trophy size={16} />
                 <span className="text-base font-semibold tracking-[0.18em] uppercase">Mission Progress</span>
               </div>
-              <p className="text-base text-muted-foreground">
-                {mode === 'spacetime'
-                  ? 'Shape gravity, test rewind, and build extreme systems to clear spacetime missions.'
-                  : 'Tune propulsion and weather conditions to complete rocket-launcher missions.'}
-              </p>
+              <p className="text-base text-muted-foreground">{activePack.description}</p>
             </div>
             <div className="text-right">
               <div className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Score</div>
               <div className="text-2xl font-semibold text-foreground">{explorationScore}</div>
             </div>
+          </div>
+
+          <div className="mb-4 rounded-xl border border-border/30 bg-muted/15 p-3">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Challenge Pack</div>
+                <div className="text-base font-semibold text-foreground">{activePack.name}</div>
+              </div>
+              <select
+                value={activePack.id}
+                onChange={(e) => handleChallengePackChange(mode, e.target.value)}
+                className="rounded-lg border border-border/40 bg-background/80 px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none"
+              >
+                {modePacks.map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-sm text-muted-foreground">{activePack.missions.length} themed missions in this pack.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-4">
