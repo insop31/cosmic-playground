@@ -1,4 +1,4 @@
-import { useRef, useMemo, useCallback } from 'react';
+import { useRef, useMemo, useCallback, useEffect } from 'react';
 import { ThreeEvent, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -112,7 +112,7 @@ const SpacetimeGrid = ({
   }, [gridSize]); // material only rebuilt when base gridSize changes; universe scale updated via uniform
 
   // Keep universe-scale uniform in sync without rebuilding material
-  useMemo(() => {
+  useEffect(() => {
     if (shaderMaterial.uniforms) {
       shaderMaterial.uniforms.uUniverseScale.value = universeScale;
       shaderMaterial.uniforms.uGridSize.value = gridSize;
@@ -180,7 +180,6 @@ const SpacetimeGrid = ({
 
     deformGrid(posArray);
     posAttr.needsUpdate = true;
-    geo.computeVertexNormals();
 
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;

@@ -7,19 +7,10 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { WeatherConditionId } from './weatherPresets';
+import type { LightningStrikeState } from './lightningStrike';
 
 const pyToWorldY = (py: number) => 1.2 + py * 2;
 
-// ─── Shared lightning strike state (mutated by LightningEffect, read by shake + HUD) ─
-export interface LightningStrikeState {
-  version: number;
-  /** 0–1, decays in WeatherShakeGroup for a hard jolt */
-  impulse: number;
-}
-
-export function createLightningStrikeState(): LightningStrikeState {
-  return { version: 0, impulse: 0 };
-}
 
 // ─── Particle / geometry counts ──────────────────────────────────────────────
 const RAIN_COUNT  = 520;   // LineSegments pairs
