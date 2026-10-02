@@ -8,14 +8,18 @@ import type { CelestialBody } from '../../physics/types';
 import { MOTION_ESCAPING } from '../../physics/system';
 import {
   STATE_STRIDE,
+  S_DOMINANT,
   S_MOTION,
   S_RADIUS,
   S_VX,
   S_VZ,
   S_X,
   S_Z,
+  type Prediction,
   type SimSnapshot,
 } from '../../physics/simulation';
+import { REALISTIC_G } from '../../physics/constants';
+import { conicPoints, orbitalElements } from '../../physics/orbits';
 import { SimulationClient } from '../../physics/simulationClient';
 import type { SimMessage } from '../../physics/simulationProtocol';
 
@@ -24,7 +28,17 @@ export interface ImpactPopupState {
   id: string;
   title: string;
   detail: string;
+  /** The conservation numbers for this impact. */
+  stats?: string;
   position: [number, number, number];
+}
+
+/** Commands the rest of the app can send to the running simulation. */
+export interface SimulationControls {
+  seek: (step: number) => void;
+  /** Fly a copy of the system with `body` added; resolves null if the run changed meanwhile. */
+  predict: (body: CelestialBody, seconds?: number) => Promise<Prediction | null>;
+  setPinned: (id: string, pinned: boolean) => void;
 }
 
 /** Live state of one body, published every tick for the grid and for saving scenarios. */
@@ -68,8 +82,17 @@ export interface PhysicsSimulatorProps {
   simulationEpoch?: number;
   /** Receives every new simulation state (time, history range, markers, diagnostics). */
   onSnapshot?: (snapshot: SimSnapshot) => void;
+  /** Called for bodies the simulation creates (fragments, tidal debris). */
+  onBodySpawned?: (body: CelestialBody) => void;
+  /** Filled with the seek / predict / pin commands once the simulation is running. */
+  simulationRef?: React.MutableRefObject<SimulationControls | null>;
+  selectedBodyId?: string | null;
+  /** Clicking a body selects it; pass undefined while placing so clicks reach the grid. */
+  onSelectBody?: (id: string) => void;
   controlsRef: RefObject<OrbitControlsImpl | null>;
 }
+
+const CONIC_SEGMENTS = 160;
 
 // Procedural canvas textures — generated once per body, never on every render
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,6 +376,7 @@ function createBodyTexture(body: CelestialBody): THREE.CanvasTexture | null {
 interface BodyRendererProps {
   body:           CelestialBody;
   meshEntriesRef: React.MutableRefObject<Map<string, MeshEntry>>;
+  onSelect?: (id: string) => void;
 }
 
 interface CameraSnapshot {
@@ -361,7 +385,7 @@ interface CameraSnapshot {
   fov: number;
 }
 
-const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => {
+const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef, onSelect }) => {
   const groupRef   = useRef<THREE.Group | null>(null);
   const meshRef    = useRef<THREE.Mesh  | null>(null);
   const glowRef    = useRef<THREE.Mesh  | null>(null);
@@ -437,7 +461,13 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
   return (
     <>
       <primitive object={trailLine} />
-      <group ref={groupRef} position={body.position}>
+      <group
+        ref={groupRef}
+        position={body.position}
+        onClick={onSelect ? (e) => { e.stopPropagation(); onSelect(body.id); } : undefined}
+        onPointerOver={onSelect ? () => { document.body.style.cursor = 'pointer'; } : undefined}
+        onPointerOut={onSelect ? () => { document.body.style.cursor = ''; } : undefined}
+      >
 
         {/* ── Main surface sphere ─────────────────────────────────────────── */}
         <mesh ref={meshRef} scale={r}>
@@ -475,6 +505,11 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
 
         {/* ── BLACK HOLE: photon sphere + animated accretion disk ─────────── */}
         {isBH && <>
+          {/* Innermost stable circular orbit: closer in, no orbit can last (3 × event horizon). */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} scale={r}>
+            <ringGeometry args={[2.94, 3.06, 128]} />
+            <meshBasicMaterial color="#e9d5ff" transparent opacity={0.35} side={THREE.DoubleSide} depthWrite={false} />
+          </mesh>
           {/* Purple photon-sphere halo */}
           <mesh scale={r * 1.30}>
             <sphereGeometry args={[1, 32, 32]} />
@@ -810,9 +845,17 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   expansionRate = 0,
   simulationEpoch = 0,
   onSnapshot,
+  onBodySpawned,
+  simulationRef,
+  selectedBodyId = null,
+  onSelectBody,
   controlsRef,
 }) => {
   const clientRef      = useRef<SimulationClient | null>(null);
+  const selectedIdRef  = useRef<string | null>(selectedBodyId);
+  selectedIdRef.current = selectedBodyId;
+  const predictionsRef = useRef(new Map<number, (prediction: Prediction | null) => void>());
+  const predictionSeqRef = useRef(0);
   const meshEntriesRef = useRef(new Map<string, MeshEntry>());
   const trailsRef      = useRef(new Map<string, TrailBuffer>());
   const epochRef       = useRef<number | null>(null);
@@ -823,12 +866,70 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const prevPropIdsRef   = useRef(new Set<string>());
   const bodiesByIdRef    = useRef(new Map<string, CelestialBody>());
   const configRef        = useRef({ realisticMode, expansionRate });
-  const callbacksRef     = useRef({ onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot });
+  const callbacksRef     = useRef({ onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned });
   const [activeImpact, setActiveImpact] = useState<ImpactPopupState | null>(null);
   const [hasPendingImpact, setHasPendingImpact] = useState(false);
 
   configRef.current = { realisticMode, expansionRate };
-  callbacksRef.current = { onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot };
+  callbacksRef.current = { onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned };
+
+  // Predicted orbit of the selected body and a ring marking it; updated every snapshot.
+  const conicLine = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((CONIC_SEGMENTS + 1) * 3), 3));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.LineDashedMaterial({ color: '#4ade80', dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.85 });
+    const line = new THREE.Line(geometry, material);
+    line.frustumCulled = false;
+    return line;
+  }, []);
+  const selectionRing = useMemo(() => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.45, 1.6, 64),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    return ring;
+  }, []);
+
+  /** Draw the selected body's two-body orbit around its dominant body. */
+  const updateSelection = (snapshot: SimSnapshot) => {
+    const id = selectedIdRef.current;
+    const i = id ? snapshot.ids.indexOf(id) : -1;
+    if (i < 0) {
+      selectionRing.visible = false;
+      conicLine.geometry.setDrawRange(0, 0);
+      return;
+    }
+    const { data, masses } = snapshot;
+    const o = i * STATE_STRIDE;
+    selectionRing.visible = true;
+    selectionRing.position.set(data[o + S_X], 0.05, data[o + S_Z]);
+    selectionRing.scale.setScalar(Math.max(data[o + S_RADIUS], 0.3));
+    const d = data[o + S_DOMINANT];
+    if (d < 0 || d >= snapshot.ids.length) {
+      conicLine.geometry.setDrawRange(0, 0);
+      return;
+    }
+    const od = d * STATE_STRIDE;
+    // Velocities are in realistic units, so the realistic G gives the orbit's true shape.
+    const el = orbitalElements(
+      data[o + S_X] - data[od + S_X],
+      data[o + S_Z] - data[od + S_Z],
+      data[o + S_VX] - data[od + S_VX],
+      data[o + S_VZ] - data[od + S_VZ],
+      REALISTIC_G * (masses[d] + masses[i]),
+    );
+    const points = conicPoints(el, data[od + S_X], data[od + S_Z], CONIC_SEGMENTS);
+    const attr = conicLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    points.forEach(([x, z], k) => { arr[k * 3] = x; arr[k * 3 + 1] = 0.02; arr[k * 3 + 2] = z; });
+    attr.needsUpdate = true;
+    conicLine.geometry.setDrawRange(0, points.length);
+    conicLine.computeLineDistances();
+    (conicLine.material as THREE.LineDashedMaterial).color.set(el.energy < 0 ? '#4ade80' : '#fbbf24');
+  };
 
   // Holds the most recent collision that arrived while a popup was already showing.
   // At most one item — always replaced by the newest so the queue never grows unbounded.
@@ -930,7 +1031,13 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   };
 
   const handleMessage = (message: SimMessage) => {
-    if (message.type !== 'state' || message.epoch !== epochRef.current) return;
+    if (message.type === 'prediction') {
+      const resolve = predictionsRef.current.get(message.requestId);
+      predictionsRef.current.delete(message.requestId);
+      resolve?.(message.epoch === epochRef.current ? message.prediction : null);
+      return;
+    }
+    if (message.epoch !== epochRef.current) return;
     const { result, snapshot } = message;
     const callbacks = callbacksRef.current;
 
@@ -939,8 +1046,15 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         id: `impact-${impactSeqRef.current++}`,
         title: impact.title,
         detail: impact.detail,
+        stats: impact.kind === 'tidal'
+          ? 'Momentum kept: 100% · Energy for the stream came from the black hole’s tides'
+          : `Momentum kept: 100% · Impact energy turned to heat: ${Math.round(impact.kineticEnergyLost * 100)}%`,
         position: impact.position,
       });
+    }
+    for (const body of result.spawned) {
+      knownIdsRef.current.add(body.id);
+      callbacks.onBodySpawned?.(body);
     }
     for (const id of result.removed) {
       coreRemovedRef.current.add(id);
@@ -958,6 +1072,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
       }
     }
     applySnapshot(snapshot, result.direction === 1 && result.stepsTaken > 0);
+    updateSelection(snapshot);
     callbacks.onSnapshot?.(snapshot);
   };
   const handleMessageRef = useRef(handleMessage);
@@ -966,11 +1081,32 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   useEffect(() => {
     const client = new SimulationClient((message) => handleMessageRef.current(message));
     clientRef.current = client;
+    const predictions = predictionsRef.current;
+    if (simulationRef) {
+      simulationRef.current = {
+        seek: (step) => {
+          if (epochRef.current !== null) client.send({ type: 'seek', epoch: epochRef.current, step });
+        },
+        predict: (body, seconds = 20) => new Promise((resolve) => {
+          if (epochRef.current === null) { resolve(null); return; }
+          const requestId = predictionSeqRef.current++;
+          predictions.set(requestId, resolve);
+          client.send({ type: 'predict', epoch: epochRef.current, requestId, body, seconds });
+        }),
+        setPinned: (id, pinned) => {
+          if (epochRef.current !== null) client.send({ type: 'pin', epoch: epochRef.current, id, pinned });
+        },
+      };
+    }
     return () => {
       client.dispose();
       clientRef.current = null;
       epochRef.current = null;
+      for (const resolve of predictions.values()) resolve(null);
+      predictions.clear();
+      if (simulationRef) simulationRef.current = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Keep the simulation's body list in step with React's ─────────────────
@@ -1065,6 +1201,9 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
             <div className="text-base text-foreground/90 leading-relaxed border-t border-border/50 pt-3">
               {activeImpact.detail}
             </div>
+            {activeImpact.stats && (
+              <div className="mt-2 text-xs font-mono text-primary/80">{activeImpact.stats}</div>
+            )}
             {hasPendingImpact && (
               <div className="mt-3 text-[11px] text-primary/60 font-mono">
                 +1 more collision — dismiss to view
@@ -1073,8 +1212,10 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
           </div>
         </Html>
       )}
+      <primitive object={conicLine} />
+      <primitive object={selectionRing} />
       {bodies.map(body => (
-        <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} />
+        <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} onSelect={onSelectBody} />
       ))}
     </>
   );

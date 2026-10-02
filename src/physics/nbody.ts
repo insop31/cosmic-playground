@@ -9,11 +9,53 @@ import {
   SPEED_OF_LIGHT,
 } from './constants';
 import { MOTION_BOUND, MOTION_CAPTURED, MOTION_ESCAPING, NBodySystem } from './system';
+import { toKmPerSecond } from './units';
 
 /** Upper bound on sub-steps per fixed step during very close encounters. */
 export const MAX_SUBDIVISIONS = 10;
 
-export type ImpactKind = 'merge' | 'absorb';
+export type ImpactKind = 'merge' | 'absorb' | 'bounce' | 'fragment' | 'tidal';
+
+/** Impact speed (relative to the pair's mutual escape speed) above which bodies bounce. */
+export const BOUNCE_SPEED_RATIO = 1;
+/** Impact speed ratio above which the smaller body shatters. */
+export const FRAGMENT_SPEED_RATIO = 2.5;
+export const FRAGMENT_COUNT = 4;
+const BOUNCE_RESTITUTION = 0.5;
+const FRAGMENT_RESTITUTION = 0.3;
+/** Smallest body (kg) that can shatter into fragments. */
+const MIN_FRAGMENT_PARENT_MASS = 1e15;
+/** Impactors lighter than this share of the target are simply accreted (a crater). */
+export const ACCRETION_MASS_RATIO = 1e-3;
+const G_SI = 6.674e-11;
+const KM_PER_S_PER_SCENE_UNIT = toKmPerSecond(1);
+
+/**
+ * Mutual escape speed of a touching pair in scene units (realistic mode), from their real
+ * masses and radii: v = √(2G(m₁+m₂)/(R₁+R₂)). Scene radii are exaggerated for visibility,
+ * so the real radii are what decide whether bodies stick, bounce or shatter.
+ */
+export function mutualEscapeSpeed(m1: number, m2: number, physR1: number, physR2: number): number {
+  const metresPerSecond = Math.sqrt((2 * G_SI * (m1 + m2)) / Math.max(physR1 + physR2, 1));
+  return metresPerSecond / 1000 / KM_PER_S_PER_SCENE_UNIT;
+}
+export const TIDAL_STREAM_PIECES = 6;
+/** Bodies treated as infinitely heavy in a collision (pinned) use this effective mass. */
+const PINNED_MASS = 1e60;
+
+/** A body created during a step (fragments, tidal debris), described by its parent. */
+export interface SpawnedBody {
+  id: string;
+  parentId: string;
+  type: string;
+  x: number;
+  z: number;
+  vx: number;
+  vz: number;
+  mass: number;
+  radius: number;
+  physRadius: number;
+}
 
 export interface ImpactEvent {
   kind: ImpactKind;
@@ -30,11 +72,16 @@ export interface StepOptions {
   effectiveG: number;
   maxSpeed?: number;
   expansionRate?: number;
+  /** Fragments and debris are only created while the system stays below this size. */
+  maxBodies?: number;
+  /** Arcade speeds are this many times realistic ones; collisions judge realistic speeds. */
+  velocityScale?: number;
 }
 
 export interface StepResult {
   impacts: ImpactEvent[];
   removed: string[];
+  spawned: SpawnedBody[];
 }
 
 export const isPinned = (sys: NBodySystem, i: number) => sys.pinned[i] === 1;
@@ -177,16 +224,20 @@ export function describeBlackHoleImpact(otherType: string): { title: string; det
   return { title: 'Horizon crossing', detail: 'A small body crossed the event horizon: nothing escapes from inside it.' };
 }
 
-/** Kinetic energy share lost when bodies i and j stick together (perfectly inelastic). */
-function mergeEnergyLoss(sys: NBodySystem, i: number, j: number): number {
-  const { vx, vz, mass } = sys;
-  const before = 0.5 * mass[i] * (vx[i] ** 2 + vz[i] ** 2) + 0.5 * mass[j] * (vx[j] ** 2 + vz[j] ** 2);
-  if (before <= 0) return 0;
-  const mt = mass[i] + mass[j];
-  const cx = (mass[i] * vx[i] + mass[j] * vx[j]) / mt;
-  const cz = (mass[i] * vz[i] + mass[j] * vz[j]) / mt;
-  const after = 0.5 * mt * (cx * cx + cz * cz);
-  return Math.max(0, Math.min(1, 1 - after / before));
+/**
+ * Impact energy: the kinetic energy of the pair's relative motion, ½·μ·v_rel², with
+ * μ = m₁m₂/(m₁+m₂). It is the same in every frame, and it is the most a collision can
+ * turn into heat. A pinned body counts as infinitely heavy (μ = the other mass).
+ */
+function impactEnergy(sys: NBodySystem, i: number, j: number): number {
+  const dvx = sys.vx[i] - sys.vx[j];
+  const dvz = sys.vz[i] - sys.vz[j];
+  let mu: number;
+  if (sys.pinned[i] && sys.pinned[j]) return 0;
+  if (sys.pinned[i]) mu = sys.mass[j];
+  else if (sys.pinned[j]) mu = sys.mass[i];
+  else mu = (sys.mass[i] * sys.mass[j]) / (sys.mass[i] + sys.mass[j]);
+  return 0.5 * mu * (dvx * dvx + dvz * dvz);
 }
 
 /**
@@ -205,50 +256,163 @@ function mergeInto(sys: NBodySystem, survivor: number, absorbed: number) {
     pz[survivor] = (mS * pz[survivor] + mA * pz[absorbed]) / mT;
   }
   radius[survivor] = Math.cbrt(radius[survivor] ** 3 + radius[absorbed] ** 3);
+  sys.physRadius[survivor] = Math.cbrt(sys.physRadius[survivor] ** 3 + sys.physRadius[absorbed] ** 3);
   mass[survivor] = mT;
   sys.accValid = false;
 }
 
-/**
- * Collisions and absorptions, detected after integration. Absorbed bodies are removed
- * from the system and their ids returned through `removed`.
- */
-export function detectCollisions(sys: NBodySystem, removed: string[]): ImpactEvent[] {
-  const impacts: ImpactEvent[] = [];
-  const gone = new Uint8Array(sys.count);
-  const { px, pz, mass, radius, types, ids } = sys;
-  for (let i = 0; i < sys.count; i++) sys.closeApproach[i] = 0;
+let spawnSeq = 0;
 
-  for (let i = 0; i < sys.count; i++) {
+const kineticEnergy = (sys: NBodySystem, i: number) =>
+  (sys.pinned[i] ? 0 : 0.5 * sys.mass[i] * (sys.vx[i] ** 2 + sys.vz[i] ** 2));
+
+/**
+ * Inelastic collision along the line of centres with restitution `e`, then push the pair
+ * apart so they no longer overlap. Momentum is conserved; pinned bodies do not move.
+ */
+function bounce(sys: NBodySystem, i: number, j: number, e: number) {
+  const { px, pz, vx, vz, radius } = sys;
+  const dx = px[j] - px[i];
+  const dz = pz[j] - pz[i];
+  const dist = Math.max(Math.hypot(dx, dz), 1e-9);
+  const nx = dx / dist;
+  const nz = dz / dist;
+  const mi = sys.pinned[i] ? PINNED_MASS : sys.mass[i];
+  const mj = sys.pinned[j] ? PINNED_MASS : sys.mass[j];
+  const ui = vx[i] * nx + vz[i] * nz;
+  const uj = vx[j] * nx + vz[j] * nz;
+  if (ui - uj > 0) {
+    // Approaching: exchange normal momentum.
+    const total = mi * ui + mj * uj;
+    const vi = (total + mj * e * (uj - ui)) / (mi + mj);
+    const vj = (total + mi * e * (ui - uj)) / (mi + mj);
+    if (!sys.pinned[i]) { vx[i] += (vi - ui) * nx; vz[i] += (vi - ui) * nz; }
+    if (!sys.pinned[j]) { vx[j] += (vj - uj) * nx; vz[j] += (vj - uj) * nz; }
+  }
+  const overlap = radius[i] + radius[j] - dist;
+  if (overlap > 0) {
+    const shareI = mj / (mi + mj);
+    const shareJ = mi / (mi + mj);
+    if (!sys.pinned[i]) { px[i] -= nx * overlap * shareI * 1.01; pz[i] -= nz * overlap * shareI * 1.01; }
+    if (!sys.pinned[j]) { px[j] += nx * overlap * shareJ * 1.01; pz[j] += nz * overlap * shareJ * 1.01; }
+  }
+  sys.accValid = false;
+}
+
+/**
+ * Split body `p` into `pieces` equal fragments. The fragments share its momentum; the
+ * extra spread speed draws on `energyBudget` (energy the impact already turned to heat),
+ * so total kinetic energy never increases. Pieces are laid out along `axis`.
+ */
+function shatter(
+  sys: NBodySystem,
+  p: number,
+  pieces: number,
+  energyBudget: number,
+  axis: [number, number],
+  spawned: SpawnedBody[],
+) {
+  const mass = sys.mass[p] / pieces;
+  const radius = sys.radius[p] / Math.cbrt(pieces);
+  // ½·m_total·s² = energyBudget  →  every piece moves ±s from the parent's velocity.
+  const spread = Math.sqrt((2 * Math.max(energyBudget, 0)) / sys.mass[p]);
+  const [ax, az] = axis;
+  for (let k = 0; k < pieces; k++) {
+    // Symmetric offsets (−1.5, −0.5, 0.5, 1.5 …) so the spreads cancel out.
+    const offset = k - (pieces - 1) / 2;
+    const sign = Math.sign(offset);
+    const physRadius = sys.physRadius[p] / Math.cbrt(pieces);
+  spawned.push({
+      id: `${sys.ids[p]}~${(spawnSeq++).toString(36)}`,
+      parentId: sys.ids[p],
+      type: sys.types[p] === 'star' ? 'debris' : sys.types[p] === 'debris' ? 'debris' : 'asteroid',
+      x: sys.px[p] + ax * offset * radius * 2.2,
+      z: sys.pz[p] + az * offset * radius * 2.2,
+      vx: sys.vx[p] + ax * spread * sign * (Math.abs(offset) / ((pieces - 1) / 2 || 1)),
+      vz: sys.vz[p] + az * spread * sign * (Math.abs(offset) / ((pieces - 1) / 2 || 1)),
+      mass,
+      radius,
+      physRadius,
+    });
+  }
+}
+
+const canShatter = (sys: NBodySystem, i: number) =>
+  !sys.pinned[i]
+  && sys.mass[i] >= MIN_FRAGMENT_PARENT_MASS
+  && (sys.types[i] === 'asteroid' || sys.types[i] === 'comet' || sys.types[i] === 'planet' || sys.types[i] === 'debris');
+
+/** Roche limit (scene units) for a star of radius r and mass m near a black hole of mass M. */
+export const rocheLimit = (r: number, m: number, M: number) => r * Math.cbrt((2 * M) / m);
+
+/**
+ * Collisions, absorptions and tidal disruptions, detected after integration. Outcomes
+ * follow the impact speed relative to the pair's mutual escape speed
+ * v_esc = √(2G(m₁+m₂)/(r₁+r₂)): slow impacts merge, faster ones bounce ("hit and run"),
+ * and violent ones shatter the smaller body. Removed bodies are taken out of the system
+ * and created bodies are added to it; both are reported.
+ */
+export function detectCollisions(
+  sys: NBodySystem,
+  removed: string[],
+  effectiveG = 0,
+  spawned: SpawnedBody[] = [],
+  maxBodies = Infinity,
+  velocityScale = 1,
+): ImpactEvent[] {
+  const impacts: ImpactEvent[] = [];
+  const n = sys.count;
+  const gone = new Uint8Array(n);
+  const { px, pz, mass, radius, types, ids } = sys;
+  for (let i = 0; i < n; i++) sys.closeApproach[i] = 0;
+  let room = maxBodies - n;
+
+  for (let i = 0; i < n; i++) {
     if (gone[i]) continue;
-    for (let j = i + 1; j < sys.count; j++) {
+    for (let j = i + 1; j < n; j++) {
       if (gone[j] || gone[i]) continue;
       const dist = Math.hypot(px[j] - px[i], pz[j] - pz[i]);
       if (dist < (radius[i] + radius[j]) * CLOSE_APPROACH_FACTOR) {
         sys.closeApproach[i] = 1;
         sys.closeApproach[j] = 1;
       }
+      const midpoint: [number, number, number] = [(px[i] + px[j]) / 2, 0.75, (pz[i] + pz[j]) / 2];
 
       const aBH = types[i] === 'blackhole';
       const bBH = types[j] === 'blackhole';
       if (aBH || bBH) {
-        // Anything crossing the horizon (or visibly overlapping) is swallowed.
-        // Between two black holes the heavier one survives.
         let bh = aBH ? i : j;
         let other = bh === i ? j : i;
         if (aBH && bBH && mass[j] > mass[i]) { bh = j; other = i; }
         const horizon = bhEventHorizon(mass[bh], radius[bh]);
+
+        // Tidal disruption: a star inside the Roche limit is pulled into a stream.
+        if (types[other] === 'star' && dist >= horizon && room >= TIDAL_STREAM_PIECES - 1
+          && dist < rocheLimit(radius[other], mass[other], mass[bh])) {
+          const ux = (px[other] - px[bh]) / dist;
+          const uz = (pz[other] - pz[bh]) / dist;
+          // Tides stretch the star along the line to the hole; the stream's spread speed
+          // is a fraction of the star's own escape speed, taken from its binding energy.
+          const bindingBudget = 0.15 * effectiveG * mass[other] * mass[other] / Math.max(radius[other], 1e-6);
+          const before = spawned.length;
+          shatter(sys, other, TIDAL_STREAM_PIECES, Math.min(bindingBudget, kineticEnergy(sys, other) * 0.5), [ux, uz], spawned);
+          room -= spawned.length - before - 1;
+          impacts.push({
+            kind: 'tidal',
+            title: 'Tidal disruption',
+            detail: 'The black hole pulled harder on the near side of the star than on the far side, stretching it into a stream of gas.',
+            position: midpoint,
+            bodies: [ids[bh], ids[other]],
+            kineticEnergyLost: 0,
+          });
+          gone[other] = 1;
+          continue;
+        }
+
         if (dist < horizon || dist < radius[bh] + radius[other]) {
           const { title, detail } = describeBlackHoleImpact(types[other]);
-          const kineticEnergyLost = mergeEnergyLoss(sys, bh, other);
-          impacts.push({
-            kind: 'absorb',
-            title,
-            detail,
-            position: [(px[bh] + px[other]) / 2, 0.75, (pz[bh] + pz[other]) / 2],
-            bodies: [ids[bh], ids[other]],
-            kineticEnergyLost,
-          });
+          // Sticking together removes all relative motion: every joule of impact energy becomes heat.
+          impacts.push({ kind: 'absorb', title, detail, position: midpoint, bodies: [ids[bh], ids[other]], kineticEnergyLost: 1 });
           mergeInto(sys, bh, other);
           sys.motion[other] = MOTION_CAPTURED;
           gone[other] = 1;
@@ -256,29 +420,70 @@ export function detectCollisions(sys: NBodySystem, removed: string[]): ImpactEve
         continue;
       }
 
-      if (dist < radius[i] + radius[j]) {
-        const [survivor, absorbed] = mass[i] >= mass[j] ? [i, j] : [j, i];
+      if (dist >= radius[i] + radius[j]) continue;
+
+      // Compare in realistic-mode units so arcade mode (faster everything) gives the same outcome.
+      const relSpeed = Math.hypot(sys.vx[i] - sys.vx[j], sys.vz[i] - sys.vz[j]) / velocityScale;
+      const escapeSpeed = mutualEscapeSpeed(mass[i], mass[j], sys.physRadius[i], sys.physRadius[j]);
+      const ratio = relSpeed / escapeSpeed;
+      const [big, small] = mass[i] >= mass[j] ? [i, j] : [j, i];
+      const accretion = mass[small] / mass[big] < ACCRETION_MASS_RATIO;
+
+      if (ratio <= BOUNCE_SPEED_RATIO || accretion || sys.pinned[i] && sys.pinned[j]) {
         const { title, detail } = describeMergeImpact(types[i], types[j]);
-        const kineticEnergyLost = mergeEnergyLoss(sys, survivor, absorbed);
+        impacts.push({ kind: 'merge', title, detail, position: midpoint, bodies: [ids[big], ids[small]], kineticEnergyLost: 1 });
+        mergeInto(sys, big, small);
+        gone[small] = 1;
+        continue;
+      }
+
+      const impactBefore = impactEnergy(sys, i, j);
+      const shattering = ratio > FRAGMENT_SPEED_RATIO && canShatter(sys, small) && room >= FRAGMENT_COUNT - 1;
+      bounce(sys, i, j, shattering ? FRAGMENT_RESTITUTION : BOUNCE_RESTITUTION);
+      // Energy lost by the bounce (frame-independent, so the same as the total KE lost).
+      const heat = Math.max(0, impactBefore - impactEnergy(sys, i, j));
+
+      if (shattering) {
+        const dx = px[small] - px[big];
+        const dz = pz[small] - pz[big];
+        const d = Math.max(Math.hypot(dx, dz), 1e-9);
+        // Fragments fan out across the impact direction; half the heat feeds their spread.
+        const before = spawned.length;
+        shatter(sys, small, FRAGMENT_COUNT, heat * 0.5, [-dz / d, dx / d], spawned);
+        room -= spawned.length - before - 1;
         impacts.push({
-          kind: 'merge',
-          title,
-          detail,
-          position: [(px[i] + px[j]) / 2, 0.75, (pz[i] + pz[j]) / 2],
-          bodies: [ids[survivor], ids[absorbed]],
-          kineticEnergyLost,
+          kind: 'fragment',
+          title: 'Shattering impact',
+          detail: `The impact was ${ratio.toFixed(1)}× faster than the pair's escape speed, so the smaller body broke into ${FRAGMENT_COUNT} fragments.`,
+          position: midpoint,
+          bodies: [ids[big], ids[small]],
+          // Up to half the heat is handed back as the fragments' spread; the rest stays heat.
+          kineticEnergyLost: impactBefore > 0 ? Math.min(1, (heat * 0.5) / impactBefore) : 0,
         });
-        mergeInto(sys, survivor, absorbed);
-        gone[absorbed] = 1;
+        gone[small] = 1;
+      } else {
+        impacts.push({
+          kind: 'bounce',
+          title: 'Hit and run',
+          detail: `The bodies met at ${ratio.toFixed(1)}× their mutual escape speed: too fast to stick together, so they bounced apart.`,
+          position: midpoint,
+          bodies: [ids[big], ids[small]],
+          kineticEnergyLost: impactBefore > 0 ? Math.min(1, heat / impactBefore) : 0,
+        });
       }
     }
   }
 
   // Remove absorbed bodies (highest index first so swap-removal keeps indices valid).
-  for (let i = sys.count - 1; i >= 0; i--) {
+  for (let i = n - 1; i >= 0; i--) {
     if (gone[i]) {
       removed.push(sys.ids[i]);
       sys.removeAt(i);
+    }
+  }
+  for (const body of spawned) {
+    if (!sys.has(body.id)) {
+      sys.add({ id: body.id, type: body.type, x: body.x, z: body.z, vx: body.vx, vz: body.vz, mass: body.mass, radius: body.radius, physRadius: body.physRadius });
     }
   }
   return impacts;
@@ -368,18 +573,21 @@ export function applyExpansion(sys: NBodySystem, rate: number, dt: number) {
  * encounters. Returns the impacts that happened and the ids of absorbed bodies.
  */
 export function stepSystem(sys: NBodySystem, dt: number, options: StepOptions): StepResult {
-  const { effectiveG, maxSpeed = Infinity, expansionRate = 0 } = options;
+  const { effectiveG, maxSpeed = Infinity, expansionRate = 0, maxBodies = Infinity, velocityScale = 1 } = options;
   const removed: string[] = [];
+  const spawned: SpawnedBody[] = [];
   const impacts: ImpactEvent[] = [];
   const n = substepCount(sys);
   const h = dt / n;
   for (let k = 0; k < n; k++) {
     leapfrogStep(sys, effectiveG, h, maxSpeed);
-    impacts.push(...detectCollisions(sys, removed));
+    impacts.push(...detectCollisions(sys, removed, effectiveG, spawned, maxBodies, velocityScale));
   }
   applyExpansion(sys, expansionRate, dt);
   classifyMotion(sys, effectiveG);
-  return { impacts, removed };
+  // A fragment that was itself absorbed in a later sub-step never needs reporting.
+  const removedSet = new Set(removed);
+  return { impacts, removed: removed.filter((id) => !spawned.some((b) => b.id === id)), spawned: spawned.filter((b) => !removedSet.has(b.id)) };
 }
 
 export interface Diagnostics {
@@ -390,6 +598,10 @@ export interface Diagnostics {
   momentumZ: number;
   /** z-component of total angular momentum about the origin (motion is in the XZ plane). */
   angularMomentum: number;
+  /** Σ m·|v|: the size momentum changes are measured against. */
+  momentumScale: number;
+  /** Σ m·|r × v|: the size angular-momentum changes are measured against. */
+  angularMomentumScale: number;
 }
 
 /**
@@ -404,13 +616,18 @@ export function diagnostics(sys: NBodySystem, effectiveG: number): Diagnostics {
   let momentumX = 0;
   let momentumZ = 0;
   let angularMomentum = 0;
+  let momentumScale = 0;
+  let angularMomentumScale = 0;
   for (let i = 0; i < count; i++) {
     if (!sys.pinned[i]) {
       kinetic += 0.5 * mass[i] * (vx[i] * vx[i] + vz[i] * vz[i]);
       momentumX += mass[i] * vx[i];
       momentumZ += mass[i] * vz[i];
       // L_y for motion in the XZ plane: m·(z·vx − x·vz)
-      angularMomentum += mass[i] * (pz[i] * vx[i] - px[i] * vz[i]);
+      const l = mass[i] * (pz[i] * vx[i] - px[i] * vz[i]);
+      angularMomentum += l;
+      momentumScale += mass[i] * Math.hypot(vx[i], vz[i]);
+      angularMomentumScale += Math.abs(l);
     }
     for (let j = i + 1; j < count; j++) {
       const r = Math.hypot(px[j] - px[i], pz[j] - pz[i]);
@@ -418,5 +635,14 @@ export function diagnostics(sys: NBodySystem, effectiveG: number): Diagnostics {
       potential -= (k / eps) * (Math.PI / 2 - Math.atan(r / eps));
     }
   }
-  return { kinetic, potential, energy: kinetic + potential, momentumX, momentumZ, angularMomentum };
+  return {
+    kinetic,
+    potential,
+    energy: kinetic + potential,
+    momentumX,
+    momentumZ,
+    angularMomentum,
+    momentumScale,
+    angularMomentumScale,
+  };
 }

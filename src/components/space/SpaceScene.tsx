@@ -3,9 +3,10 @@ import type { MutableRefObject } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
-import PhysicsSimulator, { type LiveBodyState } from './PhysicsSimulator';
+import PhysicsSimulator, { type LiveBodyState, type SimulationControls } from './PhysicsSimulator';
+import PlacementLayer, { type PendingBody } from './PlacementLayer';
+import type { SimSnapshot } from '../../physics/simulation';
 
 export type { CelestialBody } from '../../physics/types';
 import type { CelestialBody } from '../../physics/types';
@@ -16,13 +17,22 @@ interface SpaceSceneProps {
   onBodyRemoved: (id: string) => void;
   onBodyUpdated: (id: string, mass: number, radius: number) => void;
   onBodyRestored: (body: CelestialBody) => void;
-  onGridClick?: (position: [number, number, number]) => void;
+  onBodySpawned: (body: CelestialBody) => void;
+  /** The body waiting to be placed, if any. */
+  pendingPlacement: PendingBody | null;
+  placementVelocityScale: number;
+  /** Place the pending body at `point`, with a dragged velocity or null for a circular orbit. */
+  onPlace: (point: [number, number, number], aimedVelocity: [number, number, number] | null) => void;
   realisticMode?: boolean;
   universeScale?: number;
   expansionRate?: number;
   simulationEpoch?: number;
-  /** Written by PhysicsSimulator every step with live positions, velocities and masses. */
+  /** Written by PhysicsSimulator every tick with live positions, velocities and masses. */
   livePhysicsRef: MutableRefObject<LiveBodyState[]>;
+  simulationRef: MutableRefObject<SimulationControls | null>;
+  onSnapshot?: (snapshot: SimSnapshot) => void;
+  selectedBodyId?: string | null;
+  onSelectBody?: (id: string) => void;
 }
 
 // Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
@@ -34,15 +44,20 @@ const SpaceScene = ({
   onBodyRemoved,
   onBodyUpdated,
   onBodyRestored,
-  onGridClick,
+  onBodySpawned,
+  pendingPlacement,
+  placementVelocityScale,
+  onPlace,
   realisticMode = true,
   universeScale = 1,
   expansionRate = 0,
   simulationEpoch = 0,
   livePhysicsRef,
+  simulationRef,
+  onSnapshot,
+  selectedBodyId,
+  onSelectBody,
 }: SpaceSceneProps) => {
-  // livePhysicsRef is written by PhysicsSimulator and read by SpacetimeGrid every frame,
-  // keeping grid deformation in sync with physics without React state in the hot path.
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   return (
@@ -59,27 +74,35 @@ const SpaceScene = ({
       <pointLight position={[-15, 20, -10]} intensity={0.3} color="#7c3aed" />
 
       <Starfield />
-
-      <SpacetimeGrid
+      <PlacementLayer
         bodies={bodies}
+        pending={pendingPlacement}
+        velocityScale={placementVelocityScale}
         livePhysicsRef={livePhysicsRef}
+        simulationRef={simulationRef}
+        controlsRef={controlsRef}
+        onPlace={onPlace}
         gridSize={GRID_SIZE}
         gridResolution={160}
         universeScale={universeScale}
-        onGridClick={onGridClick}
+        realisticMode={realisticMode}
       />
-
       <PhysicsSimulator
         bodies={bodies}
         timeScale={timeScale}
         onBodyRemoved={onBodyRemoved}
         onBodyUpdated={onBodyUpdated}
         onBodyRestored={onBodyRestored}
+        onBodySpawned={onBodySpawned}
         livePhysicsRef={livePhysicsRef}
         expansionRate={expansionRate}
         simulationEpoch={simulationEpoch}
         realisticMode={realisticMode}
         controlsRef={controlsRef}
+        simulationRef={simulationRef}
+        onSnapshot={onSnapshot}
+        selectedBodyId={selectedBodyId}
+        onSelectBody={pendingPlacement ? undefined : onSelectBody}
       />
 
       <OrbitControls

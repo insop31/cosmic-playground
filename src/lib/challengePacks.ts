@@ -37,7 +37,7 @@ export const CHALLENGE_PACKS: ChallengePack[] = [
     missions: [
       { id: 'chaos-creator', mode: 'spacetime', name: 'Chaos Creator', description: 'Build a dense gravitational system with many active bodies.', score: 100 },
       { id: 'slingshot-expert', mode: 'spacetime', name: 'Slingshot Expert', description: 'Fire an asteroid or comet into a high-speed gravity assist near a massive anchor.', score: 110 },
-      { id: 'black-hole-survivor', mode: 'spacetime', name: 'Black Hole Survivor', description: 'Keep a living system active around a static black hole long enough to stabilize.', score: 150 },
+      { id: 'black-hole-survivor', mode: 'spacetime', name: 'Black Hole Survivor', description: 'Keep a living system active around a black hole long enough to stabilize.', score: 150 },
     ],
   },
   {

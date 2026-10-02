@@ -75,8 +75,9 @@ describe('N-body engine', () => {
 
   it('conserves momentum exactly when two bodies merge', () => {
     const sys = system([
-      { id: 'a', type: 'planet', x: 0, z: 0, vx: 0.4, vz: 0.1, mass: 3e24, radius: 0.5 },
-      { id: 'b', type: 'planet', x: 0.6, z: 0, vx: -0.9, vz: 0.3, mass: 1e24, radius: 0.5 },
+      // A gentle impact, well below the pair's mutual escape speed, so they stick.
+      { id: 'a', type: 'planet', x: 0, z: 0, vx: 0.04, vz: 0.01, mass: 3e24, radius: 0.5 },
+      { id: 'b', type: 'planet', x: 0.6, z: 0, vx: -0.09, vz: 0.03, mass: 1e24, radius: 0.5 },
     ]);
     const before = diagnostics(sys, REALISTIC_G);
     const removed: string[] = [];

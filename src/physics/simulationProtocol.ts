@@ -1,5 +1,5 @@
 // Messages between the main thread and the simulation (worker or in-process fallback).
-import { SimulationCore, type SimConfig, type SimSnapshot, type TickResult } from './simulation';
+import { SimulationCore, type Prediction, type SimConfig, type SimSnapshot, type TickResult } from './simulation';
 import type { CelestialBody } from './types';
 
 export type SimCommand =
@@ -9,7 +9,8 @@ export type SimCommand =
   | { type: 'pin'; epoch: number; id: string; pinned: boolean }
   | { type: 'config'; epoch: number; config: Partial<SimConfig> }
   | { type: 'tick'; epoch: number; dt: number }
-  | { type: 'seek'; epoch: number; step: number };
+  | { type: 'seek'; epoch: number; step: number }
+  | { type: 'predict'; epoch: number; requestId: number; body: CelestialBody; seconds: number };
 
 export interface SimStateMessage {
   type: 'state';
@@ -18,7 +19,14 @@ export interface SimStateMessage {
   snapshot: SimSnapshot;
 }
 
-export type SimMessage = SimStateMessage;
+export interface SimPredictionMessage {
+  type: 'prediction';
+  epoch: number;
+  requestId: number;
+  prediction: Prediction;
+}
+
+export type SimMessage = SimStateMessage | SimPredictionMessage;
 
 /**
  * Apply one command to a core. Commands from an older epoch are ignored; ticks, seeks
@@ -32,7 +40,7 @@ export class SimulationHost {
     if (cmd.type === 'load') {
       this.epoch = cmd.epoch;
       this.core.load(cmd.bodies, cmd.config);
-      return this.state({ impacts: [], removed: [], restored: [], updated: [], stepsTaken: 0, direction: 0 });
+      return this.state({ impacts: [], removed: [], restored: [], spawned: [], updated: [], stepsTaken: 0, direction: 0 });
     }
     if (cmd.epoch !== this.epoch) return null;
     switch (cmd.type) {
@@ -53,6 +61,13 @@ export class SimulationHost {
         return this.state(this.core.tick(cmd.dt));
       case 'seek':
         return this.state(this.core.seek(cmd.step));
+      case 'predict':
+        return {
+          type: 'prediction',
+          epoch: this.epoch,
+          requestId: cmd.requestId,
+          prediction: this.core.predict(cmd.body, cmd.seconds),
+        };
       default:
         return null;
     }

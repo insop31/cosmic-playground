@@ -199,12 +199,14 @@ describe('simulation messaging', () => {
     host.handle({ type: 'load', epoch: 2, bodies: defaultSystem(), config: { realistic: true, expansionRate: 0 } });
     expect(host.handle({ type: 'tick', epoch: 1, dt: 1 })).toBeNull();
     const reply = host.handle({ type: 'tick', epoch: 2, dt: SIM_STEP * 3 });
-    expect(reply?.snapshot.step).toBe(3);
+    expect(reply?.type === 'state' && reply.snapshot.step).toBe(3);
   });
 
   it('runs on the main thread when workers are unavailable', () => {
     const messages: number[] = [];
-    const client = new SimulationClient((message) => messages.push(message.snapshot.step));
+    const client = new SimulationClient((message) => {
+      if (message.type === 'state') messages.push(message.snapshot.step);
+    });
     expect(client.usesWorker).toBe(false); // jsdom has no Worker
     client.send({ type: 'load', epoch: 0, bodies: defaultSystem(), config: { realistic: true, expansionRate: 0 } });
     client.tick(0, SIM_STEP * 4);

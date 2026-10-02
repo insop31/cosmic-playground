@@ -1,6 +1,23 @@
 // Struct-of-arrays storage for the N-body engine. Bodies live in flat typed arrays so
 // the force loop and integrator never allocate; removal swaps the last body into the gap.
 
+// Typical bulk densities (kg/m³) used to estimate a real radius from mass.
+const DENSITY: Record<string, number> = {
+  asteroid: 2000,
+  comet: 600,
+  debris: 1400,
+  planet: 5500,
+};
+
+/** Real radius in metres for bodies that do not carry one. */
+export function estimatePhysicalRadius(type: string, mass: number): number {
+  if (type === 'star') return 696_340_000 * Math.pow(mass / 1.989e30, 0.8);
+  if (type === 'neutron') return 12_000;
+  if (type === 'blackhole') return (2 * 6.674e-11 * mass) / (299_792_458 ** 2);
+  const density = DENSITY[type] ?? 3000;
+  return Math.cbrt((3 * mass) / (4 * Math.PI * density));
+}
+
 export const MOTION_BOUND = 0;
 export const MOTION_ESCAPING = 1;
 export const MOTION_CAPTURED = 2;
@@ -14,6 +31,8 @@ export interface BodyInit {
   vz: number;
   mass: number;
   radius: number;
+  /** Real radius in metres (for collision physics); estimated from mass when omitted. */
+  physRadius?: number;
   pinned?: boolean;
 }
 
@@ -30,6 +49,8 @@ export class NBodySystem {
   az: Float64Array;
   mass: Float64Array;
   radius: Float64Array;
+  /** Real radius in metres, used to judge collision outcomes. */
+  physRadius: Float64Array;
   pinned: Uint8Array;
   motion: Uint8Array;
   closeApproach: Uint8Array;
@@ -49,6 +70,7 @@ export class NBodySystem {
     this.az = new Float64Array(capacity);
     this.mass = new Float64Array(capacity);
     this.radius = new Float64Array(capacity);
+    this.physRadius = new Float64Array(capacity);
     this.pinned = new Uint8Array(capacity);
     this.motion = new Uint8Array(capacity);
     this.closeApproach = new Uint8Array(capacity);
@@ -63,6 +85,7 @@ export class NBodySystem {
     this.vx = growF(this.vx); this.vz = growF(this.vz);
     this.ax = growF(this.ax); this.az = growF(this.az);
     this.mass = growF(this.mass); this.radius = growF(this.radius);
+    this.physRadius = growF(this.physRadius);
     this.pinned = growU(this.pinned); this.motion = growU(this.motion);
     this.closeApproach = growU(this.closeApproach);
     const dom = new Int32Array(next).fill(-1);
@@ -93,6 +116,7 @@ export class NBodySystem {
     this.az[i] = 0;
     this.mass[i] = body.mass;
     this.radius[i] = body.radius;
+    this.physRadius[i] = body.physRadius ?? estimatePhysicalRadius(body.type, body.mass);
     this.pinned[i] = body.pinned ? 1 : 0;
     this.motion[i] = MOTION_BOUND;
     this.closeApproach[i] = 0;
@@ -116,6 +140,7 @@ export class NBodySystem {
       this.az[i] = this.az[last];
       this.mass[i] = this.mass[last];
       this.radius[i] = this.radius[last];
+      this.physRadius[i] = this.physRadius[last];
       this.pinned[i] = this.pinned[last];
       this.motion[i] = this.motion[last];
       this.closeApproach[i] = this.closeApproach[last];
@@ -134,6 +159,26 @@ export class NBodySystem {
     if (i < 0) return false;
     this.removeAt(i);
     return true;
+  }
+
+  /** Independent copy (used for predictions that must not touch the live system). */
+  clone(): NBodySystem {
+    const copy = new NBodySystem(Math.max(this.capacity, 4));
+    for (let i = 0; i < this.count; i++) {
+      copy.add({
+        id: this.ids[i],
+        type: this.types[i],
+        x: this.px[i],
+        z: this.pz[i],
+        vx: this.vx[i],
+        vz: this.vz[i],
+        mass: this.mass[i],
+        radius: this.radius[i],
+        physRadius: this.physRadius[i],
+        pinned: this.pinned[i] === 1,
+      });
+    }
+    return copy;
   }
 
   clear() {

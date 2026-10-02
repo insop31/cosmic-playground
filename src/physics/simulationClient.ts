@@ -30,7 +30,7 @@ export class SimulationClient {
 
   send(cmd: SimCommand) {
     if (cmd.type === 'load') this.replayLog = [cmd];
-    else if (cmd.type !== 'tick' && cmd.type !== 'seek') this.replayLog.push(cmd);
+    else if (cmd.type !== 'tick' && cmd.type !== 'seek' && cmd.type !== 'predict') this.replayLog.push(cmd);
     if (cmd.type === 'load') {
       this.pendingDt = 0;
       this.tickInFlight = false;
@@ -64,8 +64,8 @@ export class SimulationClient {
 
   private receive(message: SimMessage) {
     if (this.disposed) return;
-    // Every state message answers the oldest outstanding request, so another tick may go.
-    this.tickInFlight = false;
+    // A state message answers the outstanding tick, so another one may go.
+    if (message.type === 'state') this.tickInFlight = false;
     this.onMessage(message);
   }
 

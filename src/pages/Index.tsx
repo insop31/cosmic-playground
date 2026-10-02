@@ -26,18 +26,23 @@ import {
   type AppMode,
   type ChallengePack,
 } from '../lib/challengePacks';
-import {
-  DEFAULT_STAR_MASS,
-  HUBBLE_RATE,
-  MAX_UNIVERSE_SCALE,
-  tangentialOrbitVelocity,
-} from '../physics/constants';
+import { DEFAULT_STAR_MASS, HUBBLE_RATE, MAX_UNIVERSE_SCALE } from '../physics/constants';
+import { planPlacement } from '../physics/placement';
+import { SIM_STEP, type SimSnapshot } from '../physics/simulation';
+import type { SimulationControls } from '../components/space/PhysicsSimulator';
+import OrbitInspector from '../components/space/OrbitInspector';
+import ConservationPanel, { type ConservationSample } from '../components/space/ConservationPanel';
+import TimelineBar, { type TimelineState } from '../components/space/TimelineBar';
 
 let nextId = 1;
 const ACTIVE_MISSION_LIMIT = 3;
 const MISSION_EXIT_DELAY_MS = 900;
 
 const MASSIVE_ANCHOR_MASS = 1e27;
+const SNAPSHOT_UI_INTERVAL_MS = 200;
+const MAX_CONSERVATION_SAMPLES = 300; // 60 s at 5 samples per second
+
+type RightTab = 'missions' | 'inspector' | 'conservation';
 
 // Bodies with a zero velocity are given a circular orbit around the heaviest body by the simulator.
 const createDefaultBodies = (): CelestialBody[] => [
@@ -98,6 +103,14 @@ const Index = () => {
   const [simulationEpoch, setSimulationEpoch] = useState(0);
   // Live positions/velocities/masses published by the simulator every step.
   const livePhysicsRef = useRef<LiveBodyState[]>([]);
+  const simulationRef = useRef<SimulationControls | null>(null);
+  const snapshotRef = useRef<SimSnapshot | null>(null);
+  const lastSnapshotUiRef = useRef(0);
+  const snapshotUiTimerRef = useRef<number | null>(null);
+  const conservationRef = useRef<ConservationSample[]>([]);
+  const [timeline, setTimeline] = useState<TimelineState>({ step: 0, historyStart: 0, historyEnd: 0, markers: [], simTime: 0 });
+  const [selectedBodyId, setSelectedBodyId] = useState<string | null>(null);
+  const [rightTab, setRightTab] = useState<RightTab>('missions');
   const [pendingPlacement, setPendingPlacement] = useState<Omit<CelestialBody, 'id' | 'position'> | null>(null);
   const [placementVelocityScale, setPlacementVelocityScale] = useState(1);
   const [realisticMode, setRealisticMode] = useState(true);
@@ -290,6 +303,14 @@ const Index = () => {
   }, [mode, isPlaying, timeScale, expansionEnabled]);
 
   useEffect(() => {
+    conservationRef.current = [];
+  }, [simulationEpoch]);
+
+  useEffect(() => {
+    if (selectedBodyId && !bodies.some((b) => b.id === selectedBodyId)) setSelectedBodyId(null);
+  }, [bodies, selectedBodyId]);
+
+  useEffect(() => {
     if (experimentKeysRef.current.size >= 8) {
       unlockAchievement('gravity-master');
     }
@@ -429,62 +450,102 @@ const Index = () => {
     });
   }, []);
 
-  const computePlacementVelocity = useCallback((position: [number, number, number], liveBodies: CelestialBody[], scale: number) => {
-    if (liveBodies.length === 0) return [0, 0, 0] as [number, number, number];
-    const attractor = liveBodies.reduce((max, b) => (b.mass > max.mass ? b : max));
-    const orbit = tangentialOrbitVelocity(position, attractor.position, attractor.mass, scale);
-    const anchorVelocity = attractor.velocity ?? [0, 0, 0];
-    // Orbit relative to the attractor, which may itself be moving.
-    return [orbit[0] + anchorVelocity[0], 0, orbit[2] + anchorVelocity[2]] as [number, number, number];
-  }, []);
-
   const handleBeginPlacement = useCallback((obj: Omit<CelestialBody, 'id'>) => {
     const { position: _ignored, ...bodyWithoutPosition } = obj;
     setPendingPlacement(bodyWithoutPosition);
     registerExperiment(`prep:${obj.type}:${Math.round(obj.mass).toExponential(1)}`);
   }, [registerExperiment]);
 
-  const handlePlaceOnGrid = useCallback((position: [number, number, number]) => {
+  const handlePlace = useCallback((point: [number, number, number], aimedVelocity: [number, number, number] | null) => {
     if (!pendingPlacement) return;
     setBodies((prev) => {
-      let spawnPos: [number, number, number] = [position[0], 0, position[2]];
-      const newRadius = pendingPlacement.radius ?? 0.3;
       const liveBodies = getLiveBodies(prev);
-
-      // Enforce minimum safe distance from EVERY existing body, not just the heaviest.
-      // This prevents the extreme close-range gravitational forces that shoot bodies off-screen.
-      for (const existing of liveBodies) {
-        const dx = spawnPos[0] - existing.position[0];
-        const dz = spawnPos[2] - existing.position[2];
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        // Buffer: sum of radii × 2.5 + 2.0 extra units of breathing room
-        const minSafe = (existing.radius + newRadius) * 2.5 + 2.0;
-        if (dist < minSafe) {
-          const ux = dist > 1e-6 ? dx / dist : 1;
-          const uz = dist > 1e-6 ? dz / dist : 0;
-          spawnPos = [
-            existing.position[0] + ux * minSafe,
-            0,
-            existing.position[2] + uz * minSafe,
-          ];
-        }
-      }
-
-      const velocity = computePlacementVelocity(spawnPos, liveBodies, placementVelocityScale);
+      const plan = planPlacement(point, pendingPlacement.radius ?? 0.3, liveBodies, placementVelocityScale, aimedVelocity);
       const hasHeavyAnchor = liveBodies.some((body) => body.mass >= MASSIVE_ANCHOR_MASS);
       if ((pendingPlacement.type === 'comet' || pendingPlacement.type === 'asteroid') && placementVelocityScale >= 1.5 && hasHeavyAnchor) {
         unlockAchievement('slingshot-expert');
       }
-      registerExperiment(`place:${pendingPlacement.type}:${spawnPos[0].toFixed(1)}:${spawnPos[2].toFixed(1)}:${placementVelocityScale.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
+      registerExperiment(`place:${pendingPlacement.type}:${plan.position[0].toFixed(1)}:${plan.position[2].toFixed(1)}:${aimedVelocity ? 'aimed' : placementVelocityScale.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
       return [...prev, {
         ...pendingPlacement,
         id: `obj_${nextId++}`,
-        position: spawnPos,
-        velocity: velocity as [number, number, number],
+        position: plan.position,
+        velocity: plan.velocity,
       }];
     });
     setPendingPlacement(null);
-  }, [computePlacementVelocity, getLiveBodies, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment, unlockAchievement]);
+  }, [getLiveBodies, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment, unlockAchievement]);
+
+  const handleBodySpawned = useCallback((body: CelestialBody) => {
+    setBodies((prev) => (prev.some((b) => b.id === body.id) ? prev : [...prev, body]));
+  }, []);
+
+  // ─── Live simulation readouts (timeline, inspector, conservation) ───
+  const flushSnapshotUi = useCallback(() => {
+    snapshotUiTimerRef.current = null;
+    lastSnapshotUiRef.current = performance.now();
+    const snapshot = snapshotRef.current;
+    if (!snapshot) return;
+    const diag = snapshot.diagnostics;
+    if (diag) {
+      const samples = conservationRef.current;
+      const last = samples[samples.length - 1];
+      if (last && snapshot.simTime < last.time) {
+        // Rewound: drop samples from the undone future.
+        conservationRef.current = samples.filter((sample) => sample.time <= snapshot.simTime);
+      }
+      if (!last || snapshot.simTime > last.time) {
+        conservationRef.current.push({
+          time: snapshot.simTime,
+          energy: diag.energy,
+          energyScale: Math.abs(diag.kinetic) + Math.abs(diag.potential),
+          momentumX: diag.momentumX,
+          momentumZ: diag.momentumZ,
+          momentumScale: diag.momentumScale,
+          angularMomentum: diag.angularMomentum,
+          angularMomentumScale: diag.angularMomentumScale,
+        });
+        while (conservationRef.current.length > MAX_CONSERVATION_SAMPLES) conservationRef.current.shift();
+      }
+    }
+    setTimeline({
+      step: snapshot.step,
+      historyStart: snapshot.historyStart,
+      historyEnd: snapshot.historyEnd,
+      markers: snapshot.markers,
+      simTime: snapshot.simTime,
+    });
+  }, []);
+
+  // Panels refresh at most five times a second, but the latest state always lands
+  // (a seek while paused produces a single snapshot that must not be dropped).
+  const handleSnapshot = useCallback((snapshot: SimSnapshot) => {
+    snapshotRef.current = snapshot;
+    if (snapshotUiTimerRef.current !== null) return;
+    const wait = Math.max(0, SNAPSHOT_UI_INTERVAL_MS - (performance.now() - lastSnapshotUiRef.current));
+    snapshotUiTimerRef.current = window.setTimeout(flushSnapshotUi, wait);
+  }, [flushSnapshotUi]);
+
+  useEffect(() => () => {
+    if (snapshotUiTimerRef.current !== null) window.clearTimeout(snapshotUiTimerRef.current);
+  }, []);
+
+  const handleSelectBody = useCallback((id: string) => {
+    setSelectedBodyId(id);
+    setRightTab('inspector');
+  }, []);
+
+  const handlePinBody = useCallback((id: string, pinned: boolean) => {
+    simulationRef.current?.setPinned(id, pinned);
+    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, pinned } : b)));
+  }, []);
+
+  const handleScrubStart = useCallback(() => setIsPlaying(false), []);
+
+  const handleSeek = useCallback((step: number) => {
+    simulationRef.current?.seek(step);
+    if (step < (snapshotRef.current?.step ?? 0)) unlockAchievement('time-bender');
+  }, [unlockAchievement]);
 
   const handleRemoveBody = useCallback((id: string) => {
     setBodies((prev) => prev.filter((b) => b.id !== id));
@@ -666,7 +727,14 @@ const Index = () => {
           onBodyRemoved={handleBodyRemoved}
           onBodyUpdated={handleBodyUpdated}
           onBodyRestored={handleBodyRestored}
-          onGridClick={handlePlaceOnGrid}
+          onBodySpawned={handleBodySpawned}
+          pendingPlacement={pendingPlacement}
+          placementVelocityScale={placementVelocityScale}
+          onPlace={handlePlace}
+          simulationRef={simulationRef}
+          onSnapshot={handleSnapshot}
+          selectedBodyId={selectedBodyId}
+          onSelectBody={handleSelectBody}
           realisticMode={realisticMode}
           universeScale={universeScale}
           expansionRate={expansionEnabled && universeScale < MAX_UNIVERSE_SCALE ? HUBBLE_RATE : 0}
@@ -754,6 +822,8 @@ const Index = () => {
             onApplyTemplate={handleApplyTemplate}
             bodies={bodies}
             onRemoveBody={handleRemoveBody}
+            selectedBodyId={selectedBodyId}
+            onSelectBody={handleSelectBody}
             onRemoveAll={handleRemoveAll}
             placementActive={Boolean(pendingPlacement)}
             velocityScale={placementVelocityScale}
@@ -786,7 +856,47 @@ const Index = () => {
       </div>
 
       <div className="absolute right-4 top-20 z-10 w-[460px] pointer-events-auto">
-        <div className="glass-panel p-4 animate-fade-in">
+        <div className="glass-panel p-4 animate-fade-in max-h-[calc(100vh-200px)] overflow-y-auto scrollbar-thin">
+          {mode === 'spacetime' && (
+            <div className="mb-4 grid grid-cols-3 gap-1 rounded-lg bg-muted/20 p-1" role="tablist" aria-label="Right panel">
+              {([
+                ['missions', 'Missions'],
+                ['inspector', 'Inspector'],
+                ['conservation', 'Conservation'],
+              ] as const).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === tab}
+                  onClick={() => setRightTab(tab)}
+                  className={`rounded-md px-2 py-1.5 text-sm transition-colors ${
+                    rightTab === tab ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {mode === 'spacetime' && rightTab === 'inspector' && (
+            <OrbitInspector
+              snapshot={snapshotRef.current}
+              bodies={bodies}
+              selectedId={selectedBodyId}
+              onClear={() => setSelectedBodyId(null)}
+              onPin={handlePinBody}
+            />
+          )}
+          {mode === 'spacetime' && rightTab === 'conservation' && (
+            <ConservationPanel
+              samples={conservationRef.current}
+              impactTimes={timeline.markers.map((marker) => marker.step * SIM_STEP)}
+              realisticMode={realisticMode}
+              expansionEnabled={expansionEnabled}
+            />
+          )}
+          {(mode === 'rocket' || rightTab === 'missions') && (<>
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
               <div className="flex items-center gap-2 text-primary mb-1">
@@ -881,11 +991,15 @@ const Index = () => {
               </motion.div>
             )}
           </div>
+          </>)}
         </div>
       </div>
 
       {/* Bottom Center - Time Controls */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto flex flex-col items-center gap-2">
+        {mode === 'spacetime' && (
+          <TimelineBar timeline={timeline} onScrubStart={handleScrubStart} onSeek={handleSeek} />
+        )}
         <TimeControls
           timeScale={timeScale}
           isPlaying={isPlaying}
@@ -900,7 +1014,9 @@ const Index = () => {
       <div className="absolute bottom-6 right-4 z-10">
         <p className="text-[10px] font-mono text-muted-foreground/50">
           {mode === 'spacetime'
-            ? 'Drag to orbit · Scroll to zoom · Add objects to warp spacetime'
+            ? (pendingPlacement
+              ? 'Click the grid for a circular orbit · Drag to aim · The line shows where it will go'
+              : 'Drag to orbit · Scroll to zoom · Click a body to inspect it')
             : 'Adjust parameters · Launch · Observe trajectory'}
         </p>
       </div>
