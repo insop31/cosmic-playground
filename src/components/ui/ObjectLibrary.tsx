@@ -5,6 +5,7 @@ import { SPACETIME_TEMPLATES } from '../space/spacetimeTemplates';
 import type { CelestialBody } from '../space/SpaceScene';
 import type { SavedSpacetimeScenario } from '../../lib/scenarioStorage';
 import { formatMass } from '../../physics/units';
+import ShareFileButtons from './ShareFileButtons';
 
 interface PlanetPreset {
   name: string;
@@ -56,6 +57,8 @@ interface ObjectLibraryProps {
   onSaveScenario: (name: string) => boolean;
   onLoadScenario: (scenarioId: string) => void;
   onDeleteScenario: (scenarioId: string) => void;
+  onExportFile: () => void;
+  onImportFile: (text: string) => string;
 }
 
 const SAVED_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -113,6 +116,8 @@ const ObjectLibrary = ({
   onSaveScenario,
   onLoadScenario,
   onDeleteScenario,
+  onExportFile,
+  onImportFile,
 }: ObjectLibraryProps) => {
   const [selectedPlanetName, setSelectedPlanetName] = useState('Earth');
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -320,6 +325,7 @@ const ObjectLibrary = ({
             </button>
           </form>
           {saveMessage && <p className="text-xs text-primary/90" role="status">{saveMessage}</p>}
+          <ShareFileButtons onExport={onExportFile} onImport={onImportFile} />
           {savedScenarios.length > 0 && (
             <div className="space-y-1.5 max-h-32 overflow-y-auto scrollbar-thin pr-1">
               {savedScenarios.map((scenario) => (

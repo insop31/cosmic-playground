@@ -36,6 +36,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AI_HINTS, type HintScenario, deriveHintScenario } from './rocketHints';
 import { vehicleSummary } from '../../physics/rocket';
+import { buildDebrief } from '../../learning/debrief';
+import { liveCoachMessage } from '../../learning/coach';
+import ShareFileButtons from '../ui/ShareFileButtons';
 
 interface RocketControlsProps {
   /** The values the student set. Sliders show and change these. */
@@ -52,7 +55,26 @@ interface RocketControlsProps {
   onSavePreset: (name: string) => boolean;
   onLoadPreset: (presetId: string) => void;
   onDeletePreset: (presetId: string) => void;
+  onExportFile: () => void;
+  onImportFile: (text: string) => string;
+  /** The outcome the student expects from the next launch, if they made a prediction. */
+  prediction: LaunchOutcome | null;
+  onPredictionChange: (prediction: LaunchOutcome | null) => void;
 }
+
+const PREDICTION_CHOICES: { id: Exclude<LaunchOutcome, 'none'>; label: string }[] = [
+  { id: 'orbiting', label: 'Orbit' },
+  { id: 'suborbital', label: 'Falls back' },
+  { id: 'escape', label: 'Escape' },
+  { id: 'crashed', label: 'Crash' },
+  { id: 'burnup', label: 'Burn-up' },
+];
+
+const COACH_TONE_CLASS = {
+  info: 'text-foreground',
+  warning: 'text-orange-200',
+  danger: 'text-red-200',
+} as const;
 
 interface SliderRowProps {
   label: string;
@@ -153,6 +175,10 @@ const RocketControls = ({
   onSavePreset,
   onLoadPreset,
   onDeletePreset,
+  onExportFile,
+  onImportFile,
+  prediction,
+  onPredictionChange,
 }: RocketControlsProps) => {
   const isActive = state.phase !== 'idle';
   const showOutcome = state.phase === 'outcome';
@@ -163,6 +189,8 @@ const RocketControls = ({
   const heatPercent = Math.min(100, state.heat * 100);
   const summary = useMemo(() => vehicleSummary(effectiveParams), [effectiveParams]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const liveCoach = useMemo(() => liveCoachMessage(effectiveParams, state), [effectiveParams, state]);
+  const debrief = useMemo(() => (showOutcome ? buildDebrief(effectiveParams, state) : null), [effectiveParams, showOutcome, state]);
 
   // Bring the outcome card and its explanation into view when a flight ends.
   useEffect(() => {
@@ -239,15 +267,21 @@ const RocketControls = ({
                 <Bot size={18} className="text-primary" />
               </div>
               <div>
-                <div className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">AI Launch Coach</div>
-                <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-secondary/85">Always-on guidance</div>
+                <div className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Launch Coach</div>
+                <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-secondary/85">{liveCoach ? 'Reading live telemetry' : 'Tips for these settings'}</div>
               </div>
             </div>
           </div>
-          <div className="text-xs font-mono uppercase tracking-[0.18em] text-secondary mb-2">
-            Scenario: {hintScenario.replace(/-/g, ' ')}
-          </div>
-          <p className="text-[15px] text-foreground leading-relaxed font-medium">{activeHint}</p>
+          {liveCoach ? (
+            <p className={`text-[15px] leading-relaxed font-medium ${COACH_TONE_CLASS[liveCoach.tone]}`} aria-live="polite">{liveCoach.text}</p>
+          ) : (
+            <>
+              <div className="text-xs font-mono uppercase tracking-[0.18em] text-secondary mb-2">
+                Scenario: {hintScenario.replace(/-/g, ' ')}
+              </div>
+              <p className="text-[15px] text-foreground leading-relaxed font-medium">{activeHint}</p>
+            </>
+          )}
         </div>
 
         <div className="relative flex-1 min-h-0 flex flex-col">
@@ -273,6 +307,38 @@ const RocketControls = ({
               {state.outcomeReason && (
                 <p className="mt-2 text-sm leading-snug text-foreground/85">{state.outcomeReason}</p>
               )}
+              {prediction && (
+                <p className={`mt-2 text-sm font-semibold ${prediction === state.outcome ? 'text-primary' : 'text-orange-300'}`}>
+                  You predicted “{PREDICTION_CHOICES.find((c) => c.id === prediction)?.label}”: {prediction === state.outcome ? 'correct!' : 'not this time.'}
+                </p>
+              )}
+            </div>
+          )}
+
+          {debrief && (
+            <div className="rounded-lg border border-white/10 bg-muted/10 p-3 text-sm animate-fade-in" aria-label="Flight debrief">
+              <div className="text-xs font-mono uppercase tracking-widest text-primary/70 mb-1.5">Debrief</div>
+              <p className="font-medium text-foreground mb-2">{debrief.headline}</p>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Why</div>
+              <ul className="list-disc pl-4 space-y-1 text-foreground/85 mb-2">
+                {debrief.causes.map((cause) => <li key={cause}>{cause}</li>)}
+              </ul>
+              {debrief.suggestions.length > 0 && (
+                <>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Try next</div>
+                  <ul className="list-disc pl-4 space-y-1 text-primary/90 mb-2">
+                    {debrief.suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}
+                  </ul>
+                </>
+              )}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-xs tabular-nums">
+                {debrief.numbers.map((n) => (
+                  <div key={n.label} className="contents">
+                    <span className="text-muted-foreground">{n.label}</span>
+                    <span className="text-right text-foreground">{n.value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -513,6 +579,7 @@ const RocketControls = ({
               </button>
             </form>
             {presetMessage && <p className="text-xs text-primary/90" role="status">{presetMessage}</p>}
+            <ShareFileButtons onExport={onExportFile} onImport={onImportFile} disabled={isActive} />
             {savedPresets.length > 0 && (
               <div className="space-y-1.5">
                 {savedPresets.map((preset) => (
@@ -704,6 +771,29 @@ const RocketControls = ({
 
         {/* ── Footer buttons ───────────────────────────────────────────────── */}
         <div className="pt-5 mt-2 border-t border-white/10 shrink-0">
+          {!isActive && (
+            <div className="mb-3">
+              <div className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">Predict first: what will happen?</div>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Predicted outcome">
+                {PREDICTION_CHOICES.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={prediction === choice.id}
+                    onClick={() => onPredictionChange(prediction === choice.id ? null : choice.id)}
+                    className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                      prediction === choice.id
+                        ? 'border-primary/60 bg-primary/20 text-primary'
+                        : 'border-border/40 bg-muted/10 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {!isActive ? (
             <motion.button
               whileHover={{ scale: 1.02 }}

@@ -30,7 +30,7 @@ interface PlacementLayerProps {
   livePhysicsRef: MutableRefObject<LiveBodyState[]>;
   simulationRef: MutableRefObject<SimulationControls | null>;
   controlsRef: RefObject<OrbitControlsImpl | null>;
-  onPlace: (point: [number, number, number], aimedVelocity: [number, number, number] | null) => void;
+  onPlace: (point: [number, number, number], aimedVelocity: [number, number, number] | null, predicted: PredictedOutcome | null) => void;
   gridSize: number;
   gridResolution: number;
   universeScale: number;
@@ -64,6 +64,8 @@ const PlacementLayer = ({
   const [label, setLabel] = useState<GhostLabel | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
+  // Outcome of the latest preview, handed over with the placement (for Predict First missions).
+  const lastOutcomeRef = useRef<PredictedOutcome | null>(null);
   const bodiesRef = useRef(bodies);
   bodiesRef.current = bodies;
 
@@ -92,6 +94,7 @@ const PlacementLayer = ({
     ghostLine.geometry.setDrawRange(0, 0);
     aimLine.geometry.setDrawRange(0, 0);
     ghostMarker.visible = false;
+    lastOutcomeRef.current = null;
     setLabel(null);
   };
 
@@ -139,6 +142,7 @@ const PlacementLayer = ({
     }
     attr.needsUpdate = true;
     ghostLine.geometry.setDrawRange(0, count);
+    lastOutcomeRef.current = prediction.outcome;
     const color = OUTCOME_COLOR[prediction.outcome];
     (ghostLine.material as THREE.LineBasicMaterial).color.set(color);
     ghostMarker.visible = true;
@@ -184,7 +188,7 @@ const PlacementLayer = ({
     aimEndRef.current = null;
     if (controlsRef.current) controlsRef.current.enabled = true;
     updateAimLine();
-    onPlace(start, aimed);
+    onPlace(start, aimed, lastOutcomeRef.current);
   };
 
   useEffect(() => {

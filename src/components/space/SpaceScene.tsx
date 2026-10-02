@@ -6,7 +6,8 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import Starfield from './Starfield';
 import PhysicsSimulator, { type LiveBodyState, type SimulationControls } from './PhysicsSimulator';
 import PlacementLayer, { type PendingBody } from './PlacementLayer';
-import type { SimSnapshot } from '../../physics/simulation';
+import type { PredictedOutcome, SimSnapshot } from '../../physics/simulation';
+import type { ImpactEvent } from '../../physics/nbody';
 
 export type { CelestialBody } from '../../physics/types';
 import type { CelestialBody } from '../../physics/types';
@@ -22,7 +23,7 @@ interface SpaceSceneProps {
   pendingPlacement: PendingBody | null;
   placementVelocityScale: number;
   /** Place the pending body at `point`, with a dragged velocity or null for a circular orbit. */
-  onPlace: (point: [number, number, number], aimedVelocity: [number, number, number] | null) => void;
+  onPlace: (point: [number, number, number], aimedVelocity: [number, number, number] | null, predicted: PredictedOutcome | null) => void;
   realisticMode?: boolean;
   universeScale?: number;
   expansionRate?: number;
@@ -31,6 +32,7 @@ interface SpaceSceneProps {
   livePhysicsRef: MutableRefObject<LiveBodyState[]>;
   simulationRef: MutableRefObject<SimulationControls | null>;
   onSnapshot?: (snapshot: SimSnapshot) => void;
+  onImpacts?: (impacts: ImpactEvent[]) => void;
   selectedBodyId?: string | null;
   onSelectBody?: (id: string) => void;
 }
@@ -55,6 +57,7 @@ const SpaceScene = ({
   livePhysicsRef,
   simulationRef,
   onSnapshot,
+  onImpacts,
   selectedBodyId,
   onSelectBody,
 }: SpaceSceneProps) => {
@@ -101,6 +104,7 @@ const SpaceScene = ({
         controlsRef={controlsRef}
         simulationRef={simulationRef}
         onSnapshot={onSnapshot}
+        onImpacts={onImpacts}
         selectedBodyId={selectedBodyId}
         onSelectBody={pendingPlacement ? undefined : onSelectBody}
       />

@@ -8,7 +8,7 @@ import { WeatherConditionId, applyWeatherToParams } from '../components/rocket/w
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
-import { Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
+import { Rocket, Orbit, Trophy, Sparkles, Target, NotebookPen } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   deleteRocketPreset,
@@ -33,12 +33,20 @@ import type { SimulationControls } from '../components/space/PhysicsSimulator';
 import OrbitInspector from '../components/space/OrbitInspector';
 import ConservationPanel, { type ConservationSample } from '../components/space/ConservationPanel';
 import TimelineBar, { type TimelineState } from '../components/space/TimelineBar';
+import LabNotebook from '../components/rocket/LabNotebook';
+import { WEATHER_PRESETS } from '../components/rocket/weatherPresets';
+import { SpacetimeMissionTracker } from '../learning/spacetimeMissions';
+import { buildDebrief } from '../learning/debrief';
+import { addNotebookEntry, clearNotebook, listNotebook, type NotebookEntry } from '../lib/notebook';
+import { buildExportFile, downloadTextFile, parseImportFile } from '../lib/exportImport';
+import { vehicleSummary } from '../physics/rocket';
+import type { ImpactEvent } from '../physics/nbody';
+import type { PredictedOutcome } from '../physics/simulation';
 
 let nextId = 1;
 const ACTIVE_MISSION_LIMIT = 3;
 const MISSION_EXIT_DELAY_MS = 900;
 
-const MASSIVE_ANCHOR_MASS = 1e27;
 const SNAPSHOT_UI_INTERVAL_MS = 200;
 const MAX_CONSERVATION_SAMPLES = 300; // 60 s at 5 samples per second
 
@@ -64,6 +72,11 @@ const DEFAULT_PACK_BY_MODE: Record<AppMode, string> = {
   spacetime: PACKS_BY_MODE.spacetime[0].id,
   rocket: PACKS_BY_MODE.rocket[0].id,
 };
+
+const createNoAchievements = (): Record<MissionId, boolean> => Object.fromEntries(ALL_MISSIONS.map((mission) => [mission.id, false]));
+
+const FAILURE_OUTCOMES = new Set<RocketState['outcome']>(['crashed', 'suborbital', 'burnup']);
+const PREDICTIONS_FOR_FORECASTER = 3;
 
 const findMission = (id: MissionId) => ALL_MISSIONS.find((mission) => mission.id === id);
 
@@ -124,6 +137,9 @@ const Index = () => {
   const universeAgeRef = useRef(0);
   const [universeScale, setUniverseScale] = useState(1);
   const lastTickRef = useRef(Date.now());
+  // Body types by id, for mission checks that run on simulation snapshots.
+  const bodyTypesRef = useRef(new Map<string, string>());
+  bodyTypesRef.current = new Map(bodies.map((body) => [body.id, body.type]));
 
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
@@ -131,68 +147,28 @@ const Index = () => {
   const [savedScenarios, setSavedScenarios] = useState<SavedSpacetimeScenario[]>([]);
   const [savedRocketPresets, setSavedRocketPresets] = useState<SavedRocketPreset[]>([]);
   const [activeWeather, setActiveWeather] = useState<Set<WeatherConditionId>>(new Set());
+  const [prediction, setPrediction] = useState<RocketState['outcome'] | null>(null);
+  const [correctPredictions, setCorrectPredictions] = useState(0);
+  const [notebook, setNotebook] = useState<NotebookEntry[]>([]);
+  const [notebookOpen, setNotebookOpen] = useState(false);
 
   const effectiveRocketParams = useMemo(
     () => applyWeatherToParams(rocketParams, activeWeather),
     [rocketParams, activeWeather],
   );
   const [explorationScore, setExplorationScore] = useState(0);
-  const [achievements, setAchievements] = useState<Record<MissionId, boolean>>({
-    'gravity-master': false,
-    'chaos-creator': false,
-    'slingshot-expert': false,
-    'black-hole-survivor': false,
-    'time-bender': false,
-    'system-architect': false,
-    'mode-shifter': false,
-    'first-stable-orbit': false,
-    'escape-velocity-achieved': false,
-    'storm-runner': false,
-    'staging-specialist': false,
-    'precision-pilot': false,
-    'heavy-lift': false,
-    'dense-atmosphere-run': false,
-  });
+  const [achievements, setAchievements] = useState<Record<MissionId, boolean>>(createNoAchievements);
   const [missionQueues, setMissionQueues] = useState<MissionQueues>(() => ({
-    spacetime: buildMissionCards(getActivePack('spacetime', DEFAULT_PACK_BY_MODE.spacetime), {
-      'gravity-master': false,
-      'chaos-creator': false,
-      'slingshot-expert': false,
-      'black-hole-survivor': false,
-      'time-bender': false,
-      'system-architect': false,
-      'mode-shifter': false,
-      'first-stable-orbit': false,
-      'escape-velocity-achieved': false,
-      'storm-runner': false,
-      'staging-specialist': false,
-      'precision-pilot': false,
-      'heavy-lift': false,
-      'dense-atmosphere-run': false,
-    }),
-    rocket: buildMissionCards(getActivePack('rocket', DEFAULT_PACK_BY_MODE.rocket), {
-      'gravity-master': false,
-      'chaos-creator': false,
-      'slingshot-expert': false,
-      'black-hole-survivor': false,
-      'time-bender': false,
-      'system-architect': false,
-      'mode-shifter': false,
-      'first-stable-orbit': false,
-      'escape-velocity-achieved': false,
-      'storm-runner': false,
-      'staging-specialist': false,
-      'precision-pilot': false,
-      'heavy-lift': false,
-      'dense-atmosphere-run': false,
-    }),
+    spacetime: buildMissionCards(getActivePack('spacetime', DEFAULT_PACK_BY_MODE.spacetime), createNoAchievements()),
+    rocket: buildMissionCards(getActivePack('rocket', DEFAULT_PACK_BY_MODE.rocket), createNoAchievements()),
   }));
   const experimentKeysRef = useRef<Set<string>>(new Set());
   const achievementStateRef = useRef(achievements);
   const missionRemovalTimersRef = useRef<Partial<Record<MissionId, number>>>({});
-  const stableSystemTimerRef = useRef(0);
-  const stableBlackHoleTimerRef = useRef(0);
-  const previousOutcomeRef = useRef<RocketState['outcome']>('none');
+  // Judges spacetime missions from the simulation itself (bound orbits, flybys, impacts).
+  const missionTrackerRef = useRef(new SpacetimeMissionTracker());
+  // Each launch is scored and written to the notebook once, even if its ending is replayed.
+  const recordedLaunchRef = useRef<number | null>(null);
 
   const awardScore = useCallback((points: number) => {
     setExplorationScore((prev) => prev + points);
@@ -218,6 +194,7 @@ const Index = () => {
   useEffect(() => {
     setSavedScenarios(listSavedSpacetimeScenarios());
     setSavedRocketPresets(listSavedRocketPresets());
+    setNotebook(listNotebook());
   }, []);
 
   useEffect(() => {
@@ -304,23 +281,12 @@ const Index = () => {
 
   useEffect(() => {
     conservationRef.current = [];
+    missionTrackerRef.current.reset();
   }, [simulationEpoch]);
 
   useEffect(() => {
     if (selectedBodyId && !bodies.some((b) => b.id === selectedBodyId)) setSelectedBodyId(null);
   }, [bodies, selectedBodyId]);
-
-  useEffect(() => {
-    if (experimentKeysRef.current.size >= 8) {
-      unlockAchievement('gravity-master');
-    }
-  }, [bodies, placementVelocityScale, realisticMode, rocketParams, unlockAchievement]);
-
-  useEffect(() => {
-    if (bodies.length >= 5) {
-      unlockAchievement('system-architect');
-    }
-  }, [bodies.length, unlockAchievement]);
 
   useEffect(() => {
     if (mode === 'spacetime' && timeScale < 0) {
@@ -335,13 +301,33 @@ const Index = () => {
   }, [realisticMode, unlockAchievement]);
 
   useEffect(() => {
-    if (rocketState.phase !== 'outcome') {
-      previousOutcomeRef.current = rocketState.outcome;
-      return;
-    }
+    if (rocketState.phase !== 'outcome' || rocketState.outcome === 'none') return;
+    if (recordedLaunchRef.current === rocketState.seed) return;
+    recordedLaunchRef.current = rocketState.seed;
 
-    if (previousOutcomeRef.current === rocketState.outcome) return;
-    previousOutcomeRef.current = rocketState.outcome;
+    // Write the run into the lab notebook with its cause, and check the prediction.
+    const debrief = buildDebrief(effectiveRocketParams, rocketState);
+    setNotebook(addNotebookEntry({
+      outcome: rocketState.outcome,
+      prediction,
+      params: effectiveRocketParams,
+      weather: Array.from(activeWeather, (id) => WEATHER_PRESETS[id].name),
+      metrics: {
+        deltaV: vehicleSummary(effectiveRocketParams).deltaV,
+        peakAltitude: rocketState.maxAltitude,
+        maxQ: rocketState.maxDynamicPressure,
+        heat: rocketState.heat,
+        flightTime: rocketState.elapsed,
+      },
+      cause: debrief.causes[0] ?? debrief.headline,
+    }));
+    if (prediction && prediction === rocketState.outcome) {
+      awardScore(25);
+      setCorrectPredictions(correctPredictions + 1);
+      if (correctPredictions + 1 >= PREDICTIONS_FOR_FORECASTER) unlockAchievement('forecaster');
+      if (FAILURE_OUTCOMES.has(rocketState.outcome)) unlockAchievement('failure-analyst');
+      if (rocketState.outcome === 'orbiting') unlockAchievement('orbit-call');
+    }
 
     if (rocketState.outcome === 'orbiting') {
       awardScore(80);
@@ -385,44 +371,14 @@ const Index = () => {
       unlockAchievement('dense-atmosphere-run');
     }
   }, [
+    activeWeather,
     awardScore,
+    correctPredictions,
     effectiveRocketParams,
-    rocketState.outcome,
-    rocketState.phase,
+    prediction,
+    rocketState,
     unlockAchievement,
   ]);
-
-  useEffect(() => {
-    if (mode !== 'spacetime' || !isPlaying || timeScale <= 0) return;
-
-    const interval = setInterval(() => {
-      const hasStableCandidate = bodies.length >= 4
-        && bodies.some((body) => body.type === 'star')
-        && bodies.filter((body) => body.type === 'planet' || body.type === 'asteroid' || body.type === 'comet').length >= 2;
-      const hasBlackHoleCandidate = bodies.some((body) => body.type === 'blackhole')
-        && bodies.filter((body) => body.type !== 'blackhole').length >= 2;
-
-      stableSystemTimerRef.current = hasStableCandidate ? stableSystemTimerRef.current + 1 : 0;
-      stableBlackHoleTimerRef.current = hasBlackHoleCandidate ? stableBlackHoleTimerRef.current + 1 : 0;
-
-      if (stableSystemTimerRef.current === 12) {
-        awardScore(75);
-        unlockAchievement('gravity-master');
-      }
-
-      if (stableBlackHoleTimerRef.current >= 10) {
-        unlockAchievement('black-hole-survivor');
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [awardScore, bodies, isPlaying, mode, timeScale, unlockAchievement]);
-
-  useEffect(() => {
-    if (bodies.length >= 7 || (bodies.some((body) => body.type === 'blackhole') && bodies.some((body) => body.type === 'neutron') && bodies.length >= 5)) {
-      unlockAchievement('chaos-creator');
-    }
-  }, [bodies, unlockAchievement]);
 
   // ─── Spacetime handlers ───
   // Physics positions are managed inside PhysicsSimulator via refs — no per-frame
@@ -456,25 +412,19 @@ const Index = () => {
     registerExperiment(`prep:${obj.type}:${Math.round(obj.mass).toExponential(1)}`);
   }, [registerExperiment]);
 
-  const handlePlace = useCallback((point: [number, number, number], aimedVelocity: [number, number, number] | null) => {
+  const handlePlace = useCallback((
+    point: [number, number, number],
+    aimedVelocity: [number, number, number] | null,
+    predicted: PredictedOutcome | null,
+  ) => {
     if (!pendingPlacement) return;
-    setBodies((prev) => {
-      const liveBodies = getLiveBodies(prev);
-      const plan = planPlacement(point, pendingPlacement.radius ?? 0.3, liveBodies, placementVelocityScale, aimedVelocity);
-      const hasHeavyAnchor = liveBodies.some((body) => body.mass >= MASSIVE_ANCHOR_MASS);
-      if ((pendingPlacement.type === 'comet' || pendingPlacement.type === 'asteroid') && placementVelocityScale >= 1.5 && hasHeavyAnchor) {
-        unlockAchievement('slingshot-expert');
-      }
-      registerExperiment(`place:${pendingPlacement.type}:${plan.position[0].toFixed(1)}:${plan.position[2].toFixed(1)}:${aimedVelocity ? 'aimed' : placementVelocityScale.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
-      return [...prev, {
-        ...pendingPlacement,
-        id: `obj_${nextId++}`,
-        position: plan.position,
-        velocity: plan.velocity,
-      }];
-    });
+    const plan = planPlacement(point, pendingPlacement.radius ?? 0.3, getLiveBodies(bodies), placementVelocityScale, aimedVelocity);
+    const id = `obj_${nextId++}`;
+    registerExperiment(`place:${pendingPlacement.type}:${plan.position[0].toFixed(1)}:${plan.position[2].toFixed(1)}:${aimedVelocity ? 'aimed' : placementVelocityScale.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
+    missionTrackerRef.current.notePlacement(id, aimedVelocity !== null, snapshotRef.current?.simTime ?? 0, predicted);
+    setBodies((prev) => [...prev, { ...pendingPlacement, id, position: plan.position, velocity: plan.velocity }]);
     setPendingPlacement(null);
-  }, [getLiveBodies, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment, unlockAchievement]);
+  }, [bodies, getLiveBodies, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment]);
 
   const handleBodySpawned = useCallback((body: CelestialBody) => {
     setBodies((prev) => (prev.some((b) => b.id === body.id) ? prev : [...prev, body]));
@@ -508,6 +458,7 @@ const Index = () => {
         while (conservationRef.current.length > MAX_CONSERVATION_SAMPLES) conservationRef.current.shift();
       }
     }
+    missionTrackerRef.current.update(snapshot, (id) => bodyTypesRef.current.get(id)).forEach(unlockAchievement);
     setTimeline({
       step: snapshot.step,
       historyStart: snapshot.historyStart,
@@ -515,7 +466,11 @@ const Index = () => {
       markers: snapshot.markers,
       simTime: snapshot.simTime,
     });
-  }, []);
+  }, [unlockAchievement]);
+
+  const handleImpacts = useCallback((impacts: ImpactEvent[]) => {
+    missionTrackerRef.current.noteImpacts(impacts).forEach(unlockAchievement);
+  }, [unlockAchievement]);
 
   // Panels refresh at most five times a second, but the latest state always lands
   // (a seek while paused produces a single snapshot that must not be dropped).
@@ -533,7 +488,8 @@ const Index = () => {
   const handleSelectBody = useCallback((id: string) => {
     setSelectedBodyId(id);
     setRightTab('inspector');
-  }, []);
+    if (snapshotRef.current) missionTrackerRef.current.noteInspection(id, snapshotRef.current).forEach(unlockAchievement);
+  }, [unlockAchievement]);
 
   const handlePinBody = useCallback((id: string, pinned: boolean) => {
     simulationRef.current?.setPinned(id, pinned);
@@ -554,8 +510,6 @@ const Index = () => {
   const handleRemoveAll = useCallback(() => {
     setBodies([]);
     setSimulationEpoch((epoch) => epoch + 1);
-    stableSystemTimerRef.current = 0;
-    stableBlackHoleTimerRef.current = 0;
   }, []);
 
   const handleApplyTemplate = useCallback((templateId: string) => {
@@ -574,8 +528,6 @@ const Index = () => {
     setIsPlaying(true);
     universeAgeRef.current = 0;
     setUniverseScale(1);
-    stableSystemTimerRef.current = 0;
-    stableBlackHoleTimerRef.current = 0;
     registerExperiment(`template:${templateId}`, 24);
   }, [registerExperiment]);
 
@@ -587,8 +539,6 @@ const Index = () => {
     universeAgeRef.current = 0;
     setUniverseScale(1);
     setPendingPlacement(null);
-    stableSystemTimerRef.current = 0;
-    stableBlackHoleTimerRef.current = 0;
   }, []);
 
   const handleSaveCurrentScenario = useCallback((name: string) => {
@@ -617,8 +567,6 @@ const Index = () => {
     setIsPlaying(true);
     universeAgeRef.current = 0;
     setUniverseScale(1);
-    stableSystemTimerRef.current = 0;
-    stableBlackHoleTimerRef.current = 0;
     registerExperiment(`saved-scenario:${scenario.id}`, 20);
   }, [registerExperiment, savedScenarios]);
 
@@ -647,7 +595,6 @@ const Index = () => {
 
   const handleRocketReset = useCallback(() => {
     setRocketState({ ...INITIAL_STATE });
-    previousOutcomeRef.current = 'none';
   }, []);
 
   const handleSaveRocketPreset = useCallback((name: string) => {
@@ -667,13 +614,38 @@ const Index = () => {
 
     setRocketParams(normalizeRocketParams(preset.params));
     setRocketState({ ...INITIAL_STATE });
-    previousOutcomeRef.current = 'none';
     registerExperiment(`saved-rocket:${preset.id}`, 16);
   }, [registerExperiment, savedRocketPresets]);
 
   const handleDeleteRocketPreset = useCallback((presetId: string) => {
     setSavedRocketPresets(deleteRocketPreset(presetId));
   }, []);
+
+  // ─── Sharing saved work as files ───
+  const handleExportFile = useCallback(() => {
+    downloadTextFile('cosmic-playground-export.json', buildExportFile(savedScenarios, savedRocketPresets));
+  }, [savedRocketPresets, savedScenarios]);
+
+  const handleImportFile = useCallback((text: string) => {
+    try {
+      const imported = parseImportFile(text);
+      let scenarios = savedScenarios;
+      let presets = savedRocketPresets;
+      imported.spacetimeScenarios.forEach((scenario) => { scenarios = saveSpacetimeScenario(scenario); });
+      imported.rocketPresets.forEach((preset) => { presets = saveRocketPreset(preset); });
+      setSavedScenarios(scenarios);
+      setSavedRocketPresets(presets);
+      const parts = [
+        `${imported.spacetimeScenarios.length} system${imported.spacetimeScenarios.length === 1 ? '' : 's'}`,
+        `${imported.rocketPresets.length} rocket preset${imported.rocketPresets.length === 1 ? '' : 's'}`,
+      ];
+      return `Imported ${parts.join(' and ')}.`;
+    } catch (error) {
+      return error instanceof Error ? error.message : 'Could not read that file.';
+    }
+  }, [savedRocketPresets, savedScenarios]);
+
+  const handleClearNotebook = useCallback(() => setNotebook(clearNotebook()), []);
 
   const handleWeatherChange = useCallback((id: WeatherConditionId) => {
     setActiveWeather((prev) => {
@@ -734,6 +706,7 @@ const Index = () => {
           onPlace={handlePlace}
           simulationRef={simulationRef}
           onSnapshot={handleSnapshot}
+          onImpacts={handleImpacts}
           selectedBodyId={selectedBodyId}
           onSelectBody={handleSelectBody}
           realisticMode={realisticMode}
@@ -809,6 +782,13 @@ const Index = () => {
                 <div className="text-muted-foreground">Alt: <span className="text-primary">{rocketState.altitude.toFixed(1)}</span></div>
                 <div className="text-muted-foreground">Fuel: <span className="text-primary">{(rocketState.fuel * 100).toFixed(0)}%</span></div>
                 <div className="text-muted-foreground">Phase: <span className="text-primary capitalize">{rocketState.phase}</span></div>
+                <button
+                  type="button"
+                  onClick={() => setNotebookOpen(true)}
+                  className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-primary hover:bg-primary/20"
+                >
+                  <NotebookPen size={12} /> Notebook ({notebook.length})
+                </button>
               </>
             )}
           </div>
@@ -837,6 +817,8 @@ const Index = () => {
             onSaveScenario={handleSaveCurrentScenario}
             onLoadScenario={handleLoadScenario}
             onDeleteScenario={handleDeleteScenario}
+            onExportFile={handleExportFile}
+            onImportFile={handleImportFile}
           />
         ) : (
           <RocketControls
@@ -852,6 +834,10 @@ const Index = () => {
             onDeletePreset={handleDeleteRocketPreset}
             activeWeather={activeWeather}
             onWeatherChange={handleWeatherChange}
+            onExportFile={handleExportFile}
+            onImportFile={handleImportFile}
+            prediction={prediction}
+            onPredictionChange={setPrediction}
           />
         )}
       </div>
@@ -995,6 +981,8 @@ const Index = () => {
           </>)}
         </div>
       </div>
+
+      <LabNotebook open={notebookOpen} onOpenChange={setNotebookOpen} entries={notebook} onClear={handleClearNotebook} />
 
       {/* Bottom Center - Time Controls */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto flex flex-col items-center gap-2">

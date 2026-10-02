@@ -5,6 +5,7 @@ import { Html } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import type { CelestialBody } from '../../physics/types';
+import type { ImpactEvent } from '../../physics/nbody';
 import { MOTION_ESCAPING } from '../../physics/system';
 import {
   STATE_STRIDE,
@@ -82,6 +83,8 @@ export interface PhysicsSimulatorProps {
   simulationEpoch?: number;
   /** Receives every new simulation state (time, history range, markers, diagnostics). */
   onSnapshot?: (snapshot: SimSnapshot) => void;
+  /** Collisions, mergers and tidal disruptions from simulation steps run forward. */
+  onImpacts?: (impacts: ImpactEvent[]) => void;
   /** Called for bodies the simulation creates (fragments, tidal debris). */
   onBodySpawned?: (body: CelestialBody) => void;
   /** Filled with the seek / predict / pin commands once the simulation is running. */
@@ -845,6 +848,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   expansionRate = 0,
   simulationEpoch = 0,
   onSnapshot,
+  onImpacts,
   onBodySpawned,
   simulationRef,
   selectedBodyId = null,
@@ -866,12 +870,12 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const prevPropIdsRef   = useRef(new Set<string>());
   const bodiesByIdRef    = useRef(new Map<string, CelestialBody>());
   const configRef        = useRef({ realisticMode, expansionRate });
-  const callbacksRef     = useRef({ onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned });
+  const callbacksRef     = useRef({ onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned, onImpacts });
   const [activeImpact, setActiveImpact] = useState<ImpactPopupState | null>(null);
   const [hasPendingImpact, setHasPendingImpact] = useState(false);
 
   configRef.current = { realisticMode, expansionRate };
-  callbacksRef.current = { onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned };
+  callbacksRef.current = { onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned, onImpacts };
 
   // Predicted orbit of the selected body and a ring marking it; updated every snapshot.
   const conicLine = useMemo(() => {
@@ -1071,6 +1075,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
         callbacks.onBodyUpdated(update.id, update.mass, update.radius);
       }
     }
+    if (result.impacts.length > 0) callbacks.onImpacts?.(result.impacts);
     applySnapshot(snapshot, result.direction === 1 && result.stepsTaken > 0);
     updateSelection(snapshot);
     callbacks.onSnapshot?.(snapshot);
