@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import type { RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
@@ -8,6 +8,7 @@ import RocketModel from './RocketModel';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
 import type { WeatherConditionId } from './weatherPresets';
 import { WeatherEnvironment, WeatherShakeGroup } from './WeatherEffects';
+import { QUALITY_PROFILES, type QualityProfile } from '../../lib/settings';
 import { createLightningStrikeState } from './lightningStrike';
 
 interface RocketSceneProps {
@@ -16,6 +17,8 @@ interface RocketSceneProps {
   onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
   timeScale?: number;
   activeWeather?: Set<WeatherConditionId>;
+  quality?: QualityProfile;
+  reduceMotion?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -583,9 +586,19 @@ const CinematicCamera = ({
 const RocketScene = ({
   params, state, onUpdateState, timeScale = 1,
   activeWeather = new Set<WeatherConditionId>(),
+  quality = QUALITY_PROFILES.high,
+  reduceMotion = false,
 }: RocketSceneProps) => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const lightningStrikeRef = useRef(createLightningStrikeState());
+
+  // A lightning strike in the flight physics also jolts the rocket on screen.
+  const strikeCount = state.events.filter((event) => event.kind === 'lightning').length;
+  useEffect(() => {
+    if (strikeCount === 0) return;
+    lightningStrikeRef.current.impulse = 1;
+    lightningStrikeRef.current.version += 1;
+  }, [strikeCount]);
   const escapedPastExosphere =
     state.phase === 'outcome' && state.outcome === 'escape' && state.altitude > EXOSPHERE_LIMIT;
   const userControlled =
@@ -600,7 +613,8 @@ const RocketScene = ({
   return (
     <Canvas
       camera={{ position: [5.5, 4.8, 13.5], fov: 42, near: 0.1, far: 20000 }}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      dpr={quality.dpr}
+      gl={{ antialias: quality.antialias, powerPreference: 'high-performance' }}
       style={{ background: '#050a14' }}
     >
       <color attach="background" args={['#050a14']} />
@@ -649,8 +663,9 @@ const RocketScene = ({
         altitude={state.altitude}
         phase={state.phase}
         lightningStrike={lightningStrikeRef.current}
+        reduceMotion={reduceMotion}
       >
-        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
+        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} activeWeather={activeWeather} />
       </WeatherShakeGroup>
 
       <CinematicCamera state={state} params={params} controlsRef={controlsRef} userControlled={userControlled} />

@@ -3,11 +3,14 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FlameParticles, SmokeParticles } from './Particles';
 import { RocketParams, RocketState } from './rocketTypes';
+import type { WeatherConditionId } from './weatherPresets';
 import {
   FLIGHT_DT,
   ORBIT_TIME_COMPRESSION,
+  altitudeOf,
   initialFlightState,
   stepFlight,
+  type FlightEnvironment,
   type FlightState,
   type FlightVerdict,
 } from '../../physics/rocket';
@@ -17,12 +20,19 @@ interface RocketModelProps {
   state: RocketState;
   onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
   timeScale: number;
+  activeWeather?: Set<WeatherConditionId>;
 }
 
 const ROCKET_SCALE = 1.75;
 const TRAJECTORY_LIMIT = 2400;
-const MAX_FLIGHT_STEPS_PER_FRAME = 32;
+const MAX_FLIGHT_STEPS_PER_FRAME = 64;
 const MAX_HISTORY = 3600;
+// After the verdict the flight keeps going for the camera; long coasts play faster.
+const COAST_SPEEDUP: Partial<Record<RocketState['outcome'], number>> = {
+  orbiting: ORBIT_TIME_COMPRESSION,
+  suborbital: 4,
+  escape: 2,
+};
 
 interface FlightSnapshot {
   flight: FlightState;
@@ -34,11 +44,6 @@ const appendTrajectoryPoint = (trajectory: [number, number][], point: [number, n
   return next.length > TRAJECTORY_LIMIT ? next.slice(next.length - TRAJECTORY_LIMIT) : next;
 };
 
-const computeRocketAngle = (vx: number, vy: number) => {
-  const safeVy = Math.abs(vy) < 0.001 ? (vy >= 0 ? 0.001 : -0.001) : vy;
-  return Math.atan2(vx, safeVy);
-};
-
 const smoothRotateZ = (current: number, target: number, factor: number) => {
   const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return current + delta * factor;
@@ -47,16 +52,33 @@ const smoothRotateZ = (current: number, target: number, factor: number) => {
 const smoothMove = (current: number, target: number, smoothing: number, dt: number) =>
   THREE.MathUtils.damp(current, target, smoothing, dt);
 
-const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelProps) => {
+/** World rotation of the rocket's axis: its attitude is measured from the local vertical. */
+const worldAxisAngle = (params: RocketParams, flight: FlightState) => {
+  const rx = flight.px;
+  const ry = flight.py + params.planetRadius;
+  const r = Math.hypot(rx, ry) || 1;
+  const upX = rx / r;
+  const upY = ry / r;
+  const bx = Math.cos(flight.attitude) * upX + Math.sin(flight.attitude) * upY;
+  const by = Math.cos(flight.attitude) * upY - Math.sin(flight.attitude) * upX;
+  return Math.atan2(bx, by);
+};
+
+const isBurning = (flight: FlightState) =>
+  !flight.engineOut && ((flight.stage === 1 && flight.fuel1 > 0) || (flight.stage === 2 && flight.stage2Lit && flight.fuel2 > 0));
+
+const RocketModel = ({ params, state, onUpdateState, timeScale, activeWeather }: RocketModelProps) => {
   const groupRef = useRef<THREE.Group>(null);
-  const flightRef = useRef<FlightState>(initialFlightState());
+  const flightRef = useRef<FlightState>(initialFlightState(params));
+  const envRef = useRef<FlightEnvironment>({ lightning: false, seed: state.seed });
   const accumRef = useRef(0);
   const prevPhaseRef = useRef(state.phase);
   const historyRef = useRef<FlightSnapshot[]>([]);
 
   // Start from the pad on reset and on every new launch.
   const resetFlight = () => {
-    flightRef.current = initialFlightState();
+    envRef.current = { lightning: activeWeather?.has('lightning') ?? false, seed: state.seed };
+    flightRef.current = initialFlightState(params, envRef.current);
     accumRef.current = 0;
     historyRef.current = [];
     if (groupRef.current) {
@@ -69,15 +91,33 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
   if (state.phase === 'launching' && prevPhaseRef.current === 'idle') resetFlight();
   prevPhaseRef.current = state.phase;
 
-  const placeRocket = (px: number, py: number, vx: number, vy: number, renderDt: number, follow = 16, turn = 12) => {
+  const placeRocket = (flight: FlightState, renderDt: number, follow = 16, turn = 12) => {
     const group = groupRef.current;
     if (!group) return;
     group.position.set(
-      smoothMove(group.position.x, px * 2, follow, renderDt),
-      smoothMove(group.position.y, 1.2 + py * 2, follow, renderDt),
+      smoothMove(group.position.x, flight.px * 2, follow, renderDt),
+      smoothMove(group.position.y, 1.2 + Math.max(flight.py, -1000) * 2, follow, renderDt),
       smoothMove(group.position.z, 0, follow, renderDt),
     );
-    group.rotation.z = smoothRotateZ(group.rotation.z, -computeRocketAngle(vx, vy), Math.min(1, renderDt * turn));
+    group.rotation.z = smoothRotateZ(group.rotation.z, -worldAxisAngle(params, flight), Math.min(1, renderDt * turn));
+  };
+
+  /** Telemetry fields copied from the flight into React state each frame. */
+  const telemetry = (flight: FlightState, prev: RocketState): Partial<RocketState> => {
+    const altitude = Math.max(altitudeOf(params, flight), 0);
+    return {
+      altitude,
+      maxAltitude: Math.max(prev.maxAltitude, altitude),
+      fuel: params.fuelMass > 0 ? (flight.fuel1 + flight.fuel2) / params.fuelMass : 0,
+      velocity: [flight.vx, flight.vy],
+      elapsed: flight.elapsed,
+      position: [flight.px, flight.py, 0],
+      heat: flight.heat,
+      stageSeparated: flight.stageSeparated,
+      dynamicPressure: flight.q,
+      maxDynamicPressure: flight.maxQ,
+      events: flight.events.length !== prev.events.length ? flight.events : prev.events,
+    };
   };
 
   useFrame((_, delta) => {
@@ -99,85 +139,37 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
       }
       if (lastSnap) {
         const restored = lastSnap;
-        flightRef.current = { ...restored.flight };
+        flightRef.current = restored.flight;
         accumRef.current = 0;
         group.position.set(restored.flight.px * 2, 1.2 + restored.flight.py * 2, 0);
-        group.rotation.z = -computeRocketAngle(restored.flight.vx, restored.flight.vy);
+        group.rotation.z = -worldAxisAngle(params, restored.flight);
         onUpdateState(() => restored.uiState);
       }
       return;
     }
 
-    const isEscaping = state.phase === 'outcome' && state.outcome === 'escape';
-    const isOrbiting = state.phase === 'outcome' && state.outcome === 'orbiting' && state.orbit;
-    if (state.phase !== 'launching' && state.phase !== 'coasting' && !isEscaping && !isOrbiting) {
-      return;
-    }
+    const inFlight = state.phase === 'launching' || state.phase === 'coasting';
+    const coastingAfterVerdict = state.phase === 'outcome' && state.outcome in COAST_SPEEDUP
+      && !(state.outcome === 'suborbital' && altitudeOf(params, flightRef.current) <= 0);
+    if (!inFlight && !coastingAfterVerdict) return;
 
-    historyRef.current.push({ flight: { ...flightRef.current }, uiState: state });
+    historyRef.current.push({ flight: flightRef.current, uiState: state });
     if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
 
-    const dt = Math.min(delta, 0.1) * timeScale;
     const renderDt = Math.min(delta, 0.05);
-    const flight = flightRef.current;
+    const speedup = coastingAfterVerdict ? COAST_SPEEDUP[state.outcome] ?? 1 : 1;
+    accumRef.current += Math.min(delta, 0.1) * timeScale * speedup;
 
-    // ── In orbit: follow the orbit ellipse (Kepler's equation, time-compressed) ──
-    if (isOrbiting && state.orbit) {
-      const orbit = state.orbit;
-      const [axisX, axisY] = orbit.axisDirection;
-      const [perpX, perpY] = orbit.perpendicularDirection;
-      // dE/dt = n / (1 − e·cos E): faster near periapsis, slower near apoapsis.
-      const rate = orbit.angularSpeed / (1 - orbit.eccentricity * Math.cos(orbit.angle));
-      const nextAngle = orbit.angle + dt * rate;
-      const cosE = Math.cos(nextAngle);
-      const sinE = Math.sin(nextAngle);
-      const px = orbit.center[0] + axisX * orbit.semiMajorAxis * cosE + perpX * orbit.semiMinorAxis * sinE;
-      const py = orbit.center[1] + axisY * orbit.semiMajorAxis * cosE + perpY * orbit.semiMinorAxis * sinE;
-      // Real orbital velocity: the playback rate is time-compressed, the reported speed is not.
-      const vx = ((-axisX * orbit.semiMajorAxis * sinE + perpX * orbit.semiMinorAxis * cosE) * rate) / ORBIT_TIME_COMPRESSION;
-      const vy = ((-axisY * orbit.semiMajorAxis * sinE + perpY * orbit.semiMinorAxis * cosE) * rate) / ORBIT_TIME_COMPRESSION;
-      flightRef.current = { ...flight, px, py, vx, vy, elapsed: flight.elapsed + dt };
-      placeRocket(px, py, vx, vy, renderDt, 18, 10);
-      onUpdateState((prev) => ({
-        ...prev,
-        altitude: py,
-        maxAltitude: Math.max(prev.maxAltitude, py),
-        velocity: [vx, vy],
-        elapsed: prev.elapsed + dt,
-        position: [px, py, 0],
-        orbit: prev.orbit ? { ...prev.orbit, angle: nextAngle } : prev.orbit,
-        trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
-      }));
-      return;
-    }
-
-    // ── Escaped: coast straight out of view while extending the trail ──
-    if (isEscaping) {
-      const px = flight.px + flight.vx * dt;
-      const py = flight.py + flight.vy * dt;
-      flightRef.current = { ...flight, px, py, elapsed: flight.elapsed + dt };
-      placeRocket(px, py, flight.vx, flight.vy, renderDt, 16, 9);
-      onUpdateState((prev) => ({
-        ...prev,
-        position: [px, py, 0],
-        altitude: py,
-        maxAltitude: Math.max(prev.maxAltitude, py),
-        trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
-      }));
-      return;
-    }
-
-    // ── Powered flight and coasting: fixed steps of the shared flight model ──
-    accumRef.current += dt;
     let current = flightRef.current;
     let verdict: FlightVerdict | null = null;
     let steps = 0;
     while (accumRef.current >= FLIGHT_DT && steps < MAX_FLIGHT_STEPS_PER_FRAME) {
-      const result = stepFlight(params, current, FLIGHT_DT);
+      const result = stepFlight(params, current, FLIGHT_DT, { env: envRef.current, coastOnly: coastingAfterVerdict });
       current = result.state;
       accumRef.current -= FLIGHT_DT;
       steps++;
-      if (result.verdict) {
+      if (coastingAfterVerdict && altitudeOf(params, current) <= 0) break; // the arc reached the ground
+      if (!coastingAfterVerdict && result.verdict) {
         verdict = result.verdict;
         break;
       }
@@ -185,49 +177,32 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
     // On an overloaded frame drop the backlog instead of letting it grow.
     if (accumRef.current > FLIGHT_DT) accumRef.current = FLIGHT_DT;
     flightRef.current = current;
+    placeRocket(current, renderDt);
 
-    const groundY = Math.max(current.py, 0);
-    const flightFields = {
-      fuel: current.fuel,
-      heat: current.heat,
-      stageSeparated: current.stageSeparated,
-      elapsed: current.elapsed,
-      maxAltitude: current.maxAltitude,
-      velocity: [current.vx, current.vy] as [number, number],
-    };
-
+    const point: [number, number] = [current.px, current.py];
     if (verdict) {
-      const endedOnGround = verdict.outcome === 'crashed' || verdict.outcome === 'suborbital';
-      const finalY = endedOnGround ? 0 : groundY;
-      placeRocket(current.px, finalY, current.vx, current.vy, renderDt);
       const result = verdict;
       onUpdateState((prev) => ({
         ...prev,
-        ...flightFields,
+        ...telemetry(current, prev),
         phase: 'outcome',
         outcome: result.outcome,
         outcomeReason: result.reason,
-        position: [current.px, finalY, 0],
-        altitude: finalY,
         orbit: result.orbit,
-        trajectory: appendTrajectoryPoint(prev.trajectory, [current.px, finalY]),
+        trajectory: appendTrajectoryPoint(prev.trajectory, point),
       }));
       return;
     }
 
-    placeRocket(current.px, groundY, current.vx, current.vy, renderDt);
     onUpdateState((prev) => ({
       ...prev,
-      ...flightFields,
-      phase: current.fuel > 0 ? 'launching' : 'coasting',
-      altitude: groundY,
-      position: [current.px, groundY, 0],
-      orbit: null,
-      trajectory: steps > 0 ? appendTrajectoryPoint(prev.trajectory, [current.px, groundY]) : prev.trajectory,
+      ...telemetry(current, prev),
+      phase: coastingAfterVerdict ? prev.phase : isBurning(current) ? 'launching' : 'coasting',
+      trajectory: steps > 0 ? appendTrajectoryPoint(prev.trajectory, point) : prev.trajectory,
     }));
   });
 
-  const isThrusting = state.phase === 'launching' && state.fuel > 0;
+  const isThrusting = state.phase === 'launching' && isBurning(flightRef.current);
   const showStageRing = params.stageSeparation && !state.stageSeparated;
 
   return (

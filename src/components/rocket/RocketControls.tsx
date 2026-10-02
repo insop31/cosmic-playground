@@ -35,6 +35,10 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AI_HINTS, type HintScenario, deriveHintScenario } from './rocketHints';
+import { vehicleSummary } from '../../physics/rocket';
+import { buildDebrief } from '../../learning/debrief';
+import { liveCoachMessage } from '../../learning/coach';
+import ShareFileButtons from '../ui/ShareFileButtons';
 
 interface RocketControlsProps {
   /** The values the student set. Sliders show and change these. */
@@ -51,7 +55,26 @@ interface RocketControlsProps {
   onSavePreset: (name: string) => boolean;
   onLoadPreset: (presetId: string) => void;
   onDeletePreset: (presetId: string) => void;
+  onExportFile: () => void;
+  onImportFile: (text: string) => Promise<string>;
+  /** The outcome the student expects from the next launch, if they made a prediction. */
+  prediction: LaunchOutcome | null;
+  onPredictionChange: (prediction: LaunchOutcome | null) => void;
 }
+
+const PREDICTION_CHOICES: { id: Exclude<LaunchOutcome, 'none'>; label: string }[] = [
+  { id: 'orbiting', label: 'Orbit' },
+  { id: 'suborbital', label: 'Falls back' },
+  { id: 'escape', label: 'Escape' },
+  { id: 'crashed', label: 'Crash' },
+  { id: 'burnup', label: 'Burn-up' },
+];
+
+const COACH_TONE_CLASS = {
+  info: 'text-foreground',
+  warning: 'text-orange-200',
+  danger: 'text-red-200',
+} as const;
 
 interface SliderRowProps {
   label: string;
@@ -68,7 +91,7 @@ interface SliderRowProps {
 }
 
 const PARAMETER_INFO: Record<keyof RocketParams, string> = {
-  launchAngle: 'Sets the rocket pitch at liftoff. Higher angles climb more vertically, while lower angles build horizontal speed earlier.',
+  launchAngle: 'After a short vertical climb the rocket tips over by this angle, then follows its own direction of travel (a gravity turn). More tilt builds sideways speed sooner but keeps the rocket lower in the thick air.',
   thrustForce: 'Controls how hard the engine pushes. More thrust improves acceleration and helps fight gravity and drag.',
   fuelMass: 'Defines how much propellant the rocket carries. More fuel extends powered flight but also makes the rocket heavier.',
   dryMass: 'The structural mass left after fuel is gone. A heavier dry mass makes the vehicle harder to accelerate.',
@@ -83,7 +106,9 @@ const PARAMETER_INFO: Record<keyof RocketParams, string> = {
   ambientTemperature: 'Changes launch-day temperature, slightly affecting engine efficiency and performance.',
   atmosphericPressure: 'Adjusts surface pressure, which changes how efficiently the engine performs near the ground.',
   padTilt: 'Tilts the launch pad away from perfectly upright. Small tilt changes can nudge the rocket into a different trajectory.',
-  stageSeparation: 'Splits the rocket into two stages. When stage 1 runs dry (60% of the fuel), its empty structure (40% of the dry mass) is dropped, so stage 2 has less mass to push.',
+  stageSeparation: 'Splits the rocket into two stages. When stage 1 runs dry its empty structure (half the dry mass) is dropped. Stage 2 coasts to the top of the climb and burns there, which is how real rockets reach orbit.',
+  stage2Thrust: 'Thrust of the upper-stage engine. It only has to push the light upper stage, so it can be much smaller than stage 1.',
+  stage2FuelShare: 'Share of the propellant carried by stage 2. A small upper stage is usually enough to turn a high climb into an orbit; a big one can reach escape.',
 };
 
 const SliderRow = ({ label, info, value, min, max, step, unit, onChange, disabled, effectiveValue }: SliderRowProps) => {
@@ -150,6 +175,10 @@ const RocketControls = ({
   onSavePreset,
   onLoadPreset,
   onDeletePreset,
+  onExportFile,
+  onImportFile,
+  prediction,
+  onPredictionChange,
 }: RocketControlsProps) => {
   const isActive = state.phase !== 'idle';
   const showOutcome = state.phase === 'outcome';
@@ -158,7 +187,10 @@ const RocketControls = ({
   const [presetName, setPresetName] = useState('');
   const [presetMessage, setPresetMessage] = useState('');
   const heatPercent = Math.min(100, state.heat * 100);
+  const summary = useMemo(() => vehicleSummary(effectiveParams), [effectiveParams]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const liveCoach = useMemo(() => liveCoachMessage(effectiveParams, state), [effectiveParams, state]);
+  const debrief = useMemo(() => (showOutcome ? buildDebrief(effectiveParams, state) : null), [effectiveParams, showOutcome, state]);
 
   // Bring the outcome card and its explanation into view when a flight ends.
   useEffect(() => {
@@ -235,15 +267,21 @@ const RocketControls = ({
                 <Bot size={18} className="text-primary" />
               </div>
               <div>
-                <div className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">AI Launch Coach</div>
-                <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-secondary/85">Always-on guidance</div>
+                <div className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Launch Coach</div>
+                <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-secondary/85">{liveCoach ? 'Reading live telemetry' : 'Tips for these settings'}</div>
               </div>
             </div>
           </div>
-          <div className="text-xs font-mono uppercase tracking-[0.18em] text-secondary mb-2">
-            Scenario: {hintScenario.replace(/-/g, ' ')}
-          </div>
-          <p className="text-[15px] text-foreground leading-relaxed font-medium">{activeHint}</p>
+          {liveCoach ? (
+            <p className={`text-[15px] leading-relaxed font-medium ${COACH_TONE_CLASS[liveCoach.tone]}`} aria-live="polite">{liveCoach.text}</p>
+          ) : (
+            <>
+              <div className="text-xs font-mono uppercase tracking-[0.18em] text-secondary mb-2">
+                Scenario: {hintScenario.replace(/-/g, ' ')}
+              </div>
+              <p className="text-[15px] text-foreground leading-relaxed font-medium">{activeHint}</p>
+            </>
+          )}
         </div>
 
         <div className="relative flex-1 min-h-0 flex flex-col">
@@ -269,6 +307,51 @@ const RocketControls = ({
               {state.outcomeReason && (
                 <p className="mt-2 text-sm leading-snug text-foreground/85">{state.outcomeReason}</p>
               )}
+              {prediction && (
+                <p className={`mt-2 text-sm font-semibold ${prediction === state.outcome ? 'text-primary' : 'text-orange-300'}`}>
+                  You predicted “{PREDICTION_CHOICES.find((c) => c.id === prediction)?.label}”: {prediction === state.outcome ? 'correct!' : 'not this time.'}
+                </p>
+              )}
+            </div>
+          )}
+
+          {debrief && (
+            <div className="rounded-lg border border-white/10 bg-muted/10 p-3 text-sm animate-fade-in" aria-label="Flight debrief">
+              <div className="text-xs font-mono uppercase tracking-widest text-primary/70 mb-1.5">Debrief</div>
+              <p className="font-medium text-foreground mb-2">{debrief.headline}</p>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Why</div>
+              <ul className="list-disc pl-4 space-y-1 text-foreground/85 mb-2">
+                {debrief.causes.map((cause) => <li key={cause}>{cause}</li>)}
+              </ul>
+              {debrief.suggestions.length > 0 && (
+                <>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Try next</div>
+                  <ul className="list-disc pl-4 space-y-1 text-primary/90 mb-2">
+                    {debrief.suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}
+                  </ul>
+                </>
+              )}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-xs tabular-nums">
+                {debrief.numbers.map((n) => (
+                  <div key={n.label} className="contents">
+                    <span className="text-muted-foreground">{n.label}</span>
+                    <span className="text-right text-foreground">{n.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isActive && state.events.length > 0 && (
+            <div className="rounded-lg border border-white/10 bg-muted/10 p-3">
+              <div className="text-xs font-mono uppercase tracking-widest text-primary/70 mb-1.5">Flight log</div>
+              <ol className="space-y-1 text-xs text-muted-foreground">
+                {state.events.map((event) => (
+                  <li key={`${event.time}-${event.kind}`} className={event.kind === 'lightning' || event.kind === 'seal-failure' ? 'text-destructive' : ''}>
+                    <span className="font-mono text-foreground/70">T+{event.time.toFixed(1)}s</span> {event.message}
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
 
@@ -289,6 +372,12 @@ const RocketControls = ({
               <div className="p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
                 <div className="flex items-center gap-1 mb-1"><Timer size={10} className="text-muted-foreground" /><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Time</p></div>
                 <p className="text-xl font-mono text-foreground font-bold">{state.elapsed.toFixed(1)}s</p>
+              </div>
+              <div className="col-span-2 p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Dynamic pressure (Max-Q {state.maxDynamicPressure.toFixed(2)})</span>
+                  <span className="font-mono font-bold text-foreground">{state.dynamicPressure.toFixed(2)}</span>
+                </div>
               </div>
               <div className="col-span-2 p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
                 <div className="flex items-center justify-between mb-1.5">
@@ -372,7 +461,7 @@ const RocketControls = ({
               <Gauge size={10} /> Propulsion
             </div>
             <div className="space-y-3">
-              <SliderRow label="Launch Angle"  info={PARAMETER_INFO.launchAngle}  value={params.launchAngle}  min={0}  max={45}  step={1}    unit=" deg"  onChange={(v) => onParamChange('launchAngle', v)}  disabled={isActive} />
+              <SliderRow label="Pitch-over"    info={PARAMETER_INFO.launchAngle}  value={params.launchAngle}  min={0}  max={45}  step={1}    unit=" deg"  onChange={(v) => onParamChange('launchAngle', v)}  disabled={isActive} />
               <SliderRow label="Thrust Force"  info={PARAMETER_INFO.thrustForce}  value={params.thrustForce}  min={10} max={100} step={1}    unit=" kN"   onChange={(v) => onParamChange('thrustForce', v)}  disabled={isActive} />
               <SliderRow label="Burn Duration" info={PARAMETER_INFO.burnDuration} value={params.burnDuration} min={3}  max={30}  step={0.5}  unit=" s"    onChange={(v) => onParamChange('burnDuration', v)} disabled={isActive} />
             </div>
@@ -437,6 +526,31 @@ const RocketControls = ({
             </button>
           </div>
 
+          {params.stageSeparation && (
+            <div className="space-y-3">
+              <SliderRow label="Stage 2 Thrust" info={PARAMETER_INFO.stage2Thrust} value={params.stage2Thrust} min={3} max={40} step={1} unit=" kN" onChange={(v) => onParamChange('stage2Thrust', v)} disabled={isActive} />
+              <SliderRow label="Stage 2 Fuel" info={PARAMETER_INFO.stage2FuelShare} value={params.stage2FuelShare * 100} min={5} max={50} step={1} unit=" %" onChange={(v) => onParamChange('stage2FuelShare', v / 100)} disabled={isActive} />
+            </div>
+          )}
+
+          <div className="rounded-lg border border-white/10 bg-muted/10 p-3 text-sm">
+            <div className="text-xs font-mono uppercase tracking-widest text-primary/70 mb-2">Vehicle</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono tabular-nums">
+              <span className="text-muted-foreground">Δv budget</span>
+              <span className="text-right text-foreground">{summary.deltaV.toFixed(2)}</span>
+              <span className="text-muted-foreground">Thrust ÷ weight</span>
+              <span className={`text-right ${summary.liftoffThrustToWeight < 1 ? 'text-destructive' : 'text-foreground'}`}>{summary.liftoffThrustToWeight.toFixed(2)}</span>
+              <span className="text-muted-foreground">Engine Isp</span>
+              <span className="text-right text-foreground">{summary.ispSeaLevel.toFixed(0)} s</span>
+              <span className="text-muted-foreground">Burn time</span>
+              <span className="text-right text-foreground">{summary.burnTimes.map((t) => `${t.toFixed(1)} s`).join(' + ')}</span>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground leading-snug">
+              Orbit needs about {summary.orbitSpeed.toFixed(2)} sideways at altitude 45; escape needs {summary.escapeSpeed.toFixed(2)} from the ground.
+              Gravity and drag eat into the budget along the way.
+            </p>
+          </div>
+
           <div className="space-y-2 border-t border-white/10 pt-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-sm font-mono text-primary/70 uppercase tracking-widest">
@@ -465,6 +579,7 @@ const RocketControls = ({
               </button>
             </form>
             {presetMessage && <p className="text-xs text-primary/90" role="status">{presetMessage}</p>}
+            <ShareFileButtons onExport={onExportFile} onImport={onImportFile} disabled={isActive} />
             {savedPresets.length > 0 && (
               <div className="space-y-1.5">
                 {savedPresets.map((preset) => (
@@ -656,6 +771,29 @@ const RocketControls = ({
 
         {/* ── Footer buttons ───────────────────────────────────────────────── */}
         <div className="pt-5 mt-2 border-t border-white/10 shrink-0">
+          {!isActive && (
+            <div className="mb-3">
+              <div className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1.5">Predict first: what will happen?</div>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Predicted outcome">
+                {PREDICTION_CHOICES.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={prediction === choice.id}
+                    onClick={() => onPredictionChange(prediction === choice.id ? null : choice.id)}
+                    className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                      prediction === choice.id
+                        ? 'border-primary/60 bg-primary/20 text-primary'
+                        : 'border-border/40 bg-muted/10 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {!isActive ? (
             <motion.button
               whileHover={{ scale: 1.02 }}

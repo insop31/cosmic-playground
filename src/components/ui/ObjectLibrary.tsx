@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { SPACETIME_TEMPLATES } from '../space/spacetimeTemplates';
 import type { CelestialBody } from '../space/SpaceScene';
 import type { SavedSpacetimeScenario } from '../../lib/scenarioStorage';
+import { formatMass } from '../../physics/units';
+import ShareFileButtons from './ShareFileButtons';
 
 interface PlanetPreset {
   name: string;
@@ -42,6 +44,8 @@ interface ObjectLibraryProps {
   bodies: CelestialBody[];
   onRemoveBody: (id: string) => void;
   onRemoveAll: () => void;
+  selectedBodyId: string | null;
+  onSelectBody: (id: string) => void;
   placementActive: boolean;
   onVelocityScaleChange: (value: number) => void;
   velocityScale: number;
@@ -53,6 +57,8 @@ interface ObjectLibraryProps {
   onSaveScenario: (name: string) => boolean;
   onLoadScenario: (scenarioId: string) => void;
   onDeleteScenario: (scenarioId: string) => void;
+  onExportFile: () => void;
+  onImportFile: (text: string) => Promise<string>;
 }
 
 const SAVED_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -97,6 +103,8 @@ const ObjectLibrary = ({
   bodies,
   onRemoveBody,
   onRemoveAll,
+  selectedBodyId,
+  onSelectBody,
   placementActive,
   onVelocityScaleChange,
   velocityScale,
@@ -108,6 +116,8 @@ const ObjectLibrary = ({
   onSaveScenario,
   onLoadScenario,
   onDeleteScenario,
+  onExportFile,
+  onImportFile,
 }: ObjectLibraryProps) => {
   const [selectedPlanetName, setSelectedPlanetName] = useState('Earth');
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -283,7 +293,10 @@ const ObjectLibrary = ({
             </p>
           )}
           {placementActive && (
-            <p className="text-[10px] text-primary/90 font-mono">Placement mode active: click on the spacetime grid</p>
+            <p className="text-sm text-primary/90 leading-snug" role="status">
+              Click the grid for a circular orbit, or drag from where it starts to aim it. The coloured line predicts
+              the next 20 s: green stays in orbit, amber escapes, red collides.
+            </p>
           )}
         </div>
 
@@ -312,6 +325,7 @@ const ObjectLibrary = ({
             </button>
           </form>
           {saveMessage && <p className="text-xs text-primary/90" role="status">{saveMessage}</p>}
+          <ShareFileButtons onExport={onExportFile} onImport={onImportFile} />
           {savedScenarios.length > 0 && (
             <div className="space-y-1.5 max-h-32 overflow-y-auto scrollbar-thin pr-1">
               {savedScenarios.map((scenario) => (
@@ -356,16 +370,26 @@ const ObjectLibrary = ({
               {bodies.map((body) => {
                 const label = body.name ?? body.type;
                 return (
-                  <div key={body.id} className="flex items-center gap-2 justify-between p-1.5 rounded bg-muted/20 hover:bg-muted/30 transition-colors group">
-                    <div className="flex items-center gap-2 overflow-hidden">
+                  <div
+                    key={body.id}
+                    className={`flex items-center gap-2 justify-between p-1.5 rounded transition-colors group ${
+                      body.id === selectedBodyId ? 'bg-primary/15 ring-1 ring-primary/40' : 'bg-muted/20 hover:bg-muted/30'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectBody(body.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left"
+                      title={`Inspect ${label}`}
+                    >
                       <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: body.color }} />
                       <span className="text-base text-muted-foreground truncate group-hover:text-foreground">
                         {label}
                       </span>
-                      <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">
-                        {MASS_FORMATTER.format(body.mass)} kg
+                      <span className="text-[10px] text-muted-foreground/70 font-mono shrink-0">
+                        {formatMass(body.mass)}
                       </span>
-                    </div>
+                    </button>
                     <button
                       onClick={() => onRemoveBody(body.id)}
                       className="text-muted-foreground hover:text-destructive p-1 rounded hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"

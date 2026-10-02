@@ -4,25 +4,45 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
-import type { CelestialBody } from './SpaceScene';
-import { gravityConstant, maxSpeedFor, velocityScaleFor } from '../../physics/constants';
+import type { CelestialBody } from '../../physics/types';
+import type { ImpactEvent } from '../../physics/nbody';
+import { MOTION_ESCAPING } from '../../physics/system';
 import {
-  MAX_TRAIL_POINTS,
-  createPhysicsBody,
-  spawnOrbitalVelocity,
-  stepSystem,
-  type PhysicsBody,
-} from '../../physics/nbody';
+  STATE_STRIDE,
+  S_DOMINANT,
+  S_MOTION,
+  S_RADIUS,
+  S_VX,
+  S_VZ,
+  S_X,
+  S_Z,
+  type Prediction,
+  type SimSnapshot,
+} from '../../physics/simulation';
+import { REALISTIC_G } from '../../physics/constants';
+import { conicPoints, orbitalElements } from '../../physics/orbits';
+import { SimulationClient } from '../../physics/simulationClient';
+import type { SimMessage } from '../../physics/simulationProtocol';
 
 /** Shown as a floating message box at the impact midpoint (world space). */
 export interface ImpactPopupState {
   id: string;
   title: string;
   detail: string;
+  /** The conservation numbers for this impact. */
+  stats?: string;
   position: [number, number, number];
 }
 
-/** Live state of one body, published every step for the grid and for saving scenarios. */
+/** Commands the rest of the app can send to the running simulation. */
+export interface SimulationControls {
+  seek: (step: number) => void;
+  /** Fly a copy of the system with `body` added; resolves null if the run changed meanwhile. */
+  predict: (body: CelestialBody, seconds?: number) => Promise<Prediction | null>;
+  setPinned: (id: string, pinned: boolean) => void;
+}
+
+/** Live state of one body, published every tick for the grid and for saving scenarios. */
 export interface LiveBodyState {
   id: string;
   position: [number, number, number];
@@ -32,24 +52,7 @@ export interface LiveBodyState {
   radius: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Simulation settings
-// ─────────────────────────────────────────────────────────────────────────────
-const FIXED_SUBSTEP  = 1 / 120;  // Physics step (s of simulated time)
-const MAX_SUBSTEPS   = 8;        // Steps per rendered frame before the backlog is dropped
-const MAX_HISTORY    = 3600;     // One snapshot per step → 30 s of simulated time to rewind
-const MAX_SIM_BODIES = 180;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal types
-// ─────────────────────────────────────────────────────────────────────────────
-interface WorldSnapshot {
-  id: string;
-  px: number; pz: number;
-  vx: number; vz: number;
-  mass: number;
-  radius: number;
-}
+const MAX_TRAIL_POINTS = 200;
 
 interface MeshEntry {
   groupRef:  React.MutableRefObject<THREE.Group | null>;
@@ -59,23 +62,43 @@ interface MeshEntry {
   trailAttr: THREE.BufferAttribute;
 }
 
+interface TrailBuffer {
+  data: Float32Array;
+  head: number;
+  len: number;
+}
+
 export interface PhysicsSimulatorProps {
   bodies: CelestialBody[];
   timeScale: number;
   realisticMode?: boolean;
   onBodyRemoved: (id: string) => void;
   onBodyUpdated: (id: string, mass: number, radius: number) => void;
-  /** Called when rewinding brings back a body that was absorbed in a collision. */
+  /** Called when rewinding brings back a body that was absorbed or removed later. */
   onBodyRestored: (body: CelestialBody) => void;
   livePhysicsRef: React.MutableRefObject<LiveBodyState[]>;
   /** Fractional expansion rate per simulated second; 0 disables expansion. */
   expansionRate?: number;
   /** Changing this value restarts the simulation from `bodies` and clears rewind history. */
   simulationEpoch?: number;
+  /** Receives every new simulation state (time, history range, markers, diagnostics). */
+  onSnapshot?: (snapshot: SimSnapshot) => void;
+  /** Collisions, mergers and tidal disruptions from simulation steps run forward. */
+  onImpacts?: (impacts: ImpactEvent[]) => void;
+  /** How many recent positions each trail shows (graphics quality). */
+  trailPoints?: number;
+  /** Called for bodies the simulation creates (fragments, tidal debris). */
+  onBodySpawned?: (body: CelestialBody) => void;
+  /** Filled with the seek / predict / pin commands once the simulation is running. */
+  simulationRef?: React.MutableRefObject<SimulationControls | null>;
+  selectedBodyId?: string | null;
+  /** Clicking a body selects it; pass undefined while placing so clicks reach the grid. */
+  onSelectBody?: (id: string) => void;
   controlsRef: RefObject<OrbitControlsImpl | null>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+const CONIC_SEGMENTS = 160;
+
 // Procedural canvas textures — generated once per body, never on every render
 // ─────────────────────────────────────────────────────────────────────────────
 function makeStarTexture(color: string): THREE.CanvasTexture {
@@ -358,6 +381,7 @@ function createBodyTexture(body: CelestialBody): THREE.CanvasTexture | null {
 interface BodyRendererProps {
   body:           CelestialBody;
   meshEntriesRef: React.MutableRefObject<Map<string, MeshEntry>>;
+  onSelect?: (id: string) => void;
 }
 
 interface CameraSnapshot {
@@ -366,7 +390,7 @@ interface CameraSnapshot {
   fov: number;
 }
 
-const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => {
+const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef, onSelect }) => {
   const groupRef   = useRef<THREE.Group | null>(null);
   const meshRef    = useRef<THREE.Mesh  | null>(null);
   const glowRef    = useRef<THREE.Mesh  | null>(null);
@@ -442,7 +466,13 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
   return (
     <>
       <primitive object={trailLine} />
-      <group ref={groupRef} position={body.position}>
+      <group
+        ref={groupRef}
+        position={body.position}
+        onClick={onSelect ? (e) => { e.stopPropagation(); onSelect(body.id); } : undefined}
+        onPointerOver={onSelect ? () => { document.body.style.cursor = 'pointer'; } : undefined}
+        onPointerOut={onSelect ? () => { document.body.style.cursor = ''; } : undefined}
+      >
 
         {/* ── Main surface sphere ─────────────────────────────────────────── */}
         <mesh ref={meshRef} scale={r}>
@@ -480,6 +510,11 @@ const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef }) => 
 
         {/* ── BLACK HOLE: photon sphere + animated accretion disk ─────────── */}
         {isBH && <>
+          {/* Innermost stable circular orbit: closer in, no orbit can last (3 × event horizon). */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} scale={r}>
+            <ringGeometry args={[2.94, 3.06, 128]} />
+            <meshBasicMaterial color="#e9d5ff" transparent opacity={0.35} side={THREE.DoubleSide} depthWrite={false} />
+          </mesh>
           {/* Purple photon-sphere halo */}
           <mesh scale={r * 1.30}>
             <sphereGeometry args={[1, 32, 32]} />
@@ -801,7 +836,8 @@ const ImpactCameraDirector = ({
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PhysicsSimulator
+// ─────────────────────────────────────────────────────────────────────────────
+// PhysicsSimulator — renders the simulation running in a worker (or in-process)
 // ─────────────────────────────────────────────────────────────────────────────
 const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   bodies,
@@ -813,21 +849,96 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   livePhysicsRef,
   expansionRate = 0,
   simulationEpoch = 0,
+  onSnapshot,
+  onImpacts,
+  trailPoints = MAX_TRAIL_POINTS,
+  onBodySpawned,
+  simulationRef,
+  selectedBodyId = null,
+  onSelectBody,
   controlsRef,
 }) => {
-  const physicsRef     = useRef<PhysicsBody[]>([]);
+  const clientRef      = useRef<SimulationClient | null>(null);
+  const selectedIdRef  = useRef<string | null>(selectedBodyId);
+  selectedIdRef.current = selectedBodyId;
+  const predictionsRef = useRef(new Map<number, (prediction: Prediction | null) => void>());
+  const predictionSeqRef = useRef(0);
   const meshEntriesRef = useRef(new Map<string, MeshEntry>());
-  const historyRef     = useRef<WorldSnapshot[][]>([]);
-  // Bodies absorbed in collisions, kept so rewinding past the collision can restore them.
-  const graveyardRef   = useRef(new Map<string, CelestialBody>());
-  const bodiesByIdRef  = useRef(new Map<string, CelestialBody>());
-  const accumRef       = useRef(0);
-  const rewindAccumRef = useRef(0);
-  const epochRef       = useRef(simulationEpoch);
-  const modeRef        = useRef(realisticMode);
-  const [renderList, setRenderList] = useState<CelestialBody[]>([]);
+  const trailsRef      = useRef(new Map<string, TrailBuffer>());
+  const epochRef       = useRef<number | null>(null);
+  // Ids the simulation has been told about this run, ids it removed itself (collisions,
+  // rewinds) and ids it restored that React has not added back yet.
+  const knownIdsRef      = useRef(new Set<string>());
+  const coreRemovedRef   = useRef(new Set<string>());
+  const prevPropIdsRef   = useRef(new Set<string>());
+  const bodiesByIdRef    = useRef(new Map<string, CelestialBody>());
+  const configRef        = useRef({ realisticMode, expansionRate });
+  const callbacksRef     = useRef({ onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned, onImpacts });
   const [activeImpact, setActiveImpact] = useState<ImpactPopupState | null>(null);
   const [hasPendingImpact, setHasPendingImpact] = useState(false);
+
+  configRef.current = { realisticMode, expansionRate };
+  const trailPointsRef = useRef(trailPoints);
+  trailPointsRef.current = Math.min(trailPoints, MAX_TRAIL_POINTS);
+  callbacksRef.current = { onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned, onImpacts };
+
+  // Predicted orbit of the selected body and a ring marking it; updated every snapshot.
+  const conicLine = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((CONIC_SEGMENTS + 1) * 3), 3));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.LineDashedMaterial({ color: '#4ade80', dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.85 });
+    const line = new THREE.Line(geometry, material);
+    line.frustumCulled = false;
+    return line;
+  }, []);
+  const selectionRing = useMemo(() => {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.45, 1.6, 64),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    return ring;
+  }, []);
+
+  /** Draw the selected body's two-body orbit around its dominant body. */
+  const updateSelection = (snapshot: SimSnapshot) => {
+    const id = selectedIdRef.current;
+    const i = id ? snapshot.ids.indexOf(id) : -1;
+    if (i < 0) {
+      selectionRing.visible = false;
+      conicLine.geometry.setDrawRange(0, 0);
+      return;
+    }
+    const { data, masses } = snapshot;
+    const o = i * STATE_STRIDE;
+    selectionRing.visible = true;
+    selectionRing.position.set(data[o + S_X], 0.05, data[o + S_Z]);
+    selectionRing.scale.setScalar(Math.max(data[o + S_RADIUS], 0.3));
+    const d = data[o + S_DOMINANT];
+    if (d < 0 || d >= snapshot.ids.length) {
+      conicLine.geometry.setDrawRange(0, 0);
+      return;
+    }
+    const od = d * STATE_STRIDE;
+    // Velocities are in realistic units, so the realistic G gives the orbit's true shape.
+    const el = orbitalElements(
+      data[o + S_X] - data[od + S_X],
+      data[o + S_Z] - data[od + S_Z],
+      data[o + S_VX] - data[od + S_VX],
+      data[o + S_VZ] - data[od + S_VZ],
+      REALISTIC_G * (masses[d] + masses[i]),
+    );
+    const points = conicPoints(el, data[od + S_X], data[od + S_Z], CONIC_SEGMENTS);
+    const attr = conicLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    points.forEach(([x, z], k) => { arr[k * 3] = x; arr[k * 3 + 1] = 0.02; arr[k * 3 + 2] = z; });
+    attr.needsUpdate = true;
+    conicLine.geometry.setDrawRange(0, points.length);
+    conicLine.computeLineDistances();
+    (conicLine.material as THREE.LineDashedMaterial).color.set(el.energy < 0 ? '#4ade80' : '#fbbf24');
+  };
 
   // Holds the most recent collision that arrived while a popup was already showing.
   // At most one item — always replaced by the newest so the queue never grows unbounded.
@@ -835,14 +946,12 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const activeImpactRef  = useRef<ImpactPopupState | null>(null);
   const impactSeqRef     = useRef(0);
 
-  const queueImpactPopups = useCallback((items: ImpactPopupState[]) => {
-    if (items.length === 0) return;
-    const latest = items[items.length - 1];
+  const queueImpactPopup = useCallback((item: ImpactPopupState) => {
     if (!activeImpactRef.current) {
-      activeImpactRef.current = latest;
-      setActiveImpact(latest);
+      activeImpactRef.current = item;
+      setActiveImpact(item);
     } else {
-      pendingImpactRef.current = latest;
+      pendingImpactRef.current = item;
       setHasPendingImpact(true);
     }
   }, []);
@@ -855,255 +964,216 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     setActiveImpact(next);
   }, []);
 
-  const publishLiveState = useCallback(() => {
-    const velScale = velocityScaleFor(modeRef.current);
-    livePhysicsRef.current = physicsRef.current.map((b) => ({
-      id: b.id,
-      position: [b.position.x, 0, b.position.z],
-      velocity: [b.velocity.x / velScale, 0, b.velocity.z / velScale],
-      mass: b.mass,
-      radius: b.radius,
-    }));
-  }, [livePhysicsRef]);
+  const clearImpacts = useCallback(() => {
+    pendingImpactRef.current = null;
+    activeImpactRef.current = null;
+    setActiveImpact(null);
+    setHasPendingImpact(false);
+  }, []);
 
-  // ── Mesh sync (bypasses React re-render every frame) ─────────────────────
-  const positionMeshes = useCallback((bods: PhysicsBody[]) => {
-    for (const body of bods) {
-      const entry = meshEntriesRef.current.get(body.id);
+  const appendTrail = (id: string, x: number, z: number) => {
+    let trail = trailsRef.current.get(id);
+    if (!trail) {
+      trail = { data: new Float32Array(MAX_TRAIL_POINTS * 3), head: 0, len: 0 };
+      trailsRef.current.set(id, trail);
+    }
+    const idx = trail.head * 3;
+    trail.data[idx] = x;
+    trail.data[idx + 1] = 0;
+    trail.data[idx + 2] = z;
+    trail.head = (trail.head + 1) % MAX_TRAIL_POINTS;
+    trail.len = Math.min(trail.len + 1, MAX_TRAIL_POINTS);
+
+    const entry = meshEntriesRef.current.get(id);
+    if (!entry) return;
+    // Unroll the newest `shown` points of the ring buffer into the line geometry in order.
+    const arr = entry.trailAttr.array as Float32Array;
+    const shown = Math.min(trail.len, trailPointsRef.current);
+    for (let k = 0; k < shown; k++) {
+      const src = ((trail.head - shown + k + MAX_TRAIL_POINTS) % MAX_TRAIL_POINTS) * 3;
+      arr[k * 3] = trail.data[src];
+      arr[k * 3 + 1] = trail.data[src + 1];
+      arr[k * 3 + 2] = trail.data[src + 2];
+    }
+    entry.trailAttr.needsUpdate = true;
+    entry.trailLine.geometry.setDrawRange(0, shown);
+  };
+
+  const clearTrails = () => {
+    trailsRef.current.clear();
+    for (const entry of meshEntriesRef.current.values()) entry.trailLine.geometry.setDrawRange(0, 0);
+  };
+
+  /** Move meshes to the snapshot; bodies missing from it are hidden until React drops them. */
+  const applySnapshot = (snapshot: SimSnapshot, appendTrails: boolean) => {
+    const { ids, data, masses } = snapshot;
+    const present = new Set(ids);
+    const live: LiveBodyState[] = new Array(ids.length);
+    for (let i = 0; i < ids.length; i++) {
+      const o = i * STATE_STRIDE;
+      const x = data[o + S_X];
+      const z = data[o + S_Z];
+      const radius = data[o + S_RADIUS];
+      live[i] = {
+        id: ids[i],
+        position: [x, 0, z],
+        velocity: [data[o + S_VX], 0, data[o + S_VZ]],
+        mass: masses[i],
+        radius,
+      };
+      if (appendTrails) appendTrail(ids[i], x, z);
+      const entry = meshEntriesRef.current.get(ids[i]);
       if (!entry) continue;
-      entry.groupRef.current?.position.copy(body.position);
-      entry.meshRef.current?.scale.setScalar(body.radius);
+      entry.groupRef.current?.position.set(x, 0, z);
+      entry.meshRef.current?.scale.setScalar(radius);
       if (entry.glowRef.current) {
-        entry.glowRef.current.scale.setScalar(body.radius * 1.8);
+        entry.glowRef.current.scale.setScalar(radius * 1.8);
         const mat = entry.glowRef.current.material as THREE.MeshBasicMaterial;
-        if (mat) mat.opacity = body.motionState === 'escaping' ? 0.18 : 0.08;
+        if (mat) mat.opacity = data[o + S_MOTION] === MOTION_ESCAPING ? 0.18 : 0.08;
       }
     }
-  }, []);
-
-  const appendTrails = useCallback((bods: PhysicsBody[]) => {
-    for (const body of bods) {
-      // Write position to ring-buffer trail (pre-allocated — no GC pressure)
-      const idx = body.trailHead * 3;
-      body.trailData[idx]     = body.position.x;
-      body.trailData[idx + 1] = 0;
-      body.trailData[idx + 2] = body.position.z;
-      body.trailHead = (body.trailHead + 1) % MAX_TRAIL_POINTS;
-      body.trailLen  = Math.min(body.trailLen + 1, MAX_TRAIL_POINTS);
-
-      const entry = meshEntriesRef.current.get(body.id);
-      if (!entry) continue;
-      // Unroll ring-buffer into the line geometry attribute in correct order
-      const arr  = entry.trailAttr.array as Float32Array;
-      const len  = body.trailLen;
-      const head = body.trailHead;
-      for (let k = 0; k < len; k++) {
-        const src = ((head - len + k + MAX_TRAIL_POINTS) % MAX_TRAIL_POINTS) * 3;
-        const dst = k * 3;
-        arr[dst]     = body.trailData[src];
-        arr[dst + 1] = body.trailData[src + 1];
-        arr[dst + 2] = body.trailData[src + 2];
-      }
-      entry.trailAttr.needsUpdate = true;
-      entry.trailLine.geometry.setDrawRange(0, len);
+    for (const [id, entry] of meshEntriesRef.current) {
+      const visible = present.has(id);
+      if (entry.groupRef.current) entry.groupRef.current.visible = visible;
+      entry.trailLine.visible = visible;
     }
-  }, []);
-
-  const clearTrails = useCallback(() => {
-    for (const entry of meshEntriesRef.current.values()) {
-      entry.trailLine.geometry.setDrawRange(0, 0);
-    }
-  }, []);
-
-  // ── Sync incoming React bodies → physics state ───────────────────────────
-  useEffect(() => {
-    if (epochRef.current !== simulationEpoch) {
-      // Reset, template or saved scenario: start a fresh simulation from `bodies`.
-      epochRef.current = simulationEpoch;
-      physicsRef.current = [];
-      historyRef.current = [];
-      graveyardRef.current.clear();
-      accumRef.current = 0;
-      rewindAccumRef.current = 0;
-      pendingImpactRef.current = null;
-      activeImpactRef.current = null;
-      setActiveImpact(null);
-      setHasPendingImpact(false);
-      clearTrails();
-    } else if (modeRef.current !== realisticMode) {
-      // Gravity mode changed mid-run: rescale velocities so every orbit keeps its shape.
-      const ratio = velocityScaleFor(realisticMode) / velocityScaleFor(modeRef.current);
-      for (const b of physicsRef.current) b.velocity.multiplyScalar(ratio);
-      for (const snap of historyRef.current) {
-        for (const e of snap) { e.vx *= ratio; e.vz *= ratio; }
-      }
-    }
-    modeRef.current = realisticMode;
-
-    const effectiveG = gravityConstant(realisticMode);
-    const velScale = velocityScaleFor(realisticMode);
-    const currentIds  = new Set(physicsRef.current.map((b) => b.id));
-    const incomingIds = new Set(bodies.map((b) => b.id));
-
-    for (const body of bodies) {
-      if (currentIds.has(body.id)) continue;
-      const pos = new THREE.Vector3(body.position[0], 0, body.position[2]);
-      const provided = body.velocity ?? [0, 0, 0];
-      const hasVelocity = provided[0] * provided[0] + provided[2] * provided[2] > 1e-12;
-      const vel = hasVelocity
-        ? new THREE.Vector3(provided[0] * velScale, 0, provided[2] * velScale)
-        : spawnOrbitalVelocity(pos, physicsRef.current, effectiveG);
-      physicsRef.current.push(createPhysicsBody({
-        id: body.id,
-        position: pos,
-        velocity: vel,
-        mass: body.mass,
-        radius: body.radius,
-        type: body.type,
-        color: body.color,
-      }));
-    }
-
-    physicsRef.current = physicsRef.current.filter((b) => incomingIds.has(b.id));
-    for (const id of currentIds) {
-      if (!incomingIds.has(id)) meshEntriesRef.current.delete(id);
-    }
-    bodiesByIdRef.current = new Map(bodies.map((b) => [b.id, b]));
-    setRenderList([...bodies]);
-    positionMeshes(physicsRef.current);
-    publishLiveState();
-  }, [bodies, realisticMode, simulationEpoch, clearTrails, positionMeshes, publishLiveState]);
-
-  /** Tell the parent about mass/radius values that differ from its copy. */
-  const reportChangedBodies = () => {
-    for (const body of physicsRef.current) {
-      const orig = bodiesByIdRef.current.get(body.id);
-      if (orig && (orig.mass !== body.mass || orig.radius !== body.radius)) {
-        onBodyUpdated(body.id, body.mass, body.radius);
-      }
-    }
+    livePhysicsRef.current = live;
   };
 
-  // ── One fixed simulation step ─────────────────────────────────────────────
-  const stepPhysics = (bods: PhysicsBody[], dt: number) => {
-    // Snapshot for time-rewind
-    historyRef.current.push(bods.map((b) => ({
-      id: b.id,
-      px: b.position.x, pz: b.position.z,
-      vx: b.velocity.x, vz: b.velocity.z,
-      mass: b.mass,
-      radius: b.radius,
-    })));
-    if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
+  const handleMessage = (message: SimMessage) => {
+    if (message.type === 'prediction') {
+      const resolve = predictionsRef.current.get(message.requestId);
+      predictionsRef.current.delete(message.requestId);
+      resolve?.(message.epoch === epochRef.current ? message.prediction : null);
+      return;
+    }
+    if (message.epoch !== epochRef.current) return;
+    const { result, snapshot } = message;
+    const callbacks = callbacksRef.current;
 
-    const { impacts, removed } = stepSystem(bods, dt, {
-      effectiveG: gravityConstant(realisticMode),
-      maxSpeed: maxSpeedFor(realisticMode),
-      expansionRate,
-    });
-
-    if (impacts.length) {
-      queueImpactPopups(impacts.map((impact) => ({
-        ...impact,
+    for (const impact of result.impacts) {
+      queueImpactPopup({
         id: `impact-${impactSeqRef.current++}`,
-      })));
+        title: impact.title,
+        detail: impact.detail,
+        stats: impact.kind === 'tidal'
+          ? 'Momentum kept: 100% · Energy for the stream came from the black hole’s tides'
+          : `Momentum kept: 100% · Impact energy turned to heat: ${Math.round(impact.kineticEnergyLost * 100)}%`,
+        position: impact.position,
+      });
     }
-
-    const survivors = removed.size > 0 ? bods.filter((b) => !removed.has(b.id)) : bods;
-    appendTrails(survivors);
-    positionMeshes(survivors);
-
-    if (removed.size > 0) {
-      for (const id of removed) {
-        const original = bodiesByIdRef.current.get(id);
-        if (original) graveyardRef.current.set(id, original);
+    for (const body of result.spawned) {
+      knownIdsRef.current.add(body.id);
+      callbacks.onBodySpawned?.(body);
+    }
+    for (const id of result.removed) {
+      coreRemovedRef.current.add(id);
+      callbacks.onBodyRemoved(id);
+    }
+    for (const body of result.restored) {
+      coreRemovedRef.current.delete(body.id);
+      knownIdsRef.current.add(body.id);
+      callbacks.onBodyRestored(body);
+    }
+    for (const update of result.updated) {
+      const current = bodiesByIdRef.current.get(update.id);
+      if (current && (current.mass !== update.mass || current.radius !== update.radius)) {
+        callbacks.onBodyUpdated(update.id, update.mass, update.radius);
       }
-      physicsRef.current = physicsRef.current.filter((b) => !removed.has(b.id));
-      for (const id of removed) meshEntriesRef.current.delete(id);
-      setRenderList((prev) => prev.filter((b) => !removed.has(b.id)));
-      removed.forEach((id) => onBodyRemoved(id));
-      // Survivors that absorbed mass report their new mass/radius
-      reportChangedBodies();
     }
-
-    publishLiveState();
+    if (result.impacts.length > 0) callbacks.onImpacts?.(result.impacts);
+    applySnapshot(snapshot, result.direction === 1 && result.stepsTaken > 0);
+    updateSelection(snapshot);
+    callbacks.onSnapshot?.(snapshot);
   };
+  const handleMessageRef = useRef(handleMessage);
+  handleMessageRef.current = handleMessage;
 
-  // ── Rewind: restore the state from `steps` snapshots ago ──────────────────
-  const rewindPhysics = (steps: number) => {
-    let snap: WorldSnapshot[] | undefined;
-    for (let s = 0; s < steps; s++) {
-      const popped = historyRef.current.pop();
-      if (!popped) break;
-      snap = popped;
+  useEffect(() => {
+    const client = new SimulationClient((message) => handleMessageRef.current(message));
+    clientRef.current = client;
+    const predictions = predictionsRef.current;
+    if (simulationRef) {
+      simulationRef.current = {
+        seek: (step) => {
+          if (epochRef.current !== null) client.send({ type: 'seek', epoch: epochRef.current, step });
+        },
+        predict: (body, seconds = 20) => new Promise((resolve) => {
+          if (epochRef.current === null) { resolve(null); return; }
+          const requestId = predictionSeqRef.current++;
+          predictions.set(requestId, resolve);
+          client.send({ type: 'predict', epoch: epochRef.current, requestId, body, seconds });
+        }),
+        setPinned: (id, pinned) => {
+          if (epochRef.current !== null) client.send({ type: 'pin', epoch: epochRef.current, id, pinned });
+        },
+      };
     }
-    if (!snap) return;
+    return () => {
+      client.dispose();
+      clientRef.current = null;
+      epochRef.current = null;
+      for (const resolve of predictions.values()) resolve(null);
+      predictions.clear();
+      if (simulationRef) simulationRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    const velScale = velocityScaleFor(realisticMode);
-    const restored: CelestialBody[] = [];
-    for (const entry of snap) {
-      let body = physicsRef.current.find((b) => b.id === entry.id);
-      if (!body) {
-        const original = graveyardRef.current.get(entry.id);
-        if (!original) continue; // removed by the user, not by a collision
-        graveyardRef.current.delete(entry.id);
-        body = createPhysicsBody({
-          id: original.id,
-          position: [entry.px, 0, entry.pz],
-          velocity: [entry.vx, 0, entry.vz],
-          mass: entry.mass,
-          radius: entry.radius,
-          type: original.type,
-          color: original.color,
-        });
-        physicsRef.current.push(body);
-        restored.push({
-          ...original,
-          position: [entry.px, 0, entry.pz],
-          velocity: [entry.vx / velScale, 0, entry.vz / velScale],
-          mass: entry.mass,
-          radius: entry.radius,
-        });
-      }
-      body.position.set(entry.px, 0, entry.pz);
-      body.velocity.set(entry.vx, 0, entry.vz);
-      body.mass = entry.mass;
-      body.radius = entry.radius;
-      body.motionState = 'bound';
-    }
+  // ── Keep the simulation's body list in step with React's ─────────────────
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!client) return;
+    const propIds = new Set(bodies.map((b) => b.id));
+    bodiesByIdRef.current = new Map(bodies.map((b) => [b.id, b]));
 
-    positionMeshes(physicsRef.current);
-    restored.forEach((body) => onBodyRestored(body));
-    reportChangedBodies();
-    publishLiveState();
-  };
-
-  // ── Frame loop ────────────────────────────────────────────────────────────
-  useFrame((_, delta) => {
-    if (timeScale === 0) return;
-    const frameDt = Math.min(delta, 0.1) * Math.abs(timeScale);
-
-    if (timeScale < 0) {
-      // Rewind at the selected speed: one snapshot was stored per fixed step.
-      rewindAccumRef.current += frameDt;
-      const steps = Math.floor(rewindAccumRef.current / FIXED_SUBSTEP);
-      if (steps > 0) {
-        rewindAccumRef.current -= steps * FIXED_SUBSTEP;
-        rewindPhysics(steps);
-      }
+    if (epochRef.current !== simulationEpoch) {
+      // Reset, template, saved scenario or first run: start a fresh simulation.
+      epochRef.current = simulationEpoch;
+      knownIdsRef.current = new Set(propIds);
+      coreRemovedRef.current = new Set();
+      prevPropIdsRef.current = propIds;
+      clearTrails();
+      clearImpacts();
+      client.send({
+        type: 'load',
+        epoch: simulationEpoch,
+        bodies,
+        config: { realistic: configRef.current.realisticMode, expansionRate: configRef.current.expansionRate },
+      });
       return;
     }
 
-    // Forward: fixed-step accumulator for frame-rate-independent simulation
-    accumRef.current += frameDt;
-    let steps = 0;
-    while (accumRef.current >= FIXED_SUBSTEP && steps < MAX_SUBSTEPS) {
-      stepPhysics(physicsRef.current.slice(0, MAX_SIM_BODIES), FIXED_SUBSTEP);
-      accumRef.current -= FIXED_SUBSTEP;
-      steps++;
+    for (const body of bodies) {
+      if (knownIdsRef.current.has(body.id)) continue;
+      knownIdsRef.current.add(body.id);
+      client.send({ type: 'add', epoch: simulationEpoch, body });
     }
-    // On an overloaded frame drop the backlog instead of letting it grow every frame.
-    if (accumRef.current > FIXED_SUBSTEP) accumRef.current = FIXED_SUBSTEP;
+    for (const id of prevPropIdsRef.current) {
+      if (propIds.has(id)) continue;
+      if (coreRemovedRef.current.has(id)) continue; // the simulation removed it itself
+      client.send({ type: 'remove', epoch: simulationEpoch, id });
+      trailsRef.current.delete(id);
+    }
+    prevPropIdsRef.current = propIds;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bodies, simulationEpoch]);
+
+  useEffect(() => {
+    if (epochRef.current === null) return;
+    clientRef.current?.send({ type: 'config', epoch: epochRef.current, config: { realistic: realisticMode } });
+  }, [realisticMode]);
+
+  useEffect(() => {
+    if (epochRef.current === null) return;
+    clientRef.current?.send({ type: 'config', epoch: epochRef.current, config: { expansionRate } });
+  }, [expansionRate]);
+
+  // ── Frame loop: ask the simulation to advance (or rewind) by this frame's time ──
+  useFrame((_, delta) => {
+    const client = clientRef.current;
+    if (!client || epochRef.current === null || timeScale === 0) return;
+    client.tick(epochRef.current, Math.min(delta, 0.1) * timeScale);
   });
 
   return (
@@ -1142,6 +1212,9 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
             <div className="text-base text-foreground/90 leading-relaxed border-t border-border/50 pt-3">
               {activeImpact.detail}
             </div>
+            {activeImpact.stats && (
+              <div className="mt-2 text-xs font-mono text-primary/80">{activeImpact.stats}</div>
+            )}
             {hasPendingImpact && (
               <div className="mt-3 text-[11px] text-primary/60 font-mono">
                 +1 more collision — dismiss to view
@@ -1150,8 +1223,10 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
           </div>
         </Html>
       )}
-      {renderList.map(body => (
-        <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} />
+      <primitive object={conicLine} />
+      <primitive object={selectionRing} />
+      {bodies.map(body => (
+        <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} onSelect={onSelectBody} />
       ))}
     </>
   );

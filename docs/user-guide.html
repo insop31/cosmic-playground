@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cosmic Playground: Guide for Students and Teachers</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  :root { --ink: #10162a; --muted: #4b5675; --accent: #0e7490; --accent2: #7c3aed; --line: #d7dcea; --soft: #f2f5fb; }
+  * { box-sizing: border-box; }
+  body { font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.45; margin: 0; }
+  h1, h2, h3 { line-height: 1.15; margin: 0; }
+  h2 { font-size: 17pt; color: var(--accent); margin: 0 0 3mm; padding-bottom: 1.5mm; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 12pt; margin: 4mm 0 1.5mm; }
+  p { margin: 0 0 2.2mm; }
+  ul, ol { margin: 0 0 2.5mm; padding-left: 5mm; }
+  li { margin-bottom: 1mm; }
+  section { break-before: page; }
+  figure { margin: 2mm 0 3mm; }
+  figure img { width: 100%; border-radius: 3mm; border: 1px solid var(--line); display: block; }
+  figure.narrow img { width: 86%; margin: 0 auto; }
+  figure.narrow figcaption { text-align: center; }
+  figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 1mm; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 1mm 0 3mm; }
+  th, td { text-align: left; padding: 1.4mm 2mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  kbd { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 9pt; border: 1px solid #b7bfd6; border-bottom-width: 2px; border-radius: 1.2mm; padding: 0 1.5mm; background: #fff; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+  .note { background: var(--soft); border-left: 3px solid var(--accent); padding: 2.5mm 3.5mm; border-radius: 1.5mm; margin: 2mm 0 3mm; }
+  .teacher { border-left-color: var(--accent2); }
+  .cover { height: 262mm; display: flex; flex-direction: column; justify-content: space-between; background: linear-gradient(160deg, #050a14 0%, #11183a 55%, #2b1550 100%); color: #e8ecff; border-radius: 4mm; padding: 16mm 14mm; }
+  .cover h1 { font-size: 34pt; letter-spacing: 0.04em; }
+  .cover .sub { font-size: 13pt; color: #a8b4e6; margin-top: 3mm; }
+  .cover img { width: 100%; border-radius: 3mm; border: 1px solid rgba(255,255,255,0.15); }
+  .cover .foot { font-size: 9pt; color: #8f9bcc; }
+  .pill { display: inline-block; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent2); border: 1px solid #cdb9f5; border-radius: 10mm; padding: 0.3mm 2.5mm; margin-bottom: 2mm; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div>
+    <h1>COSMIC PLAYGROUND</h1>
+    <div class="sub">A physics lab you can break. Guide for students and teachers.</div>
+  </div>
+  <img src="img/spacetime-inspector.jpg" alt="The Spacetime Lab with the orbit inspector open">
+  <div>
+    <p>Textbooks show physics as finished answers. In Cosmic Playground you make a prediction, run the experiment, watch it succeed or fail, and work out why. Two labs: a <b>Spacetime Lab</b> for gravity and orbits, and a <b>Rocket Lab</b> for launching to orbit through real weather.</p>
+    <p class="foot">Runs in any modern browser. Nothing to install for students.</p>
+  </div>
+</div>
+
+<section>
+  <h2>1. The Spacetime Lab</h2>
+  <p>Every body pulls on every other body, just as in the real Solar System. Masses are real (the Sun is 1.989 × 10³⁰ kg), one astronomical unit (AU) is 8 grid squares, and one year is the time an orbit at 1 AU takes. The grid bends under each mass so you can see the gravity well.</p>
+  <figure class="narrow">
+    <img src="img/spacetime-preview.jpg" alt="Placing a comet with the orbit preview">
+    <figcaption>Placing a comet: before you click, the preview line shows where it will go and what will happen.</figcaption>
+  </figure>
+  <h3>Placing bodies</h3>
+  <ol>
+    <li>Pick an object on the left: one of 8 real planets, a star, black hole, neutron star, asteroid or comet.</li>
+    <li>Move over the grid. The <b>preview line</b> shows the next 20 seconds: <b style="color:#16a34a">green</b> it stays in orbit, <b style="color:#ca8a04">yellow</b> it escapes, <b style="color:#dc2626">red</b> it hits something.</li>
+    <li><b>Click</b> to drop it into a circular orbit, or <b>press and drag</b> to throw it with your own speed and direction.</li>
+  </ol>
+  <p>The <b>placement velocity</b> slider scales the orbital speed: below 1 the body falls inwards, above about 1.41 it escapes. Try it and check the preview.</p>
+  <h3>What can happen</h3>
+  <table>
+    <tr><th>Event</th><th>When</th></tr>
+    <tr><td>Merge</td><td>A slow collision: the bodies join, keeping their total momentum.</td></tr>
+    <tr><td>Bounce</td><td>Faster than the pair's escape speed: they rebound and lose energy as heat.</td></tr>
+    <tr><td>Shatter</td><td>Much faster: the smaller body breaks into fragments.</td></tr>
+    <tr><td>Swallowed</td><td>Anything crossing a black hole's event horizon.</td></tr>
+    <tr><td>Torn apart</td><td>A body that strays inside a black hole's Roche limit is stretched into a stream.</td></tr>
+  </table>
+  <p>Each impact opens a short explanation with the momentum kept and the energy released, and leaves a marker on the timeline.</p>
+</section>
+
+<section>
+  <h2>2. Measuring orbits</h2>
+  <figure>
+    <img src="img/spacetime-lesson.jpg" alt="The Kepler lesson loaded with teacher notes">
+    <figcaption>A teacher pack loaded: the Resonant Chain system with its lesson notes and missions.</figcaption>
+  </figure>
+  <div class="two">
+    <div>
+      <h3>Orbit inspector</h3>
+      <p>Click any body (in the scene or in the Active Bodies list). The inspector shows what it orbits, its distance and speed, the size and shape of the orbit, how long one lap takes, its closest and farthest points, and <b>T² ÷ a³</b>. For every planet of the same star that number comes out the same: Kepler's third law. A dashed line in the scene shows the orbit it is following.</p>
+      <p>Tick <b>Pin in place</b> to hold a body still while it keeps pulling on the others.</p>
+    </div>
+    <div>
+      <h3>Time and conservation</h3>
+      <p>The time bar plays, pauses, speeds up to 4× and rewinds. Drag the timeline to scrub back through the last 30 seconds; impact markers show when things happened, and absorbed bodies come back.</p>
+      <p>The <b>Conservation</b> tab plots energy, momentum and angular momentum. They stay flat while only gravity acts, and jump at a collision, where energy turns into heat.</p>
+      <p><b>Arcade gravity</b> (untick Realistic physics) is 4× stronger with a speed cap: same shapes, faster play.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3. The Rocket Lab</h2>
+  <p>Launch a rocket from a small planet and try to reach orbit. The flight follows real physics: gravity weakens with height, the air thins with altitude, drag depends on speed through the air (and the wind), and fuel burns away, making the rocket lighter. This is the rocket equation at work.</p>
+  <figure>
+    <img src="img/rocket-orbit.jpg" alt="A two-stage rocket in orbit">
+    <figcaption>A two-stage launch in a stable orbit, with the flight log and telemetry.</figcaption>
+  </figure>
+  <div class="two">
+    <div>
+      <h3>Before launch</h3>
+      <ul>
+        <li><b>18 settings</b>: pitch-over angle, thrust, burn time, fuel and dry mass, drag, air, wind, heating, temperature, pressure, pad tilt, gravity, planet size and staging.</li>
+        <li><b>Weather</b>: 8 conditions. Each changes the values flown (shown in orange next to the slider), and some bring hazards such as lightning or frozen seals.</li>
+        <li>The <b>Vehicle</b> box shows the Δv budget (the total speed change the fuel can give), the thrust-to-weight ratio (it must be above 1 to lift off) and the speed an orbit needs.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Why one stage is not enough</h3>
+      <p>A rocket that burns all its fuel near the ground comes back down: the lowest point of its path can never be higher than where the engine stopped. Turn on <b>stage separation</b>. Stage 1 drops away when it is empty; stage 2 coasts to the top of the climb and burns sideways there, lifting the lowest point of the path above the air.</p>
+      <h3>Outcomes</h3>
+      <p><b>Orbit</b>, <b>escape</b>, <b>falls back</b>, <b>crash</b> or <b>burn-up</b>, judged from the rocket's energy and the lowest point of its path. Watch <b>Max-Q</b> (the hardest push of the air on the rocket) and the <b>heat shield</b>.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>4. Predict, launch, explain</h2>
+  <div class="two">
+    <figure><img src="img/rocket-debrief.jpg" alt="Debrief after a flight"><figcaption>The debrief names the cause and one change to try.</figcaption></figure>
+    <figure><img src="img/notebook.jpg" alt="Lab notebook comparing two runs"><figcaption>The lab notebook compares two runs setting by setting.</figcaption></figure>
+  </div>
+  <ol>
+    <li><b>Predict.</b> Under the Ignite button, choose what you think will happen. You score points when you are right.</li>
+    <li><b>Launch.</b> During the flight the <b>Launch Coach</b> reads the telemetry: Max-Q, heating, staging, and how much sideways speed an orbit still needs.</li>
+    <li><b>Read the debrief.</b> What happened, why (with the numbers), and one specific change to try next.</li>
+    <li><b>Compare.</b> Every launch is written into the <b>Notebook</b> (top right). Tick two runs to see exactly which settings changed and what that did to the Δv, peak height, Max-Q and heating.</li>
+  </ol>
+  <div class="note">Change one thing at a time. If two settings change between runs, the notebook cannot tell you which one mattered.</div>
+  <h3>Missions</h3>
+  <p>Missions are checked against what really happens in the simulation, not just what you click. For example, <i>Gravity Master</i> needs planets that stay in orbit for three laps of the outermost one, and <i>Slingshot Expert</i> needs a flyby that really raises a comet's speed by 30%. There are 20 missions in 11 packs. Pick a pack in the Mission Progress panel.</p>
+</section>
+
+<section>
+  <h2>5. For teachers</h2>
+  <span class="pill">Teacher packs</span>
+  <p>Each teacher pack is one lesson: notes with questions to ask, three missions, and a <b>Load lesson setup</b> button that puts the right system or rocket on every screen.</p>
+  <table>
+    <tr><th>Lesson</th><th>Lab</th><th>Big idea</th></tr>
+    <tr><td>Kepler's Laws</td><td>Spacetime</td><td>Farther planets are slower; T² ÷ a³ is the same for every planet of one star.</td></tr>
+    <tr><td>Gravity Assists</td><td>Spacetime</td><td>A moving body can lend speed to a small one that swings past it.</td></tr>
+    <tr><td>Black Holes and Tides</td><td>Spacetime</td><td>Orbits around a black hole obey the same rules, until tides tear a body apart.</td></tr>
+    <tr><td>The Rocket Equation</td><td>Rocket</td><td>Fuel is heavy: doubling it does not double the speed; dropping empty tanks helps.</td></tr>
+    <tr><td>Weather and Launch Safety</td><td>Rocket</td><td>Wind, heat and thick air decide whether a launch is safe.</td></tr>
+  </table>
+  <div class="note teacher"><b>Sharing set-ups.</b> Save a system or rocket preset, then press <b>Export file</b> to download everything saved on that computer. Students press <b>Import file</b> to add it to theirs. Files are checked before anything is stored.</div>
+  <h3>Settings and accessibility</h3>
+  <p>The gear icon (top right) holds <b>graphics quality</b> (use Low on older laptops and Chromebooks), <b>reduce motion</b> (on automatically when the device asks for it) and <b>high contrast</b>.</p>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><kbd>Space</kbd></td><td>Pause or play</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Reset the current lab</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Stop placing a body, close a dialog</td></tr>
+    <tr><td><kbd>Tab</kbd></td><td>Switch labs while the 3D view is focused (click the view first). Elsewhere Tab moves between controls as usual.</td></tr>
+    <tr><td>Drag / scroll</td><td>Turn the camera / zoom</td></tr>
+  </table>
+  <h3>Good to know</h3>
+  <ul>
+    <li>Saved systems, presets, the notebook and settings are kept in the browser on that computer. Export a file to move them.</li>
+    <li>The rocket's planet is small (radius around 50 km) so that orbits happen within a lesson; the physics is the same as for Earth.</li>
+    <li>Speeds above 4× and rewinds longer than 30 s are not available, to keep the simulation accurate.</li>
+  </ul>
+</section>
+
+</body>
+</html>

@@ -1,5 +1,4 @@
 import { Play, Pause, Rewind, FastForward, RotateCcw } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 interface TimeControlsProps {
   timeScale: number;
@@ -39,69 +38,70 @@ const TimeControls = ({ timeScale, isPlaying, onPlay, onPause, onSpeedChange, on
 
   return (
     <div className="glass-panel-strong px-5 py-3.5 flex items-center gap-4 border border-white/10 shadow-[0_0_40px_rgba(139,92,246,0.15)] rounded-2xl">
-      <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
+      <button
+        type="button"
         onClick={onReset}
-        title="Reset"
-        className="p-2 rounded-xl hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground border border-transparent hover:border-white/10"
+        title="Reset (R)"
+        aria-label="Reset"
+        className="press p-2 rounded-xl hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground border border-transparent hover:border-white/10"
       >
         <RotateCcw size={16} strokeWidth={2} />
-      </motion.button>
+      </button>
 
-      <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
+      <button
+        type="button"
         onClick={handleRewind}
         title="Rewind"
-        className={`p-2 rounded-xl border transition-colors ${
+        aria-label="Rewind faster"
+        className={`press p-2 rounded-xl border transition-colors ${
           isReversing 
             ? 'text-primary glow-border bg-primary/20 border-primary/30' 
             : 'text-muted-foreground hover:text-foreground border-transparent hover:bg-white/10 hover:border-white/10'
         }`}
       >
         <Rewind size={18} fill={isReversing ? 'currentColor' : 'none'} strokeWidth={2} />
-      </motion.button>
+      </button>
 
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+      <button
+        type="button"
         onClick={isPlaying ? onPause : onPlay}
-        className="p-3.5 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 text-primary hover:from-primary/40 hover:to-primary/20 transition-all border border-primary/30 shadow-[0_0_20px_rgba(34,211,238,0.3)]"
+        title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+        aria-label={isPlaying ? 'Pause' : 'Play'}
+        className="press p-3.5 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 text-primary hover:from-primary/40 hover:to-primary/20 transition-all border border-primary/30 shadow-[0_0_20px_rgba(34,211,238,0.3)]"
       >
         {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
-      </motion.button>
+      </button>
 
-      <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
+      <button
+        type="button"
         onClick={handleFastForward}
         title="Fast Forward"
-        className={`p-2 rounded-xl border transition-colors ${
+        aria-label="Speed up"
+        className={`press p-2 rounded-xl border transition-colors ${
           !isReversing && timeScale > 1
             ? 'text-primary glow-border bg-primary/20 border-primary/30'
             : 'text-muted-foreground hover:text-foreground border-transparent hover:bg-white/10 hover:border-white/10'
         }`}
       >
         <FastForward size={18} fill={(!isReversing && timeScale > 1) ? 'currentColor' : 'none'} strokeWidth={2} />
-      </motion.button>
+      </button>
 
       {/* Speed preset chips */}
       <div className="flex items-center gap-1.5 ml-3 pl-3 border-l border-white/10">
         {SPEED_STEPS.map((s) => (
-          <motion.button
+          <button
             key={s}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            type="button"
             onClick={() => { onSpeedChange(s); if (!isPlaying) onPlay(); }}
-            className={`px-2.5 py-1.5 text-xs font-mono rounded-lg transition-all border ${
+            aria-pressed={timeScale === s}
+            className={`press px-2.5 py-1.5 text-xs font-mono rounded-lg transition-all border ${
               timeScale === s
                 ? 'bg-primary/20 text-primary border-primary/30 shadow-[inset_0_0_10px_rgba(34,211,238,0.2)]'
                 : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-white/5 hover:border-white/10'
             }`}
           >
             {s < 0 ? `◀${Math.abs(s)}` : `${s}x`}
-          </motion.button>
+          </button>
         ))}
       </div>
 
