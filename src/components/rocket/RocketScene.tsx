@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import type { RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
@@ -586,6 +586,14 @@ const RocketScene = ({
 }: RocketSceneProps) => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const lightningStrikeRef = useRef(createLightningStrikeState());
+
+  // A lightning strike in the flight physics also jolts the rocket on screen.
+  const strikeCount = state.events.filter((event) => event.kind === 'lightning').length;
+  useEffect(() => {
+    if (strikeCount === 0) return;
+    lightningStrikeRef.current.impulse = 1;
+    lightningStrikeRef.current.version += 1;
+  }, [strikeCount]);
   const escapedPastExosphere =
     state.phase === 'outcome' && state.outcome === 'escape' && state.altitude > EXOSPHERE_LIMIT;
   const userControlled =
@@ -650,7 +658,7 @@ const RocketScene = ({
         phase={state.phase}
         lightningStrike={lightningStrikeRef.current}
       >
-        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
+        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} activeWeather={activeWeather} />
       </WeatherShakeGroup>
 
       <CinematicCamera state={state} params={params} controlsRef={controlsRef} userControlled={userControlled} />

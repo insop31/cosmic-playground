@@ -35,6 +35,7 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AI_HINTS, type HintScenario, deriveHintScenario } from './rocketHints';
+import { vehicleSummary } from '../../physics/rocket';
 
 interface RocketControlsProps {
   /** The values the student set. Sliders show and change these. */
@@ -68,7 +69,7 @@ interface SliderRowProps {
 }
 
 const PARAMETER_INFO: Record<keyof RocketParams, string> = {
-  launchAngle: 'Sets the rocket pitch at liftoff. Higher angles climb more vertically, while lower angles build horizontal speed earlier.',
+  launchAngle: 'After a short vertical climb the rocket tips over by this angle, then follows its own direction of travel (a gravity turn). More tilt builds sideways speed sooner but keeps the rocket lower in the thick air.',
   thrustForce: 'Controls how hard the engine pushes. More thrust improves acceleration and helps fight gravity and drag.',
   fuelMass: 'Defines how much propellant the rocket carries. More fuel extends powered flight but also makes the rocket heavier.',
   dryMass: 'The structural mass left after fuel is gone. A heavier dry mass makes the vehicle harder to accelerate.',
@@ -83,7 +84,9 @@ const PARAMETER_INFO: Record<keyof RocketParams, string> = {
   ambientTemperature: 'Changes launch-day temperature, slightly affecting engine efficiency and performance.',
   atmosphericPressure: 'Adjusts surface pressure, which changes how efficiently the engine performs near the ground.',
   padTilt: 'Tilts the launch pad away from perfectly upright. Small tilt changes can nudge the rocket into a different trajectory.',
-  stageSeparation: 'Splits the rocket into two stages. When stage 1 runs dry (60% of the fuel), its empty structure (40% of the dry mass) is dropped, so stage 2 has less mass to push.',
+  stageSeparation: 'Splits the rocket into two stages. When stage 1 runs dry its empty structure (half the dry mass) is dropped. Stage 2 coasts to the top of the climb and burns there, which is how real rockets reach orbit.',
+  stage2Thrust: 'Thrust of the upper-stage engine. It only has to push the light upper stage, so it can be much smaller than stage 1.',
+  stage2FuelShare: 'Share of the propellant carried by stage 2. A small upper stage is usually enough to turn a high climb into an orbit; a big one can reach escape.',
 };
 
 const SliderRow = ({ label, info, value, min, max, step, unit, onChange, disabled, effectiveValue }: SliderRowProps) => {
@@ -158,6 +161,7 @@ const RocketControls = ({
   const [presetName, setPresetName] = useState('');
   const [presetMessage, setPresetMessage] = useState('');
   const heatPercent = Math.min(100, state.heat * 100);
+  const summary = useMemo(() => vehicleSummary(effectiveParams), [effectiveParams]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Bring the outcome card and its explanation into view when a flight ends.
@@ -272,6 +276,19 @@ const RocketControls = ({
             </div>
           )}
 
+          {isActive && state.events.length > 0 && (
+            <div className="rounded-lg border border-white/10 bg-muted/10 p-3">
+              <div className="text-xs font-mono uppercase tracking-widest text-primary/70 mb-1.5">Flight log</div>
+              <ol className="space-y-1 text-xs text-muted-foreground">
+                {state.events.map((event) => (
+                  <li key={`${event.time}-${event.kind}`} className={event.kind === 'lightning' || event.kind === 'seal-failure' ? 'text-destructive' : ''}>
+                    <span className="font-mono text-foreground/70">T+{event.time.toFixed(1)}s</span> {event.message}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
           {isActive && (
             <div className="grid grid-cols-2 gap-2">
               <div className="p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
@@ -289,6 +306,12 @@ const RocketControls = ({
               <div className="p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
                 <div className="flex items-center gap-1 mb-1"><Timer size={10} className="text-muted-foreground" /><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Time</p></div>
                 <p className="text-xl font-mono text-foreground font-bold">{state.elapsed.toFixed(1)}s</p>
+              </div>
+              <div className="col-span-2 p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Dynamic pressure (Max-Q {state.maxDynamicPressure.toFixed(2)})</span>
+                  <span className="font-mono font-bold text-foreground">{state.dynamicPressure.toFixed(2)}</span>
+                </div>
               </div>
               <div className="col-span-2 p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
                 <div className="flex items-center justify-between mb-1.5">
@@ -372,7 +395,7 @@ const RocketControls = ({
               <Gauge size={10} /> Propulsion
             </div>
             <div className="space-y-3">
-              <SliderRow label="Launch Angle"  info={PARAMETER_INFO.launchAngle}  value={params.launchAngle}  min={0}  max={45}  step={1}    unit=" deg"  onChange={(v) => onParamChange('launchAngle', v)}  disabled={isActive} />
+              <SliderRow label="Pitch-over"    info={PARAMETER_INFO.launchAngle}  value={params.launchAngle}  min={0}  max={45}  step={1}    unit=" deg"  onChange={(v) => onParamChange('launchAngle', v)}  disabled={isActive} />
               <SliderRow label="Thrust Force"  info={PARAMETER_INFO.thrustForce}  value={params.thrustForce}  min={10} max={100} step={1}    unit=" kN"   onChange={(v) => onParamChange('thrustForce', v)}  disabled={isActive} />
               <SliderRow label="Burn Duration" info={PARAMETER_INFO.burnDuration} value={params.burnDuration} min={3}  max={30}  step={0.5}  unit=" s"    onChange={(v) => onParamChange('burnDuration', v)} disabled={isActive} />
             </div>
@@ -435,6 +458,31 @@ const RocketControls = ({
             >
               <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${params.stageSeparation ? 'left-5 bg-primary' : 'left-0.5 bg-muted-foreground'}`} />
             </button>
+          </div>
+
+          {params.stageSeparation && (
+            <div className="space-y-3">
+              <SliderRow label="Stage 2 Thrust" info={PARAMETER_INFO.stage2Thrust} value={params.stage2Thrust} min={3} max={40} step={1} unit=" kN" onChange={(v) => onParamChange('stage2Thrust', v)} disabled={isActive} />
+              <SliderRow label="Stage 2 Fuel" info={PARAMETER_INFO.stage2FuelShare} value={params.stage2FuelShare * 100} min={5} max={50} step={1} unit=" %" onChange={(v) => onParamChange('stage2FuelShare', v / 100)} disabled={isActive} />
+            </div>
+          )}
+
+          <div className="rounded-lg border border-white/10 bg-muted/10 p-3 text-sm">
+            <div className="text-xs font-mono uppercase tracking-widest text-primary/70 mb-2">Vehicle</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono tabular-nums">
+              <span className="text-muted-foreground">Δv budget</span>
+              <span className="text-right text-foreground">{summary.deltaV.toFixed(2)}</span>
+              <span className="text-muted-foreground">Thrust ÷ weight</span>
+              <span className={`text-right ${summary.liftoffThrustToWeight < 1 ? 'text-destructive' : 'text-foreground'}`}>{summary.liftoffThrustToWeight.toFixed(2)}</span>
+              <span className="text-muted-foreground">Engine Isp</span>
+              <span className="text-right text-foreground">{summary.ispSeaLevel.toFixed(0)} s</span>
+              <span className="text-muted-foreground">Burn time</span>
+              <span className="text-right text-foreground">{summary.burnTimes.map((t) => `${t.toFixed(1)} s`).join(' + ')}</span>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground leading-snug">
+              Orbit needs about {summary.orbitSpeed.toFixed(2)} sideways at altitude 45; escape needs {summary.escapeSpeed.toFixed(2)} from the ground.
+              Gravity and drag eat into the budget along the way.
+            </p>
           </div>
 
           <div className="space-y-2 border-t border-white/10 pt-4">

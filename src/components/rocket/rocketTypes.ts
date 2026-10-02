@@ -1,7 +1,7 @@
 import { predictFlight } from '../../physics/rocket';
 
 export interface RocketParams {
-  launchAngle: number;       // degrees from vertical (0 = straight up)
+  launchAngle: number;       // pitch-over angle in degrees from vertical (gravity turn)
   thrustForce: number;       // kN
   fuelMass: number;          // kg
   dryMass: number;           // kg
@@ -17,6 +17,8 @@ export interface RocketParams {
   atmosphericPressure: number; // 0.6-1.4 relative pressure
   padTilt: number;           // degrees offset from ideal launch pad alignment
   stageSeparation: boolean;
+  stage2Thrust: number;      // kN, upper-stage engine
+  stage2FuelShare: number;   // 0.05-0.5 share of the propellant carried by stage 2
 }
 
 export const DEFAULT_PARAMS: RocketParams = {
@@ -36,7 +38,12 @@ export const DEFAULT_PARAMS: RocketParams = {
   atmosphericPressure: 1,
   padTilt: 0,
   stageSeparation: false,
+  stage2Thrust: 8,
+  stage2FuelShare: 0.12,
 };
+
+/** Fill in settings added after a preset was saved, so old presets keep loading. */
+export const normalizeRocketParams = (params: Partial<RocketParams>): RocketParams => ({ ...DEFAULT_PARAMS, ...params });
 
 export type LaunchOutcome = 'none' | 'orbiting' | 'suborbital' | 'escape' | 'crashed' | 'burnup';
 
@@ -68,6 +75,30 @@ export interface RocketState {
   stageSeparated: boolean;
   /** Plain-language explanation of the outcome, shown after the flight. */
   outcomeReason: string;
+  /** Current and peak dynamic pressure q = ½ρv² (scene units). */
+  dynamicPressure: number;
+  maxDynamicPressure: number;
+  /** Notable moments of the flight, in order. */
+  events: FlightEventRecord[];
+  /** Seeds the weather hazards for this launch so rewinds replay them exactly. */
+  seed: number;
+}
+
+export type FlightEventKind =
+  | 'liftoff'
+  | 'pitch-over'
+  | 'max-q'
+  | 'stage-separation'
+  | 'stage-ignition'
+  | 'burnout'
+  | 'lightning'
+  | 'seal-failure';
+
+export interface FlightEventRecord {
+  time: number;
+  altitude: number;
+  kind: FlightEventKind;
+  message: string;
 }
 
 export const INITIAL_STATE: RocketState = {
@@ -84,6 +115,10 @@ export const INITIAL_STATE: RocketState = {
   heat: 0,
   stageSeparated: false,
   outcomeReason: '',
+  dynamicPressure: 0,
+  maxDynamicPressure: 0,
+  events: [],
+  seed: 1,
 };
 
 /** Predicted path for the current settings; same model and time step as the real flight. */

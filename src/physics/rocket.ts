@@ -1,51 +1,96 @@
 // Pure 2D flight model for the Rocket Lab. The live flight (RocketModel) and the
-// trajectory preview both step this same model with the same fixed time step, so the
-// preview is an exact prediction of the flight up to the point an outcome is decided.
-import type { LaunchOutcome, OrbitPathState, RocketParams } from '../components/rocket/rocketTypes';
+// trajectory preview step this same model with the same fixed time step, so the preview is
+// an exact prediction of the flight (weather hazards aside, which are random by nature).
+//
+// Coordinates: the launch pad is at (0, 0); the planet's centre is at (0, −R). "Up" is the
+// local vertical (away from the centre) and "downrange" is the direction of travel along
+// the surface. Units are scene units; thrust in kN divided by mass in kg gives scene
+// accelerations after THRUST_SCALE.
+import type {
+  FlightEventKind,
+  FlightEventRecord,
+  LaunchOutcome,
+  OrbitPathState,
+  RocketParams,
+} from '../components/rocket/rocketTypes';
 
 export const FLIGHT_DT = 1 / 60;              // Fixed flight step (s)
-export const PREVIEW_DURATION = 60;           // Seconds of flight the preview predicts
+export const PREVIEW_DURATION = 90;           // Seconds of flight the preview predicts
 
-// Scene-scale tuning shared by flight and preview.
-const GRAVITY_SCALE = 0.01;
-const DRAG_SCALE = 0.003;
-const WIND_SCALE = 0.0011;
-const ATMOSPHERE_FALLOFF = 0.015;             // Air density falls to zero at altitude ≈ 67
+// ── Scene-scale tuning shared by flight and preview ──────────────────────────
+const GRAVITY_SCALE = 0.01;                   // m/s² slider → scene units/s²
+export const THRUST_SCALE = 0.4;              // kN/kg → scene units/s²
+const FRONTAL_AREA = 0.3;                     // nose-on reference area
+const SIDE_AREA = 3.0;                        // side-on area (a rocket is long and thin)
+const SIDE_DRAG_COEFFICIENT = 1.0;            // a cylinder broadside to the flow
+export const SCALE_HEIGHT = 6;                // air thins by a factor e every 6 units
+// Wind is exaggerated so a crosswind visibly pushes the rocket off course.
+const WIND_SCALE = 0.04;                      // m/s slider → scene units/s
+const WIND_SCALE_HEIGHT = 12;
+const VACUUM_THRUST_FACTOR = 1.15;            // engines push harder without air pressure
+const STAGE_TWO_ISP_GAIN = 1.08;              // upper-stage engines are tuned for vacuum
+export const STAGE_ONE_DRY_FRACTION = 0.5;    // share of the dry mass dropped with stage 1
+export const STAGE_GAP = 0.5;                 // minimum coast between stage 1 cutoff and stage 2 ignition
+const MAX_COAST_TO_APOAPSIS = 90;             // stage 2 waits at most this long for apoapsis
+const TURN_START_ALTITUDE = 0.6;              // vertical climb before pitching over
+const PITCH_KICK_DURATION = 2;                // seconds to tip over to the chosen angle
+const UPPER_STAGE_MAX_PITCH = (80 * Math.PI) / 180; // stage 2 never points below 10° above the horizon
+const G0 = 9.80665;
 
-// Outcomes are judged once the rocket is above this altitude (the top weather layers).
-export const ORBIT_ALTITUDE_THRESHOLD = 45;
-// An orbit only counts if its lowest point stays above the dense lower atmosphere.
-export const MIN_PERIAPSIS_ALTITUDE = 20;
+// ── Outcomes ─────────────────────────────────────────────────────────────────
+export const ORBIT_ALTITUDE_THRESHOLD = 45;   // reference altitude for the orbit-speed readout
+export const MIN_PERIAPSIS_ALTITUDE = 18;     // an orbit must stay above the thick air (<5% density)
+export const ESCAPE_JUDGE_ALTITUDE = 25;      // escape is judged once clear of the dense air
 export const SUBORBITAL_ALTITUDE = 25;
-// The drawn orbit plays back faster than real time so a full lap takes seconds, not minutes.
-export const ORBIT_TIME_COMPRESSION = 10;
+export const ORBIT_TIME_COMPRESSION = 10;     // orbits play back 10× faster than real time
 
-// Staging: stage 1 holds this share of the propellant; at its burnout the empty stage-1
-// structure (this share of the dry mass) is dropped and stage 2 burns the rest.
-export const STAGE_ONE_FUEL_FRACTION = 0.6;
-export const STAGE_ONE_DRY_FRACTION = 0.4;
-
-// Aerodynamic heating: rate ∝ air density · speed³, scaled up by the thermal-load setting.
-// Burn-up happens when accumulated heat reaches the heat-shield limit (1.0).
-export const HEATING_COEFFICIENT = 5e-4;
+// Aerodynamic heating (Sutton–Graves): rate ∝ √ρ · v³, raised by the thermal-load setting.
+export const HEATING_COEFFICIENT = 0.01;
 export const HEAT_SHIELD_LIMIT = 1;
+
+// ── Weather hazards ──────────────────────────────────────────────────────────
+export const LIGHTNING_ALTITUDE = 15;         // storm clouds reach this high
+export const LIGHTNING_RATE = 0.06;           // strikes per second while inside them
+export const COLD_SEAL_THRESHOLD = -20;       // °C; colder than this, seals can fail
+const SEAL_FAILURE_THRUST = 0.6;              // thrust left after an O-ring leak
+
+export interface FlightEnvironment {
+  /** Lightning can strike while climbing through storm clouds. */
+  lightning: boolean;
+  /** Seed for this launch's random hazards; the same seed replays the same flight. */
+  seed: number;
+}
+
+export const CALM_ENVIRONMENT: FlightEnvironment = { lightning: false, seed: 1 };
 
 export interface FlightState {
   px: number;
   py: number;
   vx: number;
   vy: number;
-  /** Remaining propellant as a fraction of the initial load (0–1). */
-  fuel: number;
-  elapsed: number;
-  /** Accumulated heating as a fraction of the heat-shield limit. */
-  heat: number;
+  fuel1: number;                 // kg left in stage 1 (all the fuel without staging)
+  fuel2: number;                 // kg left in stage 2
+  stage: 1 | 2 | 0;              // burning stage; 0 once every engine has stopped
+  stageGap: number;              // seconds left of the minimum coast after separation
+  coastTime: number;             // seconds stage 2 has waited for apoapsis
+  stage2Lit: boolean;
   stageSeparated: boolean;
+  elapsed: number;
+  heat: number;                  // accumulated heating ÷ heat-shield limit
+  q: number;                     // current dynamic pressure ½ρv²
+  maxQ: number;
+  maxQLogged: boolean;
+  attitude: number;              // radians from local vertical, + downrange
+  pitchStart: number;            // time the pitch-over began (−1 before)
+  gravityTurn: boolean;          // following the velocity vector
   liftedOff: boolean;
   maxAltitude: number;
+  engineFactor: number;          // 1, or less after a seal failure
+  engineOut: boolean;            // lightning shut the engines down
+  sealFailAt: number;            // scheduled seal failure time (−1 none)
+  rng: number;                   // random state for hazards
+  events: FlightEventRecord[];
 }
-
-export type FlightEvent = 'stage-separation' | 'burnout';
 
 export interface FlightVerdict {
   outcome: Exclude<LaunchOutcome, 'none'>;
@@ -55,62 +100,152 @@ export interface FlightVerdict {
 
 export interface FlightStepResult {
   state: FlightState;
-  events: FlightEvent[];
+  events: FlightEventRecord[];
   verdict: FlightVerdict | null;
 }
 
-export const initialFlightState = (): FlightState => ({
-  px: 0,
-  py: 0,
-  vx: 0,
-  vy: 0,
-  fuel: 1,
-  elapsed: 0,
-  heat: 0,
-  stageSeparated: false,
-  liftedOff: false,
-  maxAltitude: 0,
-});
-
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-export const dryMassNow = (params: RocketParams, state: FlightState) =>
-  (state.stageSeparated ? params.dryMass * (1 - STAGE_ONE_DRY_FRACTION) : params.dryMass);
-
-export const vehicleMass = (params: RocketParams, state: FlightState) =>
-  dryMassNow(params, state) + state.fuel * params.fuelMass;
-
-/** Engine efficiency from launch-day pressure and temperature. */
-export const thrustEnvironmentFactor = (params: RocketParams) => {
-  const pressureFactor = clamp(1.04 - (params.atmosphericPressure - 1) * 0.22, 0.78, 1.14);
-  const temperatureFactor = clamp(1 - (params.ambientTemperature - 15) * 0.0024, 0.82, 1.08);
-  return pressureFactor * temperatureFactor;
+/** mulberry32: small, fast, seedable. Returns [random in 0–1, next state]. */
+const nextRandom = (state: number): [number, number] => {
+  let t = (state + 0x6d2b79f5) | 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return [((t ^ (t >>> 14)) >>> 0) / 4294967296, (state + 0x6d2b79f5) | 0];
 };
 
-export const atmosphereFactor = (params: RocketParams, altitude: number) =>
-  Math.max(0, 1 - altitude * ATMOSPHERE_FALLOFF) * params.atmosphericDensity;
-
-/** Thrust-to-weight ratio at ignition; below 1 the rocket cannot leave the pad. */
-export const liftoffThrustToWeight = (params: RocketParams) => {
-  const mass = params.dryMass + params.fuelMass;
-  return (params.thrustForce * thrustEnvironmentFactor(params)) / mass / (params.gravity * GRAVITY_SCALE);
+const stageFuel = (params: RocketParams) => {
+  if (!params.stageSeparation) return [params.fuelMass, 0];
+  const share = clamp(params.stage2FuelShare, 0.05, 0.95);
+  return [params.fuelMass * (1 - share), params.fuelMass * share];
 };
 
-const normalize = (x: number, y: number): [number, number] => {
-  const length = Math.hypot(x, y) || 1;
-  return [x / length, y / length];
+export const initialFlightState = (params: RocketParams, env: FlightEnvironment = CALM_ENVIRONMENT): FlightState => {
+  const [fuel1, fuel2] = stageFuel(params);
+  return {
+    px: 0,
+    py: 0,
+    vx: 0,
+    vy: 0,
+    fuel1,
+    fuel2,
+    stage: 1,
+    stageGap: 0,
+    coastTime: 0,
+    stage2Lit: false,
+    stageSeparated: false,
+    elapsed: 0,
+    heat: 0,
+    q: 0,
+    maxQ: 0,
+    maxQLogged: false,
+    attitude: (params.padTilt * Math.PI) / 180,
+    pitchStart: -1,
+    gravityTurn: false,
+    liftedOff: false,
+    maxAltitude: 0,
+    engineFactor: 1,
+    engineOut: false,
+    sealFailAt: -2,
+    rng: env.seed | 0,
+    events: [],
+  };
 };
 
-/**
- * Gravitational parameter μ = g₀·R² of the planet in scene units, from surface gravity and
- * radius. Orbit and escape are judged against this, so both sliders matter.
- */
+// ── Planet and atmosphere ────────────────────────────────────────────────────
+
+/** Gravitational parameter μ = g₀·R² from surface gravity and radius. */
 export const gravitationalParameter = (params: RocketParams) =>
   params.gravity * GRAVITY_SCALE * params.planetRadius * params.planetRadius;
 
-/** Escape speed √(2μ/r) at the given altitude above the surface. */
+export const radiusOf = (params: RocketParams, s: Pick<FlightState, 'px' | 'py'>) =>
+  Math.hypot(s.px, s.py + params.planetRadius);
+
+export const altitudeOf = (params: RocketParams, s: Pick<FlightState, 'px' | 'py'>) =>
+  radiusOf(params, s) - params.planetRadius;
+
+/** Escape speed √(2μ/r) at the given altitude. */
 export const escapeSpeedAt = (params: RocketParams, altitude: number) =>
   Math.sqrt((2 * gravitationalParameter(params)) / (params.planetRadius + Math.max(altitude, 0)));
+
+/** Circular orbit speed √(μ/r) at the given altitude. */
+export const orbitalSpeedAt = (params: RocketParams, altitude: number) =>
+  Math.sqrt(gravitationalParameter(params) / (params.planetRadius + Math.max(altitude, 0)));
+
+/** Sea-level air density from the density slider, pressure and temperature (ρ ∝ p/T). */
+export const surfaceDensity = (params: RocketParams) =>
+  Math.max(0, params.atmosphericDensity * params.atmosphericPressure * (288 / (273 + clamp(params.ambientTemperature, -80, 80))));
+
+export const airDensity = (params: RocketParams, altitude: number) =>
+  surfaceDensity(params) * Math.exp(-Math.max(altitude, 0) / SCALE_HEIGHT);
+
+/** Engine efficiency at launch-day temperature. */
+const temperatureFactor = (params: RocketParams) => clamp(1 - (params.ambientTemperature - 15) * 0.0024, 0.82, 1.08);
+
+/** Sea-level thrust share from launch-day pressure; vacuum thrust is higher still. */
+const seaLevelFactor = (params: RocketParams) => clamp(1.04 - (params.atmosphericPressure - 1) * 0.22, 0.78, 1.14);
+
+/** Thrust multiplier at altitude: blends from sea-level to vacuum as the air thins. */
+export const thrustFactorAt = (params: RocketParams, altitude: number) => {
+  const rho0 = surfaceDensity(params);
+  const thin = rho0 > 0 ? 1 - airDensity(params, altitude) / rho0 : 1;
+  return temperatureFactor(params) * (seaLevelFactor(params) + (VACUUM_THRUST_FACTOR - seaLevelFactor(params)) * thin);
+};
+
+/** Stage-1 propellant flow (kg/s): the burn-duration slider spreads the fuel over that time. */
+const stageOneFlow = (params: RocketParams) => params.fuelMass / Math.max(params.burnDuration, 0.1);
+
+/** Exhaust speed (scene units/s) in vacuum for each stage. */
+const exhaustSpeeds = (params: RocketParams) => {
+  const ve1 = (params.thrustForce * THRUST_SCALE * VACUUM_THRUST_FACTOR) / stageOneFlow(params);
+  return [ve1, ve1 * STAGE_TWO_ISP_GAIN];
+};
+
+const stageTwoFlow = (params: RocketParams) =>
+  (params.stage2Thrust * THRUST_SCALE * VACUUM_THRUST_FACTOR) / exhaustSpeeds(params)[1];
+
+const dryMassNow = (params: RocketParams, s: FlightState) =>
+  params.dryMass * (s.stageSeparated ? 1 - STAGE_ONE_DRY_FRACTION : 1);
+
+export const vehicleMass = (params: RocketParams, s: FlightState) => dryMassNow(params, s) + s.fuel1 + s.fuel2;
+
+export interface VehicleSummary {
+  /** Thrust ÷ weight at ignition; below 1 the rocket cannot leave the pad. */
+  liftoffThrustToWeight: number;
+  /** Sea-level specific impulse in seconds (exhaust speed ÷ g₀). */
+  ispSeaLevel: number;
+  /** Ideal velocity change from the rocket equation, Δv = vₑ·ln(m₀/m_f), summed over stages. */
+  deltaV: number;
+  burnTimes: number[];
+  /** Speed for a circular orbit at the judging altitude. */
+  orbitSpeed: number;
+  /** Escape speed from the surface. */
+  escapeSpeed: number;
+}
+
+export const vehicleSummary = (params: RocketParams): VehicleSummary => {
+  const [fuel1, fuel2] = stageFuel(params);
+  const [ve1, ve2] = exhaustSpeeds(params);
+  const m0 = params.dryMass + params.fuelMass;
+  let deltaV = ve1 * Math.log(m0 / (m0 - fuel1));
+  const burnTimes = [fuel1 / stageOneFlow(params)];
+  if (params.stageSeparation && fuel2 > 0) {
+    const m2 = params.dryMass * (1 - STAGE_ONE_DRY_FRACTION) + fuel2;
+    deltaV += ve2 * Math.log(m2 / (m2 - fuel2));
+    burnTimes.push(fuel2 / stageTwoFlow(params));
+  }
+  const flow = stageOneFlow(params);
+  return {
+    liftoffThrustToWeight: (params.thrustForce * THRUST_SCALE * thrustFactorAt(params, 0)) / m0 / (params.gravity * GRAVITY_SCALE || 1e-9),
+    ispSeaLevel: (params.thrustForce * 1000 * seaLevelFactor(params) * temperatureFactor(params)) / flow / G0,
+    deltaV,
+    burnTimes,
+    orbitSpeed: orbitalSpeedAt(params, ORBIT_ALTITUDE_THRESHOLD),
+    escapeSpeed: escapeSpeedAt(params, 0),
+  };
+};
+
+// ── Orbits ───────────────────────────────────────────────────────────────────
 
 export interface OrbitalElements {
   /** Specific orbital energy ε = v²/2 − μ/r (negative = bound). */
@@ -126,7 +261,7 @@ export interface OrbitalElements {
 
 /** Two-body orbital elements of the rocket relative to the planet centre at (0, −R). */
 export const orbitalElements = (params: RocketParams, state: Pick<FlightState, 'px' | 'py' | 'vx' | 'vy'>): OrbitalElements => {
-  const mu = gravitationalParameter(params);
+  const mu = Math.max(gravitationalParameter(params), 1e-12);
   const rx = state.px;
   const ry = state.py + params.planetRadius;
   const r = Math.max(Math.hypot(rx, ry), 1e-6);
@@ -142,39 +277,32 @@ export const orbitalElements = (params: RocketParams, state: Pick<FlightState, '
   return { energy, semiMajorAxis, eccentricity, eccentricityVector: [ex, ey], periapsisRadius, angularMomentum };
 };
 
-/**
- * The bound orbit through the rocket's current position and velocity, in the form the
- * scene draws and follows: ellipse centre, axes, and the current eccentric anomaly.
- */
+const normalize = (x: number, y: number): [number, number] => {
+  const length = Math.hypot(x, y) || 1;
+  return [x / length, y / length];
+};
+
+/** The bound orbit through the rocket's position and velocity, as the scene draws it. */
 export const buildOrbitPath = (
   params: RocketParams,
   state: Pick<FlightState, 'px' | 'py' | 'vx' | 'vy'>,
 ): OrbitPathState | null => {
   const elements = orbitalElements(params, state);
   if (elements.energy >= 0 || elements.eccentricity >= 1) return null;
-
   const focus: [number, number] = [0, -params.planetRadius];
   const a = elements.semiMajorAxis;
   const e = elements.eccentricity;
   const b = a * Math.sqrt(1 - e * e);
-  // Major axis points at periapsis; for a near-circular orbit use the current radial direction.
   const axisDirection: [number, number] = e > 1e-6
     ? [elements.eccentricityVector[0] / e, elements.eccentricityVector[1] / e]
     : normalize(state.px - focus[0], state.py - focus[1]);
-  // Perpendicular chosen so the eccentric anomaly increases in the direction of travel.
   const travel = elements.angularMomentum >= 0 ? 1 : -1;
   const perpendicularDirection: [number, number] = [-axisDirection[1] * travel, axisDirection[0] * travel];
   const center: [number, number] = [focus[0] - axisDirection[0] * a * e, focus[1] - axisDirection[1] * a * e];
-
-  // Current eccentric anomaly from the rocket's position in the ellipse frame.
   const dx = state.px - center[0];
   const dy = state.py - center[1];
   const along = dx * axisDirection[0] + dy * axisDirection[1];
   const across = dx * perpendicularDirection[0] + dy * perpendicularDirection[1];
-  const angle = Math.atan2(across / b, along / a);
-
-  const meanMotion = Math.sqrt(gravitationalParameter(params) / (a * a * a));
-
   return {
     center,
     focus,
@@ -183,9 +311,19 @@ export const buildOrbitPath = (
     eccentricity: e,
     axisDirection,
     perpendicularDirection,
-    angle,
-    angularSpeed: meanMotion * ORBIT_TIME_COMPRESSION,
+    angle: Math.atan2(across / b, along / a),
+    angularSpeed: Math.sqrt(gravitationalParameter(params) / (a * a * a)),
   };
+};
+
+// ── Outcomes ─────────────────────────────────────────────────────────────────
+
+const enginesDone = (s: FlightState) => s.stage === 0 || s.engineOut;
+
+const hazardNote = (s: FlightState) => {
+  if (s.events.some((e) => e.kind === 'lightning')) return ' A lightning strike had shut down the engines.';
+  if (s.events.some((e) => e.kind === 'seal-failure')) return ' A frozen seal leaked and cut the thrust.';
+  return '';
 };
 
 /** Decide whether the flight has ended, and why. Returns null while the flight continues. */
@@ -193,113 +331,283 @@ export const evaluateOutcome = (params: RocketParams, state: FlightState): Fligh
   if (state.heat >= HEAT_SHIELD_LIMIT) {
     return {
       outcome: 'burnup',
-      reason: 'The heat shield overloaded. The rocket flew too fast through dense air; climb more steeply or reduce thrust low in the atmosphere.',
+      reason: 'The heat shield overloaded: the rocket flew too fast through dense air. Pitch over later or lower the thrust so it climbs out of the thick air before speeding up.',
       orbit: null,
     };
   }
 
   if (!state.liftedOff) {
-    if (state.fuel <= 0) {
+    if (enginesDone(state)) {
       return {
         outcome: 'crashed',
-        reason: `The rocket never left the pad: thrust was only ${liftoffThrustToWeight(params).toFixed(2)}× its weight. It needs more than 1×.`,
+        reason: `The rocket never left the pad: thrust was only ${vehicleSummary(params).liftoffThrustToWeight.toFixed(2)}× its weight. It needs more than 1×.`,
         orbit: null,
       };
     }
     return null;
   }
 
-  if (state.py < 0) {
+  const altitude = altitudeOf(params, state);
+  if (altitude < 0) {
     if (state.maxAltitude > SUBORBITAL_ALTITUDE) {
       return {
         outcome: 'suborbital',
-        reason: `Reached altitude ${state.maxAltitude.toFixed(1)} but fell back: not enough sideways speed to stay up. Try a larger launch angle or a longer burn.`,
+        reason: `Reached altitude ${state.maxAltitude.toFixed(1)} but fell back: not enough sideways speed to keep missing the ground. A larger pitch-over angle builds more.${hazardNote(state)}`,
         orbit: null,
       };
     }
     return {
       outcome: 'crashed',
-      reason: `Peaked at altitude ${state.maxAltitude.toFixed(1)} and fell back before reaching space. It needs more thrust, more fuel or less mass.`,
+      reason: `Peaked at altitude ${state.maxAltitude.toFixed(1)} and fell back before reaching space. It needs more thrust, more fuel or less mass.${hazardNote(state)}`,
       orbit: null,
     };
   }
 
-  if (state.py > ORBIT_ALTITUDE_THRESHOLD) {
-    const elements = orbitalElements(params, state);
-    const speed = Math.hypot(state.vx, state.vy);
-    if (elements.energy >= 0) {
+  const elements = orbitalElements(params, state);
+  const periapsisAltitude = elements.periapsisRadius - params.planetRadius;
+  const descending = state.vx * state.px + state.vy * (state.py + params.planetRadius) < 0;
+
+  // Engines off, bound, and the path dips back into the thick air: it is coming back down.
+  // That is certain as soon as the rocket is clear of the dense air (or already falling),
+  // and the peak follows from the orbit: apoapsis = a(1 + e) − R.
+  const apoapsisAltitude = elements.energy < 0 ? elements.semiMajorAxis * (1 + elements.eccentricity) - params.planetRadius : Infinity;
+  const peak = Math.max(state.maxAltitude, apoapsisAltitude);
+  if (enginesDone(state) && elements.energy < 0 && (descending || altitude > ESCAPE_JUDGE_ALTITUDE)
+    && periapsisAltitude < MIN_PERIAPSIS_ALTITUDE && peak > SUBORBITAL_ALTITUDE) {
+    const singleBurnHint = params.stageSeparation
+      ? ' The upper stage did not add enough sideways speed at the top.'
+      : ' A single burn from the ground can never reach orbit: the lowest point of the path is no higher than where the engines stopped. Turn on stage separation so stage 2 burns at the top of the climb.';
+    return {
+      outcome: 'suborbital',
+      reason: `${descending ? 'Reached' : 'Will reach'} altitude ${peak.toFixed(1)} and then fall back: the path dips into the thick air.${singleBurnHint}${hazardNote(state)}`,
+      orbit: null,
+    };
+  }
+
+  if (elements.energy >= 0 && altitude > ESCAPE_JUDGE_ALTITUDE) {
+    return {
+      outcome: 'escape',
+      reason: `Speed ${Math.hypot(state.vx, state.vy).toFixed(2)} passed the escape speed here (${escapeSpeedAt(params, altitude).toFixed(2)}), so gravity can no longer pull the rocket back.`,
+      orbit: null,
+    };
+  }
+
+  // Once the engines stop, the path is fixed: if its lowest point clears the thick air,
+  // the rocket will keep falling around the planet for good.
+  if (enginesDone(state) && elements.energy < 0 && periapsisAltitude >= MIN_PERIAPSIS_ALTITUDE) {
+    const orbit = buildOrbitPath(params, state);
+    if (orbit) {
       return {
-        outcome: 'escape',
-        reason: `Speed ${speed.toFixed(2)} passed the escape speed here (${escapeSpeedAt(params, state.py).toFixed(2)}), so gravity can no longer pull the rocket back.`,
-        orbit: null,
+        outcome: 'orbiting',
+        reason: `Sideways speed is enough to keep falling around the planet: the lowest point of the orbit is at altitude ${periapsisAltitude.toFixed(1)}, above the thick air.`,
+        orbit,
       };
-    }
-    const periapsisAltitude = elements.periapsisRadius - params.planetRadius;
-    if (periapsisAltitude >= MIN_PERIAPSIS_ALTITUDE) {
-      const orbit = buildOrbitPath(params, state);
-      if (orbit) {
-        return {
-          outcome: 'orbiting',
-          reason: `Sideways speed is enough to keep falling around the planet: the lowest point of the orbit is at altitude ${periapsisAltitude.toFixed(1)}, above the thick air.`,
-          orbit,
-        };
-      }
     }
   }
 
   return null;
 };
 
+// ── Stepping ─────────────────────────────────────────────────────────────────
+
+interface StepOptions {
+  /** Hazards for this launch; omit for a calm, deterministic flight (the preview). */
+  env?: FlightEnvironment;
+  /** After an orbit or escape verdict the flight coasts without air or engines. */
+  coastOnly?: boolean;
+}
+
+const logEvent = (s: FlightState, events: FlightEventRecord[], kind: FlightEventKind, message: string, altitude: number) => {
+  const record = { time: s.elapsed, altitude, kind, message };
+  s.events = [...s.events, record];
+  events.push(record);
+};
+
+/** Accelerations (ax, ay) at a state; also returns q and the heating rate. */
+const forces = (params: RocketParams, s: FlightState, thrustAcc: number, coastOnly: boolean) => {
+  const rx = s.px;
+  const ry = s.py + params.planetRadius;
+  const r = Math.max(Math.hypot(rx, ry), 1e-6);
+  const upX = rx / r;
+  const upY = ry / r;
+  const downX = upY;          // downrange tangent: up rotated clockwise
+  const downY = -upX;
+  const mu = gravitationalParameter(params);
+  let ax = -(mu / (r * r)) * upX;
+  let ay = -(mu / (r * r)) * upY;
+
+  // Thrust along the rocket's axis.
+  const bx = Math.cos(s.attitude) * upX + Math.sin(s.attitude) * downX;
+  const by = Math.cos(s.attitude) * upY + Math.sin(s.attitude) * downY;
+  ax += bx * thrustAcc;
+  ay += by * thrustAcc;
+
+  if (coastOnly) return { ax, ay, q: 0, heating: 0 };
+
+  // Drag relative to the moving air, nose-on and side-on.
+  const altitude = r - params.planetRadius;
+  const rho = airDensity(params, altitude);
+  const shear = Math.sin(s.elapsed * 0.9 + altitude * 0.35) * params.windShear;
+  const wind = s.liftedOff ? params.crosswind * WIND_SCALE * (1 + shear) * Math.exp(-Math.max(altitude, 0) / WIND_SCALE_HEIGHT) : 0;
+  const relX = s.vx - wind * downX;
+  const relY = s.vy - wind * downY;
+  const relSpeed = Math.hypot(relX, relY);
+  const mass = vehicleMass(params, s);
+  const axial = relX * bx + relY * by;
+  const sideX = relX - axial * bx;
+  const sideY = relY - axial * by;
+  const sideSpeed = Math.hypot(sideX, sideY);
+  const thermalPenalty = 1 + params.thermalLoad * Math.max(0, relSpeed - 0.3) * rho * 1.8;
+  const axialDrag = (0.5 * rho * Math.abs(axial) * params.dragCoefficient * FRONTAL_AREA * thermalPenalty) / mass;
+  const sideDrag = (0.5 * rho * sideSpeed * SIDE_DRAG_COEFFICIENT * SIDE_AREA) / mass;
+  ax -= axialDrag * axial * bx + sideDrag * sideX;
+  ay -= axialDrag * axial * by + sideDrag * sideY;
+
+  return {
+    ax,
+    ay,
+    q: 0.5 * rho * relSpeed * relSpeed,
+    heating: HEATING_COEFFICIENT * Math.sqrt(rho) * relSpeed ** 3 * (1 + 2 * params.thermalLoad),
+  };
+};
+
 /** Advance the flight by one fixed step. */
-export const stepFlight = (params: RocketParams, prev: FlightState, dt: number = FLIGHT_DT): FlightStepResult => {
+export const stepFlight = (
+  params: RocketParams,
+  prev: FlightState,
+  dt: number = FLIGHT_DT,
+  options: StepOptions = {},
+): FlightStepResult => {
   const s: FlightState = { ...prev };
-  const events: FlightEvent[] = [];
-  const angleRad = ((params.launchAngle + params.padTilt) * Math.PI) / 180;
+  const events: FlightEventRecord[] = [];
+  const coastOnly = options.coastOnly ?? false;
+  const env = options.env;
+  const altitude0 = altitudeOf(params, s);
 
-  // Thrust
-  if (s.fuel > 0) {
-    const thrustAcc = (params.thrustForce * thrustEnvironmentFactor(params)) / vehicleMass(params, s);
-    s.vx += Math.sin(angleRad) * thrustAcc * dt;
-    s.vy += Math.cos(angleRad) * thrustAcc * dt;
-    s.fuel -= dt / params.burnDuration;
-
-    if (params.stageSeparation && !s.stageSeparated && s.fuel <= 1 - STAGE_ONE_FUEL_FRACTION) {
-      s.stageSeparated = true;
-      events.push('stage-separation');
+  // ── Weather hazards (only in the real flight) ──
+  if (env && !coastOnly) {
+    if (s.sealFailAt === -2) {
+      // Decided once at ignition: how likely cold seals are to leak today.
+      const chance = clamp((COLD_SEAL_THRESHOLD - params.ambientTemperature) / 40, 0, 0.6);
+      let roll: number;
+      [roll, s.rng] = nextRandom(s.rng);
+      if (roll < chance) {
+        let when: number;
+        [when, s.rng] = nextRandom(s.rng);
+        s.sealFailAt = 1 + when * 4;
+      } else {
+        s.sealFailAt = -1;
+      }
     }
-    if (s.fuel <= 0) {
-      s.fuel = 0;
-      events.push('burnout');
+    if (s.sealFailAt >= 0 && s.elapsed >= s.sealFailAt && s.engineFactor === 1 && !enginesDone(s)) {
+      s.engineFactor = SEAL_FAILURE_THRUST;
+      logEvent(s, events, 'seal-failure', `Frozen seal leaked at ${s.elapsed.toFixed(1)} s: thrust fell to ${SEAL_FAILURE_THRUST * 100}%.`, altitude0);
+    }
+    if (env.lightning && s.liftedOff && !enginesDone(s) && altitude0 < LIGHTNING_ALTITUDE) {
+      let roll: number;
+      [roll, s.rng] = nextRandom(s.rng);
+      if (roll < 1 - Math.exp(-LIGHTNING_RATE * dt)) {
+        s.engineOut = true;
+        logEvent(s, events, 'lightning', `Lightning struck at altitude ${altitude0.toFixed(1)} and shut down the engines.`, altitude0);
+      }
     }
   }
 
-  // Gravity
-  s.vy -= params.gravity * dt * GRAVITY_SCALE;
+  // ── Engines and fuel ──
+  let thrustAcc = 0;
+  if (!coastOnly && !s.engineOut) {
+    if (s.stage === 1 && s.fuel1 > 0) {
+      const flow = stageOneFlow(params);
+      thrustAcc = (params.thrustForce * THRUST_SCALE * thrustFactorAt(params, altitude0) * s.engineFactor) / vehicleMass(params, s);
+      s.fuel1 = Math.max(0, s.fuel1 - flow * dt);
+      if (s.fuel1 === 0) {
+        if (params.stageSeparation && s.fuel2 > 0) {
+          s.stageSeparated = true;
+          s.stageGap = STAGE_GAP;
+          s.stage = 2;
+          logEvent(s, events, 'stage-separation', `Stage 1 dropped at altitude ${altitude0.toFixed(1)}: ${(params.dryMass * STAGE_ONE_DRY_FRACTION).toFixed(0)} kg less to push.`, altitude0);
+        } else {
+          s.stage = 0;
+          logEvent(s, events, 'burnout', `Engines cut off at altitude ${altitude0.toFixed(1)}, speed ${Math.hypot(s.vx, s.vy).toFixed(2)}.`, altitude0);
+        }
+      }
+    } else if (s.stage === 2) {
+      // Stage 2 coasts to the top of the climb (apoapsis) and burns there, like a real
+      // upper stage: thrust at the highest point raises the lowest point of the orbit.
+      if (s.stageGap > 0) {
+        s.stageGap = Math.max(0, s.stageGap - dt);
+      } else if (!s.stage2Lit) {
+        s.coastTime += dt;
+        const climbing = s.vx * s.px + s.vy * (s.py + params.planetRadius) > 0;
+        if (!climbing || s.coastTime >= MAX_COAST_TO_APOAPSIS) {
+          s.stage2Lit = true;
+          logEvent(s, events, 'stage-ignition', `Stage 2 lit at the top of the climb, altitude ${altitude0.toFixed(1)}.`, altitude0);
+        }
+      }
+      if (s.stage2Lit && s.fuel2 > 0) {
+        thrustAcc = (params.stage2Thrust * THRUST_SCALE * VACUUM_THRUST_FACTOR * temperatureFactor(params) * s.engineFactor) / vehicleMass(params, s);
+        s.fuel2 = Math.max(0, s.fuel2 - stageTwoFlow(params) * dt);
+        if (s.fuel2 === 0) {
+          s.stage = 0;
+          logEvent(s, events, 'burnout', `Stage 2 cut off at altitude ${altitude0.toFixed(1)}, speed ${Math.hypot(s.vx, s.vy).toFixed(2)}.`, altitude0);
+        }
+      }
+    }
+  }
 
-  // Wind, drag and heating
+  // ── Guidance: vertical climb, pitch-over, then a gravity turn ──
+  const rx = s.px;
+  const ry = s.py + params.planetRadius;
+  const r = Math.max(Math.hypot(rx, ry), 1e-6);
   const speed = Math.hypot(s.vx, s.vy);
-  const airFactor = atmosphereFactor(params, s.py);
-  const shearWave = Math.sin((s.elapsed + dt) * 0.9 + s.py * 0.35) * params.windShear;
-  const wind = params.crosswind * (1 + shearWave) * airFactor;
-  if (s.liftedOff) s.vx += wind * dt * WIND_SCALE;
-
-  const thermalPenalty = 1 + params.thermalLoad * Math.max(0, speed - 0.3) * airFactor * 1.8;
-  const dragForce = 0.5 * params.dragCoefficient * airFactor * speed * speed * DRAG_SCALE * thermalPenalty;
-  if (speed > 0.001) {
-    s.vx -= (s.vx / speed) * dragForce * dt;
-    s.vy -= (s.vy / speed) * dragForce * dt;
+  const velocityAngle = speed > 1e-6
+    ? Math.atan2(s.vx * (ry / r) - s.vy * (rx / r), s.vx * (rx / r) + s.vy * (ry / r))
+    : s.attitude;
+  const kickAngle = ((params.launchAngle + params.padTilt) * Math.PI) / 180;
+  if (!coastOnly) {
+    if (s.pitchStart < 0) {
+      if (s.liftedOff && altitude0 >= TURN_START_ALTITUDE) {
+        s.pitchStart = s.elapsed;
+        if (params.launchAngle > 0) logEvent(s, events, 'pitch-over', `Pitched over by ${params.launchAngle}° at altitude ${altitude0.toFixed(1)}.`, altitude0);
+      }
+    } else if (!s.gravityTurn) {
+      const progress = clamp((s.elapsed - s.pitchStart) / PITCH_KICK_DURATION, 0, 1);
+      const padAngle = (params.padTilt * Math.PI) / 180;
+      s.attitude = padAngle + (kickAngle - padAngle) * progress;
+      // Hold the pitched attitude until the path has bent over to match it.
+      if (progress >= 1 && Math.abs(velocityAngle) >= Math.abs(kickAngle) - 0.01) s.gravityTurn = true;
+    } else {
+      s.attitude = velocityAngle;
+    }
   }
-  s.heat += HEATING_COEFFICIENT * airFactor * speed ** 3 * (1 + 2 * params.thermalLoad) * dt;
+  if (thrustAcc === 0 && s.liftedOff) {
+    s.attitude = velocityAngle; // unpowered: weathervanes into the airflow
+  } else if (s.stage === 2 && s.stage2Lit && !coastOnly) {
+    // Upper-stage guidance: burn prograde to build sideways speed, but keep the nose a
+    // little above the horizon so the burn also holds the rocket up.
+    s.attitude = Math.max(-UPPER_STAGE_MAX_PITCH, Math.min(velocityAngle, UPPER_STAGE_MAX_PITCH));
+  }
 
-  // Motion
-  s.px += s.vx * dt;
-  s.py += s.vy * dt;
+  // ── Integrate (kick-drift-kick) ──
+  const f0 = forces(params, s, thrustAcc, coastOnly);
+  const halfVx = s.vx + f0.ax * dt * 0.5;
+  const halfVy = s.vy + f0.ay * dt * 0.5;
+  s.px += halfVx * dt;
+  s.py += halfVy * dt;
+  s.vx = halfVx;
+  s.vy = halfVy;
+  const f1 = forces(params, s, thrustAcc, coastOnly);
+  s.vx += f1.ax * dt * 0.5;
+  s.vy += f1.ay * dt * 0.5;
   s.elapsed += dt;
+  s.q = f1.q;
+  s.heat += f1.heating * dt;
 
   // The pad holds the rocket until thrust exceeds its weight.
   if (!s.liftedOff) {
     if (s.py > 0) {
       s.liftedOff = true;
+      logEvent(s, events, 'liftoff', 'Liftoff.', 0);
     } else {
       s.px = 0;
       s.py = 0;
@@ -307,9 +615,17 @@ export const stepFlight = (params: RocketParams, prev: FlightState, dt: number =
       s.vy = 0;
     }
   }
-  s.maxAltitude = Math.max(s.maxAltitude, s.py);
 
-  return { state: s, events, verdict: evaluateOutcome(params, s) };
+  const altitude = altitudeOf(params, s);
+  s.maxAltitude = Math.max(s.maxAltitude, altitude);
+  if (s.q > s.maxQ) {
+    s.maxQ = s.q;
+  } else if (!s.maxQLogged && s.maxQ > 0 && s.q < s.maxQ * 0.9) {
+    s.maxQLogged = true;
+    logEvent(s, events, 'max-q', `Max-Q passed: peak dynamic pressure ${s.maxQ.toFixed(2)} before altitude ${altitude.toFixed(1)}.`, altitude);
+  }
+
+  return { state: s, events, verdict: coastOnly ? null : evaluateOutcome(params, s) };
 };
 
 export interface FlightPrediction {
@@ -318,21 +634,21 @@ export interface FlightPrediction {
 }
 
 /**
- * Predicted path for the current settings, using the same model and step as the flight.
- * Stops where the flight would end or when the flight would switch to its orbit path.
+ * Predicted path for the current settings, using the same model and step as the flight
+ * (with calm weather). Stops where the flight would end or reach its verdict.
  */
 export const predictFlight = (params: RocketParams, duration = PREVIEW_DURATION, sampleEvery = 3): FlightPrediction => {
   const points: [number, number][] = [[0, 0]];
-  let state = initialFlightState();
+  let state = initialFlightState(params);
   const steps = Math.round(duration / FLIGHT_DT);
   for (let i = 1; i <= steps; i++) {
     const result = stepFlight(params, state, FLIGHT_DT);
     state = result.state;
     if (result.verdict) {
-      points.push([state.px, Math.max(state.py, 0)]);
+      points.push([state.px, state.py]);
       return { points, verdict: result.verdict };
     }
-    if (i % sampleEvery === 0) points.push([state.px, Math.max(state.py, 0)]);
+    if (i % sampleEvery === 0) points.push([state.px, state.py]);
   }
   return { points, verdict: null };
 };

@@ -3,7 +3,7 @@ import SpaceScene, { CelestialBody } from '../components/space/SpaceScene';
 import type { LiveBodyState } from '../components/space/PhysicsSimulator';
 import RocketScene from '../components/rocket/RocketScene';
 import RocketControls from '../components/rocket/RocketControls';
-import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
+import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE, normalizeRocketParams } from '../components/rocket/rocketTypes';
 import { WeatherConditionId, applyWeatherToParams } from '../components/rocket/weatherPresets';
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
@@ -641,7 +641,8 @@ const Index = () => {
 
   const handleLaunch = useCallback(() => {
     awardScore(15);
-    setRocketState({ ...INITIAL_STATE, phase: 'launching', fuel: 1 });
+    // A fresh seed per launch: weather hazards differ between launches but replay exactly on rewind.
+    setRocketState({ ...INITIAL_STATE, phase: 'launching', fuel: 1, seed: Math.floor(Math.random() * 2 ** 31) });
   }, [awardScore]);
 
   const handleRocketReset = useCallback(() => {
@@ -664,7 +665,7 @@ const Index = () => {
     const preset = savedRocketPresets.find((entry) => entry.id === presetId);
     if (!preset) return;
 
-    setRocketParams(preset.params);
+    setRocketParams(normalizeRocketParams(preset.params));
     setRocketState({ ...INITIAL_STATE });
     previousOutcomeRef.current = 'none';
     registerExperiment(`saved-rocket:${preset.id}`, 16);
