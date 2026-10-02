@@ -7,20 +7,8 @@ import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
 import PhysicsSimulator, { type LiveBodyState } from './PhysicsSimulator';
 
-export interface CelestialBody {
-  id: string;
-  name?: string;
-  type: string;
-  bodyClass?: 'rocky' | 'gas' | 'ice' | 'star' | 'asteroid' | 'blackhole' | 'neutron' | 'comet';
-  position: [number, number, number];
-  mass: number;
-  radius: number;
-  physicalRadius?: number;
-  color: string;
-  atmosphere?: boolean;
-  eventHorizonRadius?: number;
-  velocity?: [number, number, number];
-}
+export type { CelestialBody } from '../../physics/types';
+import type { CelestialBody } from '../../physics/types';
 
 interface SpaceSceneProps {
   bodies: CelestialBody[];
