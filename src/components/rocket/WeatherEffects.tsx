@@ -1103,12 +1103,15 @@ export const WeatherShakeGroup = ({
   altitude,
   phase,
   lightningStrike,
+  reduceMotion = false,
   children,
 }: {
   activeWeather: Set<WeatherConditionId>;
   altitude: number;
   phase: string;
   lightningStrike?: LightningStrikeState;
+  /** Skip the shaking entirely (reduced-motion setting). */
+  reduceMotion?: boolean;
   children: ReactNode;
 }) => {
   const groupRef  = useRef<THREE.Group>(null);
@@ -1121,7 +1124,7 @@ export const WeatherShakeGroup = ({
       lightningStrike.impulse = Math.max(0, lightningStrike.impulse - dt * 4.2);
     }
 
-    if (phase === 'idle' || phase === 'outcome') {
+    if (phase === 'idle' || phase === 'outcome' || reduceMotion) {
       groupRef.current.position.x = THREE.MathUtils.damp(groupRef.current.position.x, 0, 10, dt);
       groupRef.current.rotation.z = THREE.MathUtils.damp(groupRef.current.rotation.z, 0, 10, dt);
       return;

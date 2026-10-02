@@ -5,7 +5,7 @@ interface ShareFileButtonsProps {
   /** Save everything worth sharing to a file. */
   onExport: () => void;
   /** Read a chosen file; returns a message for the student (what was added, or what is wrong). */
-  onImport: (text: string) => string;
+  onImport: (text: string) => Promise<string>;
   disabled?: boolean;
 }
 
@@ -22,7 +22,7 @@ const ShareFileButtons = ({ onExport, onImport, disabled }: ShareFileButtonsProp
       setMessage('That file is too large to be a Cosmic Playground export.');
       return;
     }
-    setMessage(onImport(await file.text()));
+    setMessage(await onImport(await file.text()));
   };
 
   return (

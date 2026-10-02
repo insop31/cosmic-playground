@@ -1,3 +1,5 @@
+import type { RocketParams } from '../components/rocket/rocketTypes';
+
 export type AppMode = 'spacetime' | 'rocket';
 
 export interface MissionDefinition {
@@ -8,15 +10,27 @@ export interface MissionDefinition {
   score: number;
 }
 
+/** Classroom guidance attached to a teacher pack. */
+export interface TeacherGuide {
+  /** What the lesson is about and what to ask students. */
+  notes: string;
+  /** Spacetime packs: the template that sets up the lesson. */
+  templateId?: string;
+  /** Rocket packs: settings to start from (anything not listed keeps its default). */
+  rocketSettings?: Partial<RocketParams>;
+}
+
 export interface ChallengePack {
   id: string;
   mode: AppMode;
   name: string;
   description: string;
   missions: MissionDefinition[];
+  /** Present on teacher packs: a curated lesson with a starting setup. */
+  teacher?: TeacherGuide;
 }
 
-export const CHALLENGE_PACKS: ChallengePack[] = [
+const CORE_PACKS: ChallengePack[] = [
   {
     id: 'spacetime-core',
     mode: 'spacetime',
@@ -87,4 +101,72 @@ export const CHALLENGE_PACKS: ChallengePack[] = [
   },
 ];
 
-export const ALL_MISSIONS = CHALLENGE_PACKS.flatMap((pack) => pack.missions);
+const CORE_MISSIONS = new Map(CORE_PACKS.flatMap((pack) => pack.missions).map((mission) => [mission.id, mission]));
+const reuse = (...ids: string[]) => ids.map((id) => {
+  const mission = CORE_MISSIONS.get(id);
+  if (!mission) throw new Error(`Unknown mission ${id}`);
+  return mission;
+});
+
+// Teacher packs: one lesson each, with a starting setup and discussion prompts.
+const TEACHER_PACKS: ChallengePack[] = [
+  {
+    id: 'lesson-kepler',
+    mode: 'spacetime',
+    name: "Lesson: Kepler's Laws",
+    description: 'Outer planets take longer to orbit, and T² ÷ a³ is the same for every planet of one star.',
+    teacher: {
+      templateId: 'resonant-chain',
+      notes: 'Students click two planets and read T² ÷ a³ in the inspector. Ask: why does the number match? What happens to it around a heavier star? Then have them drag-aim a new planet into a lasting orbit.',
+    },
+    missions: reuse('kepler-check', 'aimed-orbit', 'gravity-master'),
+  },
+  {
+    id: 'lesson-slingshot',
+    mode: 'spacetime',
+    name: 'Lesson: Gravity Assists',
+    description: 'A moving body can lend speed to a small one that swings past it, the trick space probes use.',
+    teacher: {
+      templateId: 'slingshot-lab',
+      notes: 'Run the set-up and watch the comet leave the companion star faster than it arrived. Ask: where did the energy come from? Rewind and replay the flyby, then have students predict and aim their own.',
+    },
+    missions: reuse('slingshot-expert', 'time-bender', 'collision-course'),
+  },
+  {
+    id: 'lesson-black-holes',
+    mode: 'spacetime',
+    name: 'Lesson: Black Holes and Tides',
+    description: 'Orbits around a black hole follow the same rules, until a body strays too close and is torn apart.',
+    teacher: {
+      templateId: 'black-hole-halo',
+      notes: 'Students keep bodies orbiting the black hole, then place one inside the Roche limit and watch the tidal stream. Ask: why does a black hole not "suck in" a body that is in orbit?',
+    },
+    missions: reuse('black-hole-survivor', 'system-architect', 'chaos-creator'),
+  },
+  {
+    id: 'lesson-rocket-equation',
+    mode: 'rocket',
+    name: 'Lesson: The Rocket Equation',
+    description: 'Fuel is heavy: doubling it does not double the speed, but dropping empty tanks helps a lot.',
+    teacher: {
+      rocketSettings: { stageSeparation: false, fuelMass: 80, thrustForce: 35 },
+      notes: 'Start single-stage and record the Δv budget in the notebook. Ask students to predict what doubling the fuel does, test it, then turn on stage separation and compare the two runs side by side.',
+    },
+    missions: reuse('forecaster', 'staging-specialist', 'heavy-lift'),
+  },
+  {
+    id: 'lesson-launch-weather',
+    mode: 'rocket',
+    name: 'Lesson: Weather and Launch Safety',
+    description: 'Wind, heat and thick air decide whether a launch is safe, which is why real launches get scrubbed.',
+    teacher: {
+      rocketSettings: { stageSeparation: true, crosswind: 25, windShear: 0.6, thermalLoad: 0.5 },
+      notes: 'The starting rocket faces strong wind and heating. Students predict a failure first, read the debrief, then change one setting at a time until the launch survives. Ask: which change mattered most?',
+    },
+    missions: reuse('failure-analyst', 'storm-runner', 'dense-atmosphere-run'),
+  },
+];
+
+export const CHALLENGE_PACKS: ChallengePack[] = [...CORE_PACKS, ...TEACHER_PACKS];
+
+export const ALL_MISSIONS = [...CORE_MISSIONS.values()];

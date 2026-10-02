@@ -170,3 +170,54 @@
     box-shadow: 0 10px 25px -5px hsla(var(--primary) / 0.25);
   }
 }
+
+/* Small press feedback for icon buttons (replaces per-button animation code). */
+.press {
+  transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.press:hover { transform: scale(1.06); }
+.press:active { transform: scale(0.94); }
+
+/* Visible keyboard focus everywhere. */
+:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Reduced motion: follows the system setting, or the in-app toggle (html.reduce-motion). */
+@media (prefers-reduced-motion: reduce) {
+  html:not(.allow-motion) *,
+  html:not(.allow-motion) *::before,
+  html:not(.allow-motion) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* High contrast: solid panels and full-strength secondary text. */
+html.high-contrast {
+  --muted-foreground: 215 30% 88%;
+  --border: 215 30% 55%;
+}
+html.high-contrast .glass-panel,
+html.high-contrast .glass-panel-strong {
+  background: hsl(240 35% 7% / 0.94);
+  border-color: hsl(215 30% 70% / 0.6);
+  backdrop-filter: none;
+}
+html.high-contrast [class*="text-muted-foreground"] {
+  color: hsl(var(--muted-foreground)) !important;
+}
+html.high-contrast [class*="text-foreground/"] {
+  color: hsl(var(--foreground)) !important;
+}

@@ -56,7 +56,7 @@ interface RocketControlsProps {
   onLoadPreset: (presetId: string) => void;
   onDeletePreset: (presetId: string) => void;
   onExportFile: () => void;
-  onImportFile: (text: string) => string;
+  onImportFile: (text: string) => Promise<string>;
   /** The outcome the student expects from the next launch, if they made a prediction. */
   prediction: LaunchOutcome | null;
   onPredictionChange: (prediction: LaunchOutcome | null) => void;

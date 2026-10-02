@@ -1,15 +1,12 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import SpaceScene, { CelestialBody } from '../components/space/SpaceScene';
+import { useState, useCallback, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
+import type { CelestialBody } from '../physics/types';
 import type { LiveBodyState } from '../components/space/PhysicsSimulator';
-import RocketScene from '../components/rocket/RocketScene';
-import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE, normalizeRocketParams } from '../components/rocket/rocketTypes';
 import { WeatherConditionId, applyWeatherToParams } from '../components/rocket/weatherPresets';
 import TimeControls from '../components/ui/TimeControls';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
 import { Rocket, Orbit, Trophy, Sparkles, Target, NotebookPen } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
   deleteRocketPreset,
   deleteSpacetimeScenario,
@@ -33,15 +30,23 @@ import type { SimulationControls } from '../components/space/PhysicsSimulator';
 import OrbitInspector from '../components/space/OrbitInspector';
 import ConservationPanel, { type ConservationSample } from '../components/space/ConservationPanel';
 import TimelineBar, { type TimelineState } from '../components/space/TimelineBar';
-import LabNotebook from '../components/rocket/LabNotebook';
 import { WEATHER_PRESETS } from '../components/rocket/weatherPresets';
 import { SpacetimeMissionTracker } from '../learning/spacetimeMissions';
 import { buildDebrief } from '../learning/debrief';
 import { addNotebookEntry, clearNotebook, listNotebook, type NotebookEntry } from '../lib/notebook';
-import { buildExportFile, downloadTextFile, parseImportFile } from '../lib/exportImport';
+import { buildExportFile, downloadTextFile } from '../lib/exportFile';
+import SettingsMenu from '../components/ui/SettingsMenu';
+import { QUALITY_PROFILES, applySettingsToDocument, loadSettings, motionReduced, saveSettings, type DisplaySettings } from '../lib/settings';
 import { vehicleSummary } from '../physics/rocket';
 import type { ImpactEvent } from '../physics/nbody';
 import type { PredictedOutcome } from '../physics/simulation';
+
+// The 3D view loads after the panels so the page is usable quickly on slow connections.
+const SpaceScene = lazy(() => import('../components/space/SpaceScene'));
+// The Rocket Lab (scene, weather effects, controls) loads the first time it is opened.
+const RocketScene = lazy(() => import('../components/rocket/RocketScene'));
+const RocketControls = lazy(() => import('../components/rocket/RocketControls'));
+const LabNotebook = lazy(() => import('../components/rocket/LabNotebook'));
 
 let nextId = 1;
 const ACTIVE_MISSION_LIMIT = 3;
@@ -107,6 +112,26 @@ const cloneBodiesForScene = (savedBodies: CelestialBody[]) => savedBodies.map((b
 
 const Index = () => {
   const [mode, setMode] = useState<AppMode>('spacetime');
+  const [settings, setSettings] = useState<DisplaySettings>(loadSettings);
+  const [, setSystemMotionTick] = useState(0);
+  const quality = QUALITY_PROFILES[settings.quality];
+  const reduceMotion = motionReduced(settings);
+  useEffect(() => {
+    applySettingsToDocument(settings);
+    saveSettings(settings);
+  }, [settings]);
+  useEffect(() => {
+    // Follow changes to the system "reduce motion" setting while the page is open.
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const onChange = () => setSystemMotionTick((tick) => tick + 1);
+    query?.addEventListener?.('change', onChange);
+    return () => query?.removeEventListener?.('change', onChange);
+  }, []);
+  // Once opened, the Rocket Lab stays mounted so switching back does not lose its WebGL context.
+  const [rocketLabLoaded, setRocketLabLoaded] = useState(false);
+  useEffect(() => {
+    if (mode === 'rocket') setRocketLabLoaded(true);
+  }, [mode]);
   const [activePacks, setActivePacks] = useState<Record<AppMode, string>>(DEFAULT_PACK_BY_MODE);
 
   // ─── Spacetime state ───
@@ -137,6 +162,8 @@ const Index = () => {
   const universeAgeRef = useRef(0);
   const [universeScale, setUniverseScale] = useState(1);
   const lastTickRef = useRef(Date.now());
+  const spaceViewRef = useRef<HTMLDivElement>(null);
+  const rocketViewRef = useRef<HTMLDivElement>(null);
   // Body types by id, for mission checks that run on simulation snapshots.
   const bodyTypesRef = useRef(new Map<string, string>());
   bodyTypesRef.current = new Map(bodies.map((body) => [body.id, body.type]));
@@ -621,13 +648,24 @@ const Index = () => {
     setSavedRocketPresets(deleteRocketPreset(presetId));
   }, []);
 
+  // ─── Teacher packs ───
+  const handleLoadLessonSetup = useCallback((pack: ChallengePack) => {
+    if (pack.teacher?.templateId) handleApplyTemplate(pack.teacher.templateId);
+    if (pack.teacher?.rocketSettings) {
+      setRocketParams(normalizeRocketParams({ ...DEFAULT_PARAMS, ...pack.teacher.rocketSettings }));
+      setActiveWeather(new Set());
+      setRocketState({ ...INITIAL_STATE });
+    }
+  }, [handleApplyTemplate]);
+
   // ─── Sharing saved work as files ───
   const handleExportFile = useCallback(() => {
     downloadTextFile('cosmic-playground-export.json', buildExportFile(savedScenarios, savedRocketPresets));
   }, [savedRocketPresets, savedScenarios]);
 
-  const handleImportFile = useCallback((text: string) => {
+  const handleImportFile = useCallback(async (text: string) => {
     try {
+      const { parseImportFile } = await import('../lib/exportImport');
       const imported = parseImportFile(text);
       let scenarios = savedScenarios;
       let presets = savedRocketPresets;
@@ -672,6 +710,40 @@ const Index = () => {
     if (value) registerExperiment('universe-expansion');
   }, [registerExperiment]);
 
+  // ─── Keyboard shortcuts ───
+  // Space pauses, R resets, Esc cancels a placement. Tab switches labs while a 3D view has
+  // focus (click it first), so Tab still moves through the panels for keyboard users.
+  const shortcutsRef = useRef({ mode, handleResetSpacetime, handleRocketReset });
+  shortcutsRef.current = { mode, handleResetSpacetime, handleRocketReset };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      const typing = target?.closest('input, textarea, select, [contenteditable="true"]');
+      const onControl = target?.closest('button, a, [role="radio"], [role="checkbox"], [role="tab"]');
+      if (typing || document.querySelector('[role="dialog"][data-state="open"]')) return;
+      const current = shortcutsRef.current;
+      const viewFocused = target === spaceViewRef.current || target === rocketViewRef.current;
+      if (event.key === 'Tab' && viewFocused && !event.shiftKey) {
+        event.preventDefault();
+        const next: AppMode = current.mode === 'spacetime' ? 'rocket' : 'spacetime';
+        setMode(next);
+        // Keep focus on the newly shown view so Tab can switch straight back.
+        window.setTimeout(() => (next === 'spacetime' ? spaceViewRef : rocketViewRef).current?.focus(), 0);
+      } else if (event.key === ' ' && !onControl) {
+        event.preventDefault();
+        setIsPlaying((playing) => !playing);
+      } else if ((event.key === 'r' || event.key === 'R') && !event.shiftKey) {
+        event.preventDefault();
+        if (current.mode === 'spacetime') current.handleResetSpacetime(); else current.handleRocketReset();
+      } else if (event.key === 'Escape') {
+        setPendingPlacement(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
   const activePack = getActivePack(mode, activePacks[mode]);
@@ -693,8 +765,17 @@ const Index = () => {
   return (
     <div className="w-full h-screen relative overflow-hidden bg-background">
       {/* 3D Canvases - use visibility instead of conditional render to avoid WebGL context loss */}
-      <div className="absolute inset-0" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
+      <div
+        ref={spaceViewRef}
+        tabIndex={-1}
+        aria-label="Spacetime 3D view"
+        className="absolute inset-0 outline-none"
+        style={{ display: mode === 'spacetime' ? 'block' : 'none' }}
+      >
+        <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading the 3D view…</div>}>
         <SpaceScene
+          quality={quality}
+          reduceMotion={reduceMotion}
           bodies={bodies}
           timeScale={effectiveTimeScale}
           onBodyRemoved={handleBodyRemoved}
@@ -715,13 +796,24 @@ const Index = () => {
           simulationEpoch={simulationEpoch}
           livePhysicsRef={livePhysicsRef}
         />
+        </Suspense>
       </div>
-      <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
-        <RocketScene params={effectiveRocketParams} state={rocketState} onUpdateState={setRocketState} timeScale={effectiveTimeScale} activeWeather={activeWeather} />
+      <div
+        ref={rocketViewRef}
+        tabIndex={-1}
+        aria-label="Rocket 3D view"
+        className="absolute inset-0 outline-none"
+        style={{ display: mode === 'rocket' ? 'block' : 'none' }}
+      >
+        {rocketLabLoaded && (
+          <Suspense fallback={null}>
+            <RocketScene params={effectiveRocketParams} state={rocketState} onUpdateState={setRocketState} timeScale={effectiveTimeScale} activeWeather={activeWeather} quality={quality} reduceMotion={reduceMotion} />
+          </Suspense>
+        )}
       </div>
 
       {/* Top Bar */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-0 left-0 right-0 z-20 p-4 flex items-center justify-between pointer-events-none">
         <div className="glass-panel px-4 py-2.5 flex items-center gap-3 pointer-events-auto min-w-[280px]">
           <img
             src="/cosmic-playground-logo.png"
@@ -760,8 +852,9 @@ const Index = () => {
           </button>
         </div>
 
-        {/* Stats */}
-        <div className="glass-panel px-3 py-2 pointer-events-auto">
+        {/* Stats and settings */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+        <div className="glass-panel px-3 py-2">
           <div className="flex items-center gap-4 text-xs font-mono">
             {mode === 'spacetime' ? (
               <>
@@ -793,6 +886,10 @@ const Index = () => {
             )}
           </div>
         </div>
+        <div className="rounded-2xl border border-white/10 bg-[hsla(var(--glass-bg)/0.6)] p-1.5 backdrop-blur-xl">
+          <SettingsMenu settings={settings} onChange={setSettings} />
+        </div>
+        </div>
       </div>
 
       {/* Left Panel */}
@@ -821,24 +918,26 @@ const Index = () => {
             onImportFile={handleImportFile}
           />
         ) : (
-          <RocketControls
-            params={rocketParams}
-            effectiveParams={effectiveRocketParams}
-            state={rocketState}
-            onParamChange={handleRocketParamChange}
-            onLaunch={handleLaunch}
-            onReset={handleRocketReset}
-            savedPresets={savedRocketPresets}
-            onSavePreset={handleSaveRocketPreset}
-            onLoadPreset={handleLoadRocketPreset}
-            onDeletePreset={handleDeleteRocketPreset}
-            activeWeather={activeWeather}
-            onWeatherChange={handleWeatherChange}
-            onExportFile={handleExportFile}
-            onImportFile={handleImportFile}
-            prediction={prediction}
-            onPredictionChange={setPrediction}
-          />
+          <Suspense fallback={<div className="glass-panel-strong w-[440px] h-[calc(100vh-140px)] p-7 text-sm text-muted-foreground">Loading the Rocket Lab…</div>}>
+            <RocketControls
+              params={rocketParams}
+              effectiveParams={effectiveRocketParams}
+              state={rocketState}
+              onParamChange={handleRocketParamChange}
+              onLaunch={handleLaunch}
+              onReset={handleRocketReset}
+              savedPresets={savedRocketPresets}
+              onSavePreset={handleSaveRocketPreset}
+              onLoadPreset={handleLoadRocketPreset}
+              onDeletePreset={handleDeleteRocketPreset}
+              activeWeather={activeWeather}
+              onWeatherChange={handleWeatherChange}
+              onExportFile={handleExportFile}
+              onImportFile={handleImportFile}
+              prediction={prediction}
+              onPredictionChange={setPrediction}
+            />
+          </Suspense>
         )}
       </div>
 
@@ -907,16 +1006,36 @@ const Index = () => {
               <select
                 value={activePack.id}
                 onChange={(e) => handleChallengePackChange(mode, e.target.value)}
-                className="rounded-lg border border-border/40 bg-background/80 px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none"
+                aria-label="Challenge pack"
+                className="max-w-[58%] min-w-0 rounded-lg border border-border/40 bg-background/80 px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none"
               >
-                {modePacks.map((pack) => (
-                  <option key={pack.id} value={pack.id}>
-                    {pack.name}
-                  </option>
-                ))}
+                <optgroup label="Challenge packs">
+                  {modePacks.filter((pack) => !pack.teacher).map((pack) => (
+                    <option key={pack.id} value={pack.id}>{pack.name}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Teacher packs">
+                  {modePacks.filter((pack) => pack.teacher).map((pack) => (
+                    <option key={pack.id} value={pack.id}>{pack.name}</option>
+                  ))}
+                </optgroup>
               </select>
             </div>
             <p className="text-sm text-muted-foreground">{activePack.missions.length} themed missions in this pack.</p>
+            {activePack.teacher && (
+              <div className="mt-3 rounded-lg border border-secondary/30 bg-secondary/10 p-3" aria-label="Teacher notes">
+                <div className="text-xs uppercase tracking-[0.2em] text-secondary mb-1">Teacher notes</div>
+                <p className="text-sm text-foreground/90 leading-snug">{activePack.teacher.notes}</p>
+                <button
+                  type="button"
+                  onClick={() => handleLoadLessonSetup(activePack)}
+                  disabled={mode === 'rocket' && rocketState.phase !== 'idle' && rocketState.phase !== 'outcome'}
+                  className="press mt-2 rounded-md border border-secondary/40 bg-secondary/15 px-3 py-1.5 text-sm text-secondary hover:bg-secondary/25 disabled:opacity-40"
+                >
+                  Load lesson setup
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-4">
@@ -937,52 +1056,43 @@ const Index = () => {
           </div>
 
           <div className="space-y-2 min-h-[248px]">
-            <AnimatePresence mode="popLayout">
-              {visibleMissions.map((achievement) => (
-                <motion.div
-                  key={achievement.id}
-                  layout
-                  initial={{ opacity: 0, y: 18, scale: 0.97 }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                    scale: achievement.phase === 'complete' ? 0.985 : 1,
-                    borderColor: achievement.phase === 'complete' ? 'rgba(0, 229, 255, 0.35)' : 'rgba(148, 163, 184, 0.18)',
-                    backgroundColor: achievement.phase === 'complete' ? 'rgba(0, 229, 255, 0.08)' : 'rgba(148, 163, 184, 0.08)',
-                  }}
-                  exit={{ opacity: 0, x: 36, scale: 0.94, height: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0 }}
-                  transition={{ duration: 0.32, ease: 'easeOut' }}
-                  className="rounded-xl border px-3 py-2.5"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className={`text-base font-medium ${achievement.phase === 'complete' ? 'text-primary' : 'text-foreground'}`}>{achievement.name}</div>
-                      <div className="text-base text-muted-foreground">{achievement.description}</div>
-                    </div>
-                    <div className={`text-sm font-mono uppercase tracking-[0.2em] ${achievement.phase === 'complete' ? 'text-primary' : 'text-muted-foreground/70'}`}>
-                      {achievement.phase === 'complete' ? 'Complete' : 'Incomplete'}
-                    </div>
+            {visibleMissions.map((achievement) => (
+              <div
+                key={achievement.id}
+                className={`rounded-xl border px-3 py-2.5 animate-fade-in transition-all duration-300 ${
+                  achievement.phase === 'complete'
+                    ? 'scale-[0.985] border-primary/35 bg-primary/10'
+                    : 'border-slate-400/20 bg-slate-400/10'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className={`text-base font-medium ${achievement.phase === 'complete' ? 'text-primary' : 'text-foreground'}`}>{achievement.name}</div>
+                    <div className="text-base text-muted-foreground">{achievement.description}</div>
                   </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+                  <div className={`text-sm font-mono uppercase tracking-[0.2em] ${achievement.phase === 'complete' ? 'text-primary' : 'text-muted-foreground/70'}`}>
+                    {achievement.phase === 'complete' ? 'Complete' : 'Incomplete'}
+                  </div>
+                </div>
+              </div>
+            ))}
 
             {visibleMissions.length === 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-xl border border-primary/35 bg-primary/10 px-3 py-4 text-center"
-              >
+              <div className="rounded-xl border border-primary/35 bg-primary/10 px-3 py-4 text-center animate-fade-in">
                 <div className="text-base font-medium text-primary">All {mode === 'spacetime' ? 'spacetime' : 'rocket'} missions complete</div>
                 <div className="text-base text-muted-foreground mt-1">Every mission in this queue has been cleared.</div>
-              </motion.div>
+              </div>
             )}
           </div>
           </>)}
         </div>
       </div>
 
-      <LabNotebook open={notebookOpen} onOpenChange={setNotebookOpen} entries={notebook} onClear={handleClearNotebook} />
+      {notebookOpen && (
+        <Suspense fallback={null}>
+          <LabNotebook open={notebookOpen} onOpenChange={setNotebookOpen} entries={notebook} onClear={handleClearNotebook} />
+        </Suspense>
+      )}
 
       {/* Bottom Center - Time Controls */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto flex flex-col items-center gap-2">

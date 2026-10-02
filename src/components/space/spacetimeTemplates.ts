@@ -515,4 +515,25 @@ export const SPACETIME_TEMPLATES: SpacetimeTemplate[] = [
       ];
     },
   },
+  {
+    id: 'slingshot-lab',
+    name: 'Slingshot Lab',
+    subtitle: 'Gravity assist set-up',
+    description: 'A comet heads into the path of a moving companion star. Watch its speed before and after the flyby, then try your own aims.',
+    bodyCount: 3,
+    preview: {
+      orbits: [{ radius: 42, stroke: '#f97316', dashed: true }],
+      bodies: [
+        { x: 50, y: 50, radius: 6.5, color: '#ffcc00' },
+        { x: 92, y: 50, radius: 4.4, color: '#f97316' },
+        { x: 86, y: 43, radius: 2.2, color: '#66ddff' },
+      ],
+    },
+    createBodies: () => [
+      createStar({ name: 'Sol', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, color: '#ffcc00', velocity: [0, 0, 0] }),
+      // Zero velocity: the simulator gives the companion a circular orbit around Sol.
+      { ...createStar({ name: 'Ember', position: [30, 0, 0], mass: DEFAULT_STAR_MASS * 0.4, radius: 1.4, color: '#f97316', velocity: [0, 0, 0] }) },
+      createSmallBody({ name: 'Swift', type: 'comet', position: [26, 0, 5], mass: 2.0e14, radius: 0.22, color: '#66ddff', velocity: [0, 0, -0.6] }),
+    ],
+  },
 ];

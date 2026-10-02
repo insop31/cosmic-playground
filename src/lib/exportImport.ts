@@ -1,11 +1,10 @@
-// Share saved systems and rocket presets as files, e.g. a teacher handing a setup to a
-// class. Imported files are validated before anything is stored.
+// Reading shared files: everything is validated before it is stored.
 import { z } from 'zod';
 import { DEFAULT_PARAMS, normalizeRocketParams } from '../components/rocket/rocketTypes';
 import type { SavedRocketPreset, SavedSpacetimeScenario } from './scenarioStorage';
+import { EXPORT_FORMAT, EXPORT_VERSION } from './exportFile';
 
-export const EXPORT_FORMAT = 'cosmic-playground';
-export const EXPORT_VERSION = 1;
+export { buildExportFile } from './exportFile';
 
 const vec3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 
@@ -57,16 +56,6 @@ export interface ImportedFile {
   rocketPresets: Omit<SavedRocketPreset, 'id' | 'createdAt' | 'updatedAt'>[];
 }
 
-export function buildExportFile(scenarios: SavedSpacetimeScenario[], presets: SavedRocketPreset[]): string {
-  return JSON.stringify({
-    format: EXPORT_FORMAT,
-    version: EXPORT_VERSION,
-    exportedAt: new Date().toISOString(),
-    spacetimeScenarios: scenarios.map(({ name, bodies, placementVelocityScale, realisticMode }) => ({ name, bodies, placementVelocityScale, realisticMode })),
-    rocketPresets: presets.map(({ name, params }) => ({ name, params })),
-  }, null, 2);
-}
-
 /** Parse and validate an exported file; throws an Error with a readable message if invalid. */
 export function parseImportFile(text: string): ImportedFile {
   let json: unknown;
@@ -88,17 +77,4 @@ export function parseImportFile(text: string): ImportedFile {
     })) as ImportedFile['spacetimeScenarios'],
     rocketPresets: result.data.rocketPresets.map((preset) => ({ name: preset.name, params: normalizeRocketParams(preset.params) })),
   };
-}
-
-/** Ask the browser to save `text` as a file. */
-export function downloadTextFile(filename: string, text: string) {
-  const blob = new Blob([text], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

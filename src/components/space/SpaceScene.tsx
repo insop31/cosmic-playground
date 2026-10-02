@@ -11,6 +11,7 @@ import type { ImpactEvent } from '../../physics/nbody';
 
 export type { CelestialBody } from '../../physics/types';
 import type { CelestialBody } from '../../physics/types';
+import { QUALITY_PROFILES, type QualityProfile } from '../../lib/settings';
 
 interface SpaceSceneProps {
   bodies: CelestialBody[];
@@ -35,6 +36,8 @@ interface SpaceSceneProps {
   onImpacts?: (impacts: ImpactEvent[]) => void;
   selectedBodyId?: string | null;
   onSelectBody?: (id: string) => void;
+  quality?: QualityProfile;
+  reduceMotion?: boolean;
 }
 
 // Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
@@ -60,13 +63,16 @@ const SpaceScene = ({
   onImpacts,
   selectedBodyId,
   onSelectBody,
+  quality = QUALITY_PROFILES.high,
+  reduceMotion = false,
 }: SpaceSceneProps) => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   return (
     <Canvas
       camera={{ position: [0, 45, 45], fov: 55, near: 0.1, far: 800 }}
-      gl={{ antialias: true, alpha: false }}
+      dpr={quality.dpr}
+      gl={{ antialias: quality.antialias, alpha: false }}
       style={{ background: 'black' }}
     >
       <color attach="background" args={['#050a14']} />
@@ -76,7 +82,7 @@ const SpaceScene = ({
       <pointLight position={[20, 30, 20]} intensity={0.5} color="#00e5ff" />
       <pointLight position={[-15, 20, -10]} intensity={0.3} color="#7c3aed" />
 
-      <Starfield />
+      <Starfield count={quality.stars} animate={!reduceMotion} />
       <PlacementLayer
         bodies={bodies}
         pending={pendingPlacement}
@@ -86,7 +92,7 @@ const SpaceScene = ({
         controlsRef={controlsRef}
         onPlace={onPlace}
         gridSize={GRID_SIZE}
-        gridResolution={160}
+        gridResolution={quality.gridResolution}
         universeScale={universeScale}
         realisticMode={realisticMode}
       />
@@ -105,6 +111,7 @@ const SpaceScene = ({
         simulationRef={simulationRef}
         onSnapshot={onSnapshot}
         onImpacts={onImpacts}
+        trailPoints={quality.trailPoints}
         selectedBodyId={selectedBodyId}
         onSelectBody={pendingPlacement ? undefined : onSelectBody}
       />

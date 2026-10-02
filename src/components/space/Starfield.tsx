@@ -2,11 +2,16 @@ import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-const Starfield = () => {
+interface StarfieldProps {
+  count?: number;
+  /** Slow drift of the sky; off when motion is reduced. */
+  animate?: boolean;
+}
+
+const Starfield = ({ count = 3000, animate = true }: StarfieldProps) => {
   const pointsRef = useRef<THREE.Points>(null);
 
   const [positions, colors] = useMemo(() => {
-    const count = 3000;
     const pos = new Float32Array(count * 3);
     const col = new Float32Array(count * 3);
 
@@ -27,10 +32,10 @@ const Starfield = () => {
     }
 
     return [pos, col];
-  }, []);
+  }, [count]);
 
   useFrame((state) => {
-    if (pointsRef.current) {
+    if (pointsRef.current && animate) {
       pointsRef.current.rotation.y = state.clock.elapsedTime * 0.003;
     }
   });

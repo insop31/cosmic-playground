@@ -85,6 +85,8 @@ export interface PhysicsSimulatorProps {
   onSnapshot?: (snapshot: SimSnapshot) => void;
   /** Collisions, mergers and tidal disruptions from simulation steps run forward. */
   onImpacts?: (impacts: ImpactEvent[]) => void;
+  /** How many recent positions each trail shows (graphics quality). */
+  trailPoints?: number;
   /** Called for bodies the simulation creates (fragments, tidal debris). */
   onBodySpawned?: (body: CelestialBody) => void;
   /** Filled with the seek / predict / pin commands once the simulation is running. */
@@ -849,6 +851,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   simulationEpoch = 0,
   onSnapshot,
   onImpacts,
+  trailPoints = MAX_TRAIL_POINTS,
   onBodySpawned,
   simulationRef,
   selectedBodyId = null,
@@ -875,6 +878,8 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
   const [hasPendingImpact, setHasPendingImpact] = useState(false);
 
   configRef.current = { realisticMode, expansionRate };
+  const trailPointsRef = useRef(trailPoints);
+  trailPointsRef.current = Math.min(trailPoints, MAX_TRAIL_POINTS);
   callbacksRef.current = { onBodyRemoved, onBodyUpdated, onBodyRestored, onSnapshot, onBodySpawned, onImpacts };
 
   // Predicted orbit of the selected body and a ring marking it; updated every snapshot.
@@ -981,16 +986,17 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 
     const entry = meshEntriesRef.current.get(id);
     if (!entry) return;
-    // Unroll the ring buffer into the line geometry in order.
+    // Unroll the newest `shown` points of the ring buffer into the line geometry in order.
     const arr = entry.trailAttr.array as Float32Array;
-    for (let k = 0; k < trail.len; k++) {
-      const src = ((trail.head - trail.len + k + MAX_TRAIL_POINTS) % MAX_TRAIL_POINTS) * 3;
+    const shown = Math.min(trail.len, trailPointsRef.current);
+    for (let k = 0; k < shown; k++) {
+      const src = ((trail.head - shown + k + MAX_TRAIL_POINTS) % MAX_TRAIL_POINTS) * 3;
       arr[k * 3] = trail.data[src];
       arr[k * 3 + 1] = trail.data[src + 1];
       arr[k * 3 + 2] = trail.data[src + 2];
     }
     entry.trailAttr.needsUpdate = true;
-    entry.trailLine.geometry.setDrawRange(0, trail.len);
+    entry.trailLine.geometry.setDrawRange(0, shown);
   };
 
   const clearTrails = () => {

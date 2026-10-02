@@ -58,7 +58,7 @@ interface ObjectLibraryProps {
   onLoadScenario: (scenarioId: string) => void;
   onDeleteScenario: (scenarioId: string) => void;
   onExportFile: () => void;
-  onImportFile: (text: string) => string;
+  onImportFile: (text: string) => Promise<string>;
 }
 
 const SAVED_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
