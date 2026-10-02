@@ -1,10 +1,11 @@
 import { useRef } from 'react';
+import type { MutableRefObject } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
-import PhysicsSimulator from './PhysicsSimulator';
+import PhysicsSimulator, { type LiveBodyState } from './PhysicsSimulator';
 
 export interface CelestialBody {
   id: string;
@@ -26,9 +27,14 @@ interface SpaceSceneProps {
   timeScale: number;
   onBodyRemoved: (id: string) => void;
   onBodyUpdated: (id: string, mass: number, radius: number) => void;
+  onBodyRestored: (body: CelestialBody) => void;
   onGridClick?: (position: [number, number, number]) => void;
   realisticMode?: boolean;
   universeScale?: number;
+  expansionRate?: number;
+  simulationEpoch?: number;
+  /** Written by PhysicsSimulator every step with live positions, velocities and masses. */
+  livePhysicsRef: MutableRefObject<LiveBodyState[]>;
 }
 
 // Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
@@ -39,14 +45,16 @@ const SpaceScene = ({
   timeScale,
   onBodyRemoved,
   onBodyUpdated,
+  onBodyRestored,
   onGridClick,
   realisticMode = true,
   universeScale = 1,
+  expansionRate = 0,
+  simulationEpoch = 0,
+  livePhysicsRef,
 }: SpaceSceneProps) => {
-  // Shared ref written by PhysicsSimulator and read by SpacetimeGrid every frame.
-  // Using a plain ref keeps grid deformation in sync with physics without any
-  // React state updates in the hot path.
-  const livePhysicsRef = useRef<Array<{ position: [number, number, number]; mass: number }>>([]);
+  // livePhysicsRef is written by PhysicsSimulator and read by SpacetimeGrid every frame,
+  // keeping grid deformation in sync with physics without React state in the hot path.
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   return (
@@ -78,9 +86,10 @@ const SpaceScene = ({
         timeScale={timeScale}
         onBodyRemoved={onBodyRemoved}
         onBodyUpdated={onBodyUpdated}
+        onBodyRestored={onBodyRestored}
         livePhysicsRef={livePhysicsRef}
-        universeScale={universeScale}
-        gridSize={GRID_SIZE}
+        expansionRate={expansionRate}
+        simulationEpoch={simulationEpoch}
         realisticMode={realisticMode}
         controlsRef={controlsRef}
       />

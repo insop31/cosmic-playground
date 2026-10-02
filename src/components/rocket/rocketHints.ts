@@ -26,7 +26,8 @@ export type HintScenario =
   | 'crashed'
   | 'suborbital'
   | 'orbiting'
-  | 'escape';
+  | 'escape'
+  | 'burnup';
 
 // 27 normalized rocket situations x 5 variants each = 135 hardcoded hint lines.
 export const AI_HINTS: Record<HintScenario, string[]> = {
@@ -212,6 +213,13 @@ export const AI_HINTS: Record<HintScenario, string[]> = {
     'This profile has more than enough energy to keep going.',
     'You have crossed from orbital ambition into full departure. That is a valid success state.',
   ],
+  burnup: [
+    'Burn-up. Heating grows with air density and the cube of speed, so going fast low in the atmosphere is what melted the shield.',
+    'The heat shield gave out. Try a steeper climb so the rocket leaves the thick air before it gets really fast.',
+    'Too much speed in dense air. Lower the thrust or stretch the burn so the rocket accelerates higher up.',
+    'Thermal load and storm conditions add heating. Clear weather or a lower thermal load gives the shield more margin.',
+    'Watch the heat shield gauge during flight. If it passes 75%, that profile is on the edge.',
+  ],
 };
 
 export const deriveHintScenario = (params: RocketParams, state: RocketState): HintScenario => {
@@ -220,6 +228,7 @@ export const deriveHintScenario = (params: RocketParams, state: RocketState): Hi
     if (state.outcome === 'suborbital') return 'suborbital';
     if (state.outcome === 'orbiting') return 'orbiting';
     if (state.outcome === 'escape') return 'escape';
+    if (state.outcome === 'burnup') return 'burnup';
   }
 
   if (state.phase === 'launching') {

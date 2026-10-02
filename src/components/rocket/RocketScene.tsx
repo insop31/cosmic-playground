@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import RocketModel from './RocketModel';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
 import type { WeatherConditionId } from './weatherPresets';
-import { WeatherEnvironment, WeatherShakeGroup, createLightningStrikeState } from './WeatherEffects';
+import { WeatherEnvironment, WeatherShakeGroup } from './WeatherEffects';
+import { createLightningStrikeState } from './lightningStrike';
 
 interface RocketSceneProps {
   params: RocketParams;
@@ -364,7 +365,7 @@ const AtmosphericLayers = ({
         <meshBasicMaterial color="#ffffff" transparent opacity={0.12} />
       </mesh>
 
-      {ATMO_LAYERS.map((layer, i) => {
+      {ATMO_LAYERS.map((layer) => {
         const yMin = pyToWorldY(layer.pyMin);
         const yMax = pyToWorldY(layer.pyMax);
         const trajectoryX = THREE.MathUtils.clamp((layer.pyMax * trajectorySlope) * 2, -60, 60);
@@ -473,7 +474,7 @@ const CinematicCamera = ({
   controlsRef: RefObject<OrbitControlsImpl | null>;
   userControlled: boolean;
 }) => {
-  const { camera } = useThree();
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const targetPos = useRef(new THREE.Vector3(0, 5, 0));
   const targetCam = useRef(new THREE.Vector3(8, 6, 20));
   const orbitBlendRef = useRef(0);

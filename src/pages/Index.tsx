@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import SpaceScene, { CelestialBody } from '../components/space/SpaceScene';
+import type { LiveBodyState } from '../components/space/PhysicsSimulator';
 import RocketScene from '../components/rocket/RocketScene';
 import RocketControls from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
@@ -25,19 +26,25 @@ import {
   type AppMode,
   type ChallengePack,
 } from '../lib/challengePacks';
+import {
+  DEFAULT_STAR_MASS,
+  HUBBLE_RATE,
+  MAX_UNIVERSE_SCALE,
+  tangentialOrbitVelocity,
+} from '../physics/constants';
 
 let nextId = 1;
 const ACTIVE_MISSION_LIMIT = 3;
 const MISSION_EXIT_DELAY_MS = 900;
 
-// Universe expansion starts after this many real seconds
-const EXPANSION_DELAY_S = 600; // 10 minutes
-const DEFAULT_STAR_MASS = 1.989e30;
-const MASSIVE_ATTRACTOR_THRESHOLD = 1e27;
-const REAL_G = 6.674e-11;
-const REAL_GRAVITY_BOOST = 7.5e-20; // Must match PhysicsSimulator — G_eff * M_sun ≈ 10 at scene scale
-const MIN_ORBITAL_SPEED = 0.08;
-const MAX_ORBITAL_SPEED = 3.0;
+const MASSIVE_ANCHOR_MASS = 1e27;
+
+// Bodies with a zero velocity are given a circular orbit around the heaviest body by the simulator.
+const createDefaultBodies = (): CelestialBody[] => [
+  { id: 'sun', name: 'Sun', type: 'star', bodyClass: 'star', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, physicalRadius: 696_340_000, color: '#ffcc00', velocity: [0, 0, 0] },
+  { id: 'earth', name: 'Earth', type: 'planet', bodyClass: 'rocky', position: [8, 0, 0], mass: 5.97e24, radius: 0.45, physicalRadius: 6_371_000, color: '#5b9ee8', atmosphere: true, velocity: [0, 0, 0] },
+  { id: 'mars', name: 'Mars', type: 'planet', bodyClass: 'rocky', position: [-5, 0, 6], mass: 6.42e23, radius: 0.35, physicalRadius: 3_389_500, color: '#dd7755', atmosphere: true, velocity: [0, 0, 0] },
+];
 
 type MissionId = (typeof ALL_MISSIONS)[number]['id'];
 type MissionCard = { id: MissionId; phase: 'incomplete' | 'complete' };
@@ -85,11 +92,12 @@ const Index = () => {
   const [activePacks, setActivePacks] = useState<Record<AppMode, string>>(DEFAULT_PACK_BY_MODE);
 
   // ─── Spacetime state ───
-  const [bodies, setBodies] = useState<CelestialBody[]>([
-    { id: 'sun', name: 'Sun', type: 'star', bodyClass: 'star', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, physicalRadius: 696_340_000, color: '#ffcc00', velocity: [0, 0, 0] },
-    { id: 'earth', name: 'Earth', type: 'planet', bodyClass: 'rocky', position: [8, 0, 0], mass: 5.97e24, radius: 0.45, physicalRadius: 6_371_000, color: '#5b9ee8', atmosphere: true, velocity: [0, 0, 0] },
-    { id: 'mars', name: 'Mars', type: 'planet', bodyClass: 'rocky', position: [-5, 0, 6], mass: 6.42e23, radius: 0.35, physicalRadius: 3_389_500, color: '#dd7755', atmosphere: true, velocity: [0, 0, 0] },
-  ]);
+  const [bodies, setBodies] = useState<CelestialBody[]>(createDefaultBodies);
+  // Incremented whenever the whole system is replaced (reset, template, load, clear) so the
+  // simulator restarts from `bodies` and clears its rewind history.
+  const [simulationEpoch, setSimulationEpoch] = useState(0);
+  // Live positions/velocities/masses published by the simulator every step.
+  const livePhysicsRef = useRef<LiveBodyState[]>([]);
   const [pendingPlacement, setPendingPlacement] = useState<Omit<CelestialBody, 'id' | 'position'> | null>(null);
   const [placementVelocityScale, setPlacementVelocityScale] = useState(1);
   const [realisticMode, setRealisticMode] = useState(true);
@@ -98,7 +106,8 @@ const Index = () => {
   const [timeScale, setTimeScale] = useState(1);
   const [isPlaying, setIsPlaying] = useState(true);
 
-  // Universe expansion
+  // Universe expansion (opt-in)
+  const [expansionEnabled, setExpansionEnabled] = useState(false);
   const universeAgeRef = useRef(0);
   const [universeScale, setUniverseScale] = useState(1);
   const lastTickRef = useRef(Date.now());
@@ -259,28 +268,26 @@ const Index = () => {
     });
   }, []);
 
-  // ─── Universe age ticker ───
+  // ─── Universe expansion clock ───
+  // Tracks simulated time while expansion is on; the grid scale follows exp(H·t) and
+  // shrinks back when time is rewound.
   useEffect(() => {
-    if (mode !== 'spacetime') return;
+    if (mode !== 'spacetime' || !expansionEnabled) return;
+    lastTickRef.current = Date.now();
 
     const interval = setInterval(() => {
       const now = Date.now();
       const elapsed = (now - lastTickRef.current) / 1000;
       lastTickRef.current = now;
 
-      // Only age the universe while time is moving forward
-      if (isPlaying && timeScale > 0) {
-        universeAgeRef.current += elapsed;
+      if (isPlaying) {
+        universeAgeRef.current = Math.max(0, universeAgeRef.current + elapsed * timeScale);
       }
-
-      const age = universeAgeRef.current;
-      // Scale starts at 1, grows slowly after EXPANSION_DELAY_S
-      const newScale = 1 + 0.00018 * Math.max(0, age - EXPANSION_DELAY_S);
-      setUniverseScale(newScale);
-    }, 1000);
+      setUniverseScale(Math.min(MAX_UNIVERSE_SCALE, Math.exp(HUBBLE_RATE * universeAgeRef.current)));
+    }, 500);
 
     return () => clearInterval(interval);
-  }, [mode, isPlaying, timeScale]);
+  }, [mode, isPlaying, timeScale, expansionEnabled]);
 
   useEffect(() => {
     if (experimentKeysRef.current.size >= 8) {
@@ -325,43 +332,40 @@ const Index = () => {
       unlockAchievement('escape-velocity-achieved');
     }
 
+    // Missions are judged on the conditions actually flown (base values + weather).
+    const flown = effectiveRocketParams;
+    const reachedSpace = rocketState.outcome === 'orbiting' || rocketState.outcome === 'escape';
+    const survived = rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup';
+
     const difficultWeather =
-      Math.abs(effectiveRocketParams.crosswind) >= 20
-      && effectiveRocketParams.windShear >= 0.5
-      && effectiveRocketParams.thermalLoad >= 0.45;
-    if (difficultWeather && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
+      Math.abs(flown.crosswind) >= 20
+      && flown.windShear >= 0.5
+      && flown.thermalLoad >= 0.45;
+    if (difficultWeather && survived) {
       unlockAchievement('storm-runner');
     }
 
-    if (rocketParams.stageSeparation && (rocketState.outcome === 'orbiting' || rocketState.outcome === 'escape')) {
+    if (flown.stageSeparation && reachedSpace) {
       unlockAchievement('staging-specialist');
     }
 
-    const preciseFlight = Math.abs(rocketParams.padTilt) <= 1 && Math.abs(rocketParams.crosswind) <= 8;
-    if (preciseFlight && (rocketState.outcome === 'orbiting' || rocketState.outcome === 'escape')) {
+    const preciseFlight = Math.abs(flown.padTilt) <= 1 && Math.abs(flown.crosswind) <= 8;
+    if (preciseFlight && reachedSpace) {
       unlockAchievement('precision-pilot');
     }
 
-    const heavyLiftConfig = rocketParams.thrustForce >= 70 && rocketParams.fuelMass >= 120;
-    if (heavyLiftConfig && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
+    const heavyLiftConfig = flown.thrustForce >= 70 && flown.fuelMass >= 120;
+    if (heavyLiftConfig && reachedSpace) {
       unlockAchievement('heavy-lift');
     }
 
-    const thickAtmosphere = rocketParams.atmosphericDensity >= 0.75 && rocketParams.atmosphericPressure >= 1.1;
-    if (thickAtmosphere && rocketState.outcome !== 'crashed' && rocketState.outcome !== 'burnup') {
+    const thickAtmosphere = flown.atmosphericDensity >= 0.75 && flown.atmosphericPressure >= 1.1;
+    if (thickAtmosphere && reachedSpace) {
       unlockAchievement('dense-atmosphere-run');
     }
   }, [
     awardScore,
-    rocketParams.atmosphericDensity,
-    rocketParams.atmosphericPressure,
-    rocketParams.crosswind,
-    rocketParams.fuelMass,
-    rocketParams.padTilt,
-    rocketParams.stageSeparation,
-    rocketParams.thermalLoad,
-    rocketParams.thrustForce,
-    rocketParams.windShear,
+    effectiveRocketParams,
     rocketState.outcome,
     rocketState.phase,
     unlockAchievement,
@@ -410,20 +414,28 @@ const Index = () => {
     setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, mass, radius } : b)));
   }, []);
 
-  const computePlacementVelocity = useCallback((position: [number, number, number], allBodies: CelestialBody[], scale: number) => {
-    if (allBodies.length === 0) return [0, 0, 0] as [number, number, number];
-    const attractor = allBodies.reduce((max, b) => (b.mass > max.mass ? b : max));
-    const rx = position[0] - attractor.position[0];
-    const rz = position[2] - attractor.position[2];
-    const distance = Math.sqrt(rx * rx + rz * rz);
-    if (distance < 0.01) return [0, 0, 0];
-    const normalizedDistance = Math.max(distance, 0.25);
-    const effectiveMass = Math.max(attractor.mass, MASSIVE_ATTRACTOR_THRESHOLD);
-    const orbitalSpeedRaw = Math.sqrt((REAL_G * effectiveMass * REAL_GRAVITY_BOOST) / normalizedDistance);
-    const orbitalSpeed = Math.min(MAX_ORBITAL_SPEED, Math.max(MIN_ORBITAL_SPEED, orbitalSpeedRaw));
-    const tangentX = -rz / distance;
-    const tangentZ = rx / distance;
-    return [tangentX * orbitalSpeed * scale, 0, tangentZ * orbitalSpeed * scale];
+  const handleBodyRestored = useCallback((body: CelestialBody) => {
+    setBodies((prev) => (prev.some((b) => b.id === body.id) ? prev : [...prev, body]));
+  }, []);
+
+  /** Bodies as they are right now in the simulation (React state only holds spawn values). */
+  const getLiveBodies = useCallback((current: CelestialBody[]): CelestialBody[] => {
+    const live = new Map(livePhysicsRef.current.map((entry) => [entry.id, entry]));
+    return current.map((body) => {
+      const state = live.get(body.id);
+      return state
+        ? { ...body, position: state.position, velocity: state.velocity, mass: state.mass, radius: state.radius }
+        : body;
+    });
+  }, []);
+
+  const computePlacementVelocity = useCallback((position: [number, number, number], liveBodies: CelestialBody[], scale: number) => {
+    if (liveBodies.length === 0) return [0, 0, 0] as [number, number, number];
+    const attractor = liveBodies.reduce((max, b) => (b.mass > max.mass ? b : max));
+    const orbit = tangentialOrbitVelocity(position, attractor.position, attractor.mass, scale);
+    const anchorVelocity = attractor.velocity ?? [0, 0, 0];
+    // Orbit relative to the attractor, which may itself be moving.
+    return [orbit[0] + anchorVelocity[0], 0, orbit[2] + anchorVelocity[2]] as [number, number, number];
   }, []);
 
   const handleBeginPlacement = useCallback((obj: Omit<CelestialBody, 'id'>) => {
@@ -435,12 +447,13 @@ const Index = () => {
   const handlePlaceOnGrid = useCallback((position: [number, number, number]) => {
     if (!pendingPlacement) return;
     setBodies((prev) => {
-      let spawnPos: [number, number, number] = [...position] as [number, number, number];
+      let spawnPos: [number, number, number] = [position[0], 0, position[2]];
       const newRadius = pendingPlacement.radius ?? 0.3;
+      const liveBodies = getLiveBodies(prev);
 
       // Enforce minimum safe distance from EVERY existing body, not just the heaviest.
       // This prevents the extreme close-range gravitational forces that shoot bodies off-screen.
-      for (const existing of prev) {
+      for (const existing of liveBodies) {
         const dx = spawnPos[0] - existing.position[0];
         const dz = spawnPos[2] - existing.position[2];
         const dist = Math.sqrt(dx * dx + dz * dz);
@@ -457,8 +470,8 @@ const Index = () => {
         }
       }
 
-      const velocity = computePlacementVelocity(spawnPos, prev, placementVelocityScale);
-      const hasHeavyAnchor = prev.some((body) => body.mass >= 1e27);
+      const velocity = computePlacementVelocity(spawnPos, liveBodies, placementVelocityScale);
+      const hasHeavyAnchor = liveBodies.some((body) => body.mass >= MASSIVE_ANCHOR_MASS);
       if ((pendingPlacement.type === 'comet' || pendingPlacement.type === 'asteroid') && placementVelocityScale >= 1.5 && hasHeavyAnchor) {
         unlockAchievement('slingshot-expert');
       }
@@ -471,7 +484,7 @@ const Index = () => {
       }];
     });
     setPendingPlacement(null);
-  }, [computePlacementVelocity, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment, unlockAchievement]);
+  }, [computePlacementVelocity, getLiveBodies, pendingPlacement, placementVelocityScale, realisticMode, registerExperiment, unlockAchievement]);
 
   const handleRemoveBody = useCallback((id: string) => {
     setBodies((prev) => prev.filter((b) => b.id !== id));
@@ -479,6 +492,7 @@ const Index = () => {
 
   const handleRemoveAll = useCallback(() => {
     setBodies([]);
+    setSimulationEpoch((epoch) => epoch + 1);
     stableSystemTimerRef.current = 0;
     stableBlackHoleTimerRef.current = 0;
   }, []);
@@ -493,6 +507,7 @@ const Index = () => {
     }));
 
     setBodies(nextBodies);
+    setSimulationEpoch((epoch) => epoch + 1);
     setPendingPlacement(null);
     setTimeScale(1);
     setIsPlaying(true);
@@ -504,10 +519,8 @@ const Index = () => {
   }, [registerExperiment]);
 
   const handleResetSpacetime = useCallback(() => {
-    setBodies([
-      { id: 'sun', name: 'Sun', type: 'star', bodyClass: 'star', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, physicalRadius: 696_340_000, color: '#ffcc00', velocity: [0, 0, 0] },
-      { id: 'earth', name: 'Earth', type: 'planet', bodyClass: 'rocky', position: [8, 0, 0], mass: 5.97e24, radius: 0.45, physicalRadius: 6_371_000, color: '#5b9ee8', atmosphere: true, velocity: [0, 0, 0] },
-    ]);
+    setBodies(createDefaultBodies());
+    setSimulationEpoch((epoch) => epoch + 1);
     setTimeScale(1);
     setIsPlaying(true);
     universeAgeRef.current = 0;
@@ -523,18 +536,19 @@ const Index = () => {
 
     setSavedScenarios(saveSpacetimeScenario({
       name: trimmedName,
-      bodies,
+      bodies: getLiveBodies(bodies),
       placementVelocityScale,
       realisticMode,
     }));
     return true;
-  }, [bodies, placementVelocityScale, realisticMode]);
+  }, [bodies, getLiveBodies, placementVelocityScale, realisticMode]);
 
   const handleLoadScenario = useCallback((scenarioId: string) => {
     const scenario = savedScenarios.find((entry) => entry.id === scenarioId);
     if (!scenario) return;
 
     setBodies(cloneBodiesForScene(scenario.bodies));
+    setSimulationEpoch((epoch) => epoch + 1);
     setPlacementVelocityScale(scenario.placementVelocityScale);
     setRealisticMode(scenario.realisticMode);
     setPendingPlacement(null);
@@ -617,6 +631,13 @@ const Index = () => {
     registerExperiment(`physics-mode:${value ? 'realistic' : 'arcade'}`);
   }, [registerExperiment]);
 
+  const handleExpansionChange = useCallback((value: boolean) => {
+    setExpansionEnabled(value);
+    universeAgeRef.current = 0;
+    setUniverseScale(1);
+    if (value) registerExperiment('universe-expansion');
+  }, [registerExperiment]);
+
   // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
   const activePack = getActivePack(mode, activePacks[mode]);
@@ -644,9 +665,13 @@ const Index = () => {
           timeScale={effectiveTimeScale}
           onBodyRemoved={handleBodyRemoved}
           onBodyUpdated={handleBodyUpdated}
+          onBodyRestored={handleBodyRestored}
           onGridClick={handlePlaceOnGrid}
           realisticMode={realisticMode}
           universeScale={universeScale}
+          expansionRate={expansionEnabled && universeScale < MAX_UNIVERSE_SCALE ? HUBBLE_RATE : 0}
+          simulationEpoch={simulationEpoch}
+          livePhysicsRef={livePhysicsRef}
         />
       </div>
       <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
@@ -735,6 +760,8 @@ const Index = () => {
             onVelocityScaleChange={handleVelocityScaleChange}
             realisticMode={realisticMode}
             onRealisticModeChange={handleRealisticModeChange}
+            expansionEnabled={expansionEnabled}
+            onExpansionChange={handleExpansionChange}
             savedScenarios={savedScenarios}
             onSaveScenario={handleSaveCurrentScenario}
             onLoadScenario={handleLoadScenario}
@@ -742,7 +769,8 @@ const Index = () => {
           />
         ) : (
           <RocketControls
-            params={effectiveRocketParams}
+            params={rocketParams}
+            effectiveParams={effectiveRocketParams}
             state={rocketState}
             onParamChange={handleRocketParamChange}
             onLaunch={handleLaunch}

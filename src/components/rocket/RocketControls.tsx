@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { RocketParams, RocketState, LaunchOutcome } from './rocketTypes';
+import type { SavedRocketPreset } from '../../lib/scenarioStorage';
 import {
   WeatherConditionId,
   WEATHER_PRESETS,
@@ -26,19 +27,30 @@ import {
   AlertTriangle,
   CheckCircle2,
   X,
+  Save,
+  FolderOpen,
+  Trash2,
+  Thermometer,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { AI_HINTS, type HintScenario, deriveHintScenario } from './rocketHints';
 
 interface RocketControlsProps {
+  /** The values the student set. Sliders show and change these. */
   params: RocketParams;
+  /** The values actually flown: `params` plus active weather effects. */
+  effectiveParams: RocketParams;
   state: RocketState;
   onParamChange: (key: keyof RocketParams, value: number | boolean) => void;
   onLaunch: () => void;
   onReset: () => void;
   activeWeather: Set<WeatherConditionId>;
   onWeatherChange: (id: WeatherConditionId) => void;
+  savedPresets: SavedRocketPreset[];
+  onSavePreset: (name: string) => boolean;
+  onLoadPreset: (presetId: string) => void;
+  onDeletePreset: (presetId: string) => void;
 }
 
 interface SliderRowProps {
@@ -51,6 +63,8 @@ interface SliderRowProps {
   unit: string;
   onChange: (v: number) => void;
   disabled?: boolean;
+  /** Value after weather effects, shown when it differs from `value`. */
+  effectiveValue?: number;
 }
 
 const PARAMETER_INFO: Record<keyof RocketParams, string> = {
@@ -61,19 +75,21 @@ const PARAMETER_INFO: Record<keyof RocketParams, string> = {
   burnDuration: 'Sets how long the engine burns. Longer burns spread thrust out over more time instead of delivering it all at once.',
   dragCoefficient: 'Represents how much aerodynamic resistance the rocket shape creates while moving through air.',
   gravity: 'Adjusts the planet gravity pulling the rocket downward. Higher gravity makes reaching orbit much harder.',
-  planetRadius: 'Changes the visual size and orbital scale of the planet, which affects how the flight path is framed.',
+  planetRadius: 'Sets the size of the planet. With the same surface gravity, a bigger planet holds on more strongly at altitude, so it needs more speed to orbit or escape.',
   atmosphericDensity: 'Controls how thick the air is. Denser air increases drag and makes ascent less efficient.',
   crosswind: 'Applies a sideways wind that pushes the rocket left or right during ascent.',
   windShear: 'Adds altitude-dependent wind variation so winds can shift as the rocket climbs.',
-  thermalLoad: 'Increases heating and aerodynamic penalty at high speed, making aggressive ascents riskier.',
+  thermalLoad: 'Increases heating and drag at high speed. Too much heating overloads the heat shield and the rocket burns up.',
   ambientTemperature: 'Changes launch-day temperature, slightly affecting engine efficiency and performance.',
   atmosphericPressure: 'Adjusts surface pressure, which changes how efficiently the engine performs near the ground.',
   padTilt: 'Tilts the launch pad away from perfectly upright. Small tilt changes can nudge the rocket into a different trajectory.',
-  stageSeparation: 'Splits the flight into stages. When enabled, the vehicle can shed mass mid-flight for better efficiency.',
+  stageSeparation: 'Splits the rocket into two stages. When stage 1 runs dry (60% of the fuel), its empty structure (40% of the dry mass) is dropped, so stage 2 has less mass to push.',
 };
 
-const SliderRow = ({ label, info, value, min, max, step, unit, onChange, disabled }: SliderRowProps) => {
+const SliderRow = ({ label, info, value, min, max, step, unit, onChange, disabled, effectiveValue }: SliderRowProps) => {
   const pct = ((value - min) / (max - min)) * 100;
+  const decimals = step < 1 ? (step < 0.1 ? 2 : 1) : 0;
+  const weatherChanged = effectiveValue !== undefined && Math.abs(effectiveValue - value) > 1e-9;
   return (
     <div className={`flex flex-col gap-1.5 ${disabled ? 'opacity-30 pointer-events-none' : ''}`}>
       <div className="flex justify-between items-center text-sm">
@@ -90,8 +106,15 @@ const SliderRow = ({ label, info, value, min, max, step, unit, onChange, disable
             </TooltipContent>
           </Tooltip>
         </span>
-        <span className="font-mono text-sm text-primary bg-primary/10 px-2 py-0.5 rounded">
-          {value.toFixed(step < 1 ? 1 : 0)}{unit}
+        <span className="flex items-center gap-1.5">
+          {weatherChanged && (
+            <span className="font-mono text-[11px] text-orange-300" title="Value after weather effects">
+              → {effectiveValue.toFixed(decimals)}{unit}
+            </span>
+          )}
+          <span className="font-mono text-sm text-primary bg-primary/10 px-2 py-0.5 rounded">
+            {value.toFixed(decimals)}{unit}
+          </span>
         </span>
       </div>
       <div className="relative">
@@ -116,17 +139,41 @@ const weatherConditionList = Object.values(WEATHER_PRESETS);
 
 const RocketControls = ({
   params,
+  effectiveParams,
   state,
   onParamChange,
   onLaunch,
   onReset,
   activeWeather,
   onWeatherChange,
+  savedPresets,
+  onSavePreset,
+  onLoadPreset,
+  onDeletePreset,
 }: RocketControlsProps) => {
   const isActive = state.phase !== 'idle';
   const showOutcome = state.phase === 'outcome';
   const outcome = outcomeConfig[state.outcome];
-  const hintScenario = useMemo(() => deriveHintScenario(params, state), [params, state]);
+  const hintScenario = useMemo(() => deriveHintScenario(effectiveParams, state), [effectiveParams, state]);
+  const [presetName, setPresetName] = useState('');
+  const [presetMessage, setPresetMessage] = useState('');
+  const heatPercent = Math.min(100, state.heat * 100);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Bring the outcome card and its explanation into view when a flight ends.
+  useEffect(() => {
+    if (showOutcome) scrollAreaRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [showOutcome]);
+
+  const handleSavePreset = (event: FormEvent) => {
+    event.preventDefault();
+    if (onSavePreset(presetName)) {
+      setPresetMessage(`Saved “${presetName.trim()}”`);
+      setPresetName('');
+    } else {
+      setPresetMessage('Enter a name to save these settings.');
+    }
+  };
   const hintIndexRef = useRef<Record<HintScenario, number>>({} as Record<HintScenario, number>);
   const [activeHint, setActiveHint] = useState(AI_HINTS[hintScenario][0]);
   const [showBriefing, setShowBriefing] = useState(false);
@@ -194,13 +241,13 @@ const RocketControls = ({
             </div>
           </div>
           <div className="text-xs font-mono uppercase tracking-[0.18em] text-secondary mb-2">
-            Scenario: {hintScenario.replaceAll('-', ' ')}
+            Scenario: {hintScenario.replace(/-/g, ' ')}
           </div>
           <p className="text-[15px] text-foreground leading-relaxed font-medium">{activeHint}</p>
         </div>
 
         <div className="relative flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-5 pr-2 scrollbar-thin">
+          <div ref={scrollAreaRef} className="flex-1 min-h-0 overflow-y-auto space-y-5 pr-2 scrollbar-thin">
           <div className="flex items-center gap-3 pb-4 border-b border-white/10">
             <div className="w-12 h-12 rounded-xl bg-secondary/20 flex items-center justify-center glow-border border border-secondary/30">
               <Rocket size={22} className="text-secondary" />
@@ -219,6 +266,9 @@ const RocketControls = ({
                 <span>Max Alt: {state.maxAltitude.toFixed(1)}</span>
                 <span>Time: {state.elapsed.toFixed(1)}s</span>
               </div>
+              {state.outcomeReason && (
+                <p className="mt-2 text-sm leading-snug text-foreground/85">{state.outcomeReason}</p>
+              )}
             </div>
           )}
 
@@ -239,6 +289,26 @@ const RocketControls = ({
               <div className="p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
                 <div className="flex items-center gap-1 mb-1"><Timer size={10} className="text-muted-foreground" /><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Time</p></div>
                 <p className="text-xl font-mono text-foreground font-bold">{state.elapsed.toFixed(1)}s</p>
+              </div>
+              <div className="col-span-2 p-3 rounded-lg glass-panel bg-muted/10 border-border/30 shadow-inner">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1">
+                    <Thermometer size={10} className={heatPercent >= 75 ? 'text-destructive' : 'text-muted-foreground'} />
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Heat shield</p>
+                  </div>
+                  <p className={`text-sm font-mono font-bold ${heatPercent >= 75 ? 'text-destructive' : 'text-foreground'}`}>{heatPercent.toFixed(0)}%</p>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(heatPercent)} aria-label="Heat shield load">
+                  <div
+                    className={`h-full rounded-full ${heatPercent >= 75 ? 'bg-destructive' : heatPercent >= 45 ? 'bg-orange-400' : 'bg-primary'}`}
+                    style={{ width: `${heatPercent}%` }}
+                  />
+                </div>
+                {params.stageSeparation && (
+                  <p className="mt-2 text-[11px] font-mono text-muted-foreground">
+                    {state.stageSeparated ? 'Stage 1 separated · stage 2 burning' : 'Stage 1 burning'}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -323,13 +393,13 @@ const RocketControls = ({
               <Wind size={10} /> Environment
             </div>
             <div className="space-y-3">
-              <SliderRow label="Drag Coeff"    info={PARAMETER_INFO.dragCoefficient}    value={params.dragCoefficient}    min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('dragCoefficient', v)}    disabled={isActive} />
-              <SliderRow label="Atmo Density"  info={PARAMETER_INFO.atmosphericDensity} value={params.atmosphericDensity} min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('atmosphericDensity', v)} disabled={isActive} />
-              <SliderRow label="Crosswind"     info={PARAMETER_INFO.crosswind}          value={params.crosswind}          min={-60} max={60}  step={1}    unit=" m/s"  onChange={(v) => onParamChange('crosswind', v)}          disabled={isActive} />
-              <SliderRow label="Wind Shear"    info={PARAMETER_INFO.windShear}          value={params.windShear}          min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('windShear', v)}          disabled={isActive} />
-              <SliderRow label="Thermal Load"  info={PARAMETER_INFO.thermalLoad}        value={params.thermalLoad}        min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('thermalLoad', v)}        disabled={isActive} />
-              <SliderRow label="Ambient Temp"  info={PARAMETER_INFO.ambientTemperature} value={params.ambientTemperature} min={-60} max={60}  step={1}    unit=" C"    onChange={(v) => onParamChange('ambientTemperature', v)} disabled={isActive} />
-              <SliderRow label="Atmo Pressure" info={PARAMETER_INFO.atmosphericPressure} value={params.atmosphericPressure} min={0.6} max={1.4} step={0.02} unit=" atm" onChange={(v) => onParamChange('atmosphericPressure', v)} disabled={isActive} />
+              <SliderRow label="Drag Coeff"    info={PARAMETER_INFO.dragCoefficient}    value={params.dragCoefficient} effectiveValue={effectiveParams.dragCoefficient}    min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('dragCoefficient', v)}    disabled={isActive} />
+              <SliderRow label="Atmo Density"  info={PARAMETER_INFO.atmosphericDensity} value={params.atmosphericDensity} effectiveValue={effectiveParams.atmosphericDensity} min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('atmosphericDensity', v)} disabled={isActive} />
+              <SliderRow label="Crosswind"     info={PARAMETER_INFO.crosswind}          value={params.crosswind} effectiveValue={effectiveParams.crosswind}          min={-60} max={60}  step={1}    unit=" m/s"  onChange={(v) => onParamChange('crosswind', v)}          disabled={isActive} />
+              <SliderRow label="Wind Shear"    info={PARAMETER_INFO.windShear}          value={params.windShear} effectiveValue={effectiveParams.windShear}          min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('windShear', v)}          disabled={isActive} />
+              <SliderRow label="Thermal Load"  info={PARAMETER_INFO.thermalLoad}        value={params.thermalLoad} effectiveValue={effectiveParams.thermalLoad}        min={0}   max={1}   step={0.05} unit=""      onChange={(v) => onParamChange('thermalLoad', v)}        disabled={isActive} />
+              <SliderRow label="Ambient Temp"  info={PARAMETER_INFO.ambientTemperature} value={params.ambientTemperature} effectiveValue={effectiveParams.ambientTemperature} min={-60} max={60}  step={1}    unit=" C"    onChange={(v) => onParamChange('ambientTemperature', v)} disabled={isActive} />
+              <SliderRow label="Atmo Pressure" info={PARAMETER_INFO.atmosphericPressure} value={params.atmosphericPressure} effectiveValue={effectiveParams.atmosphericPressure} min={0.6} max={1.4} step={0.02} unit=" atm" onChange={(v) => onParamChange('atmosphericPressure', v)} disabled={isActive} />
               <SliderRow label="Pad Tilt"      info={PARAMETER_INFO.padTilt}            value={params.padTilt}            min={-8}  max={8}   step={0.5}  unit=" deg"  onChange={(v) => onParamChange('padTilt', v)}            disabled={isActive} />
             </div>
           </div>
@@ -365,6 +435,70 @@ const RocketControls = ({
             >
               <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${params.stageSeparation ? 'left-5 bg-primary' : 'left-0.5 bg-muted-foreground'}`} />
             </button>
+          </div>
+
+          <div className="space-y-2 border-t border-white/10 pt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-sm font-mono text-primary/70 uppercase tracking-widest">
+                <Save size={10} /> Saved Presets
+              </div>
+              <span className="text-[10px] font-mono text-muted-foreground/70">{savedPresets.length}/12</span>
+            </div>
+            <form onSubmit={handleSavePreset} className="flex gap-2">
+              <input
+                id="preset-name"
+                type="text"
+                value={presetName}
+                maxLength={40}
+                disabled={isActive}
+                onChange={(e) => { setPresetName(e.target.value); setPresetMessage(''); }}
+                placeholder="Name these settings"
+                aria-label="Preset name"
+                className="min-w-0 flex-1 rounded-md border border-border/40 bg-background/70 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none disabled:opacity-40"
+              />
+              <button
+                type="submit"
+                disabled={isActive}
+                className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+              >
+                <Save size={14} /> Save
+              </button>
+            </form>
+            {presetMessage && <p className="text-xs text-primary/90" role="status">{presetMessage}</p>}
+            {savedPresets.length > 0 && (
+              <div className="space-y-1.5">
+                {savedPresets.map((preset) => (
+                  <div key={preset.id} className="flex items-center gap-2 justify-between p-1.5 rounded bg-muted/20">
+                    <div className="min-w-0">
+                      <div className="text-sm text-foreground truncate">{preset.name}</div>
+                      <div className="text-[10px] font-mono text-muted-foreground/70">
+                        {preset.params.thrustForce} kN · {preset.params.fuelMass} kg fuel · {preset.params.launchAngle}°
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        disabled={isActive}
+                        onClick={() => onLoadPreset(preset.id)}
+                        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-40"
+                        title={`Load ${preset.name}`}
+                      >
+                        <FolderOpen size={12} /> Load
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeletePreset(preset.id)}
+                        className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        title={`Delete ${preset.name}`}
+                        aria-label={`Delete ${preset.name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
         </div>

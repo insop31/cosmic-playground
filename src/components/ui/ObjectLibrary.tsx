@@ -1,8 +1,9 @@
-import { type ReactNode, useMemo, useState } from 'react';
-import { Orbit, Sun, Circle, Hexagon, Star, Zap, Sparkles, LayoutTemplate } from 'lucide-react';
+import { type FormEvent, type ReactNode, useMemo, useState } from 'react';
+import { Orbit, Sun, Circle, Hexagon, Star, Zap, Sparkles, LayoutTemplate, Save, FolderOpen, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';
 import { SPACETIME_TEMPLATES } from '../space/spacetimeTemplates';
 import type { CelestialBody } from '../space/SpaceScene';
+import type { SavedSpacetimeScenario } from '../../lib/scenarioStorage';
 
 interface PlanetPreset {
   name: string;
@@ -46,7 +47,15 @@ interface ObjectLibraryProps {
   velocityScale: number;
   realisticMode: boolean;
   onRealisticModeChange: (value: boolean) => void;
+  expansionEnabled: boolean;
+  onExpansionChange: (value: boolean) => void;
+  savedScenarios: SavedSpacetimeScenario[];
+  onSaveScenario: (name: string) => boolean;
+  onLoadScenario: (scenarioId: string) => void;
+  onDeleteScenario: (scenarioId: string) => void;
 }
+
+const SAVED_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 const TemplatePreview = ({ templateId }: { templateId: string }) => {
   const template = SPACETIME_TEMPLATES.find((entry) => entry.id === templateId);
@@ -93,9 +102,27 @@ const ObjectLibrary = ({
   velocityScale,
   realisticMode,
   onRealisticModeChange,
+  expansionEnabled,
+  onExpansionChange,
+  savedScenarios,
+  onSaveScenario,
+  onLoadScenario,
+  onDeleteScenario,
 }: ObjectLibraryProps) => {
   const [selectedPlanetName, setSelectedPlanetName] = useState('Earth');
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [scenarioName, setScenarioName] = useState('');
+  const [saveMessage, setSaveMessage] = useState('');
+
+  const handleSaveScenario = (event: FormEvent) => {
+    event.preventDefault();
+    if (onSaveScenario(scenarioName)) {
+      setSaveMessage(`Saved “${scenarioName.trim()}”`);
+      setScenarioName('');
+    } else {
+      setSaveMessage('Enter a name to save this system.');
+    }
+  };
   const selectedPlanet = useMemo(
     () => PLANET_PRESETS.find((planet) => planet.name === selectedPlanetName) ?? PLANET_PRESETS[2],
     [selectedPlanetName],
@@ -136,7 +163,7 @@ const ObjectLibrary = ({
 
   return (
     <>
-      <div className="glass-panel p-6 w-[400px] animate-fade-in">
+      <div className="glass-panel p-6 w-[400px] max-h-full overflow-y-auto scrollbar-thin animate-fade-in">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Orbit size={20} className="text-primary" />
@@ -218,6 +245,7 @@ const ObjectLibrary = ({
             <span>{velocityScale.toFixed(2)}x</span>
           </div>
           <input
+            id="placement-velocity"
             type="range"
             min={0.2}
             max={3}
@@ -229,13 +257,93 @@ const ObjectLibrary = ({
           <label className="flex items-center justify-between text-base text-muted-foreground">
             <span>Realistic physics</span>
             <input
+              id="realistic-physics"
               type="checkbox"
               checked={realisticMode}
               onChange={(e) => onRealisticModeChange(e.target.checked)}
             />
           </label>
+          <p className="text-xs text-muted-foreground/80 leading-snug">
+            {realisticMode
+              ? 'Full N-body gravity: every body pulls on every other.'
+              : 'Arcade: gravity 4× stronger and speeds capped. Orbits keep their shape but run faster.'}
+          </p>
+          <label className="flex items-center justify-between text-base text-muted-foreground">
+            <span>Universe expansion</span>
+            <input
+              id="universe-expansion"
+              type="checkbox"
+              checked={expansionEnabled}
+              onChange={(e) => onExpansionChange(e.target.checked)}
+            />
+          </label>
+          {expansionEnabled && (
+            <p className="text-xs text-muted-foreground/80 leading-snug">
+              Space stretches over time. Unbound bodies drift apart, but orbits held by gravity stay the same size.
+            </p>
+          )}
           {placementActive && (
             <p className="text-[10px] text-primary/90 font-mono">Placement mode active: click on the spacetime grid</p>
+          )}
+        </div>
+
+        <div className="border-t border-border/20 pt-3 mb-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-base font-semibold text-muted-foreground uppercase tracking-wider">Saved Systems</span>
+            <span className="text-xs font-mono text-muted-foreground/70">{savedScenarios.length}/12</span>
+          </div>
+          <form onSubmit={handleSaveScenario} className="flex gap-2">
+            <input
+              id="scenario-name"
+              type="text"
+              value={scenarioName}
+              maxLength={40}
+              onChange={(e) => { setScenarioName(e.target.value); setSaveMessage(''); }}
+              placeholder="Name this system"
+              aria-label="Scenario name"
+              className="min-w-0 flex-1 rounded-md border border-border/40 bg-background/70 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={bodies.length === 0}
+              className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+            >
+              <Save size={14} /> Save
+            </button>
+          </form>
+          {saveMessage && <p className="text-xs text-primary/90" role="status">{saveMessage}</p>}
+          {savedScenarios.length > 0 && (
+            <div className="space-y-1.5 max-h-32 overflow-y-auto scrollbar-thin pr-1">
+              {savedScenarios.map((scenario) => (
+                <div key={scenario.id} className="flex items-center gap-2 justify-between p-1.5 rounded bg-muted/20">
+                  <div className="min-w-0">
+                    <div className="text-sm text-foreground truncate">{scenario.name}</div>
+                    <div className="text-[10px] font-mono text-muted-foreground/70">
+                      {scenario.bodies.length} bodies · {SAVED_DATE_FORMATTER.format(new Date(scenario.updatedAt))}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onLoadScenario(scenario.id)}
+                      className="flex items-center gap-1 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+                      title={`Load ${scenario.name}`}
+                    >
+                      <FolderOpen size={12} /> Load
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteScenario(scenario.id)}
+                      className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      title={`Delete ${scenario.name}`}
+                      aria-label={`Delete ${scenario.name}`}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
