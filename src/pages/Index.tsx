@@ -1,12 +1,12 @@
-import { useRef } from 'react';
+import { Suspense, lazy, useRef } from 'react';
 import { Eye } from 'lucide-react';
-import StageCanvas from '@/stage/StageCanvas';
 import MissionWatchers from '@/app/MissionWatchers';
 import { ErrorBoundary, HudFallback, StageFallback } from '@/app/ErrorBoundary';
 import FlightRecorder from '@/app/FlightRecorder';
 import Countdown from '@/hud/Countdown';
 import BootSequence from '@/hud/BootSequence';
 import MissionLog from '@/hud/MissionLog';
+import LabNotebook from '@/hud/LabNotebook';
 import FlightDirector from '@/hud/FlightDirector';
 import MissionReport from '@/hud/MissionReport';
 import FlightBar from '@/hud/FlightBar';
@@ -14,12 +14,17 @@ import InstrumentRail from '@/hud/InstrumentRail';
 import ContextBanner from '@/hud/ContextBanner';
 import ObjectivesPanel from '@/hud/ObjectivesPanel';
 import BodyInspector from '@/hud/BodyInspector';
+import ConservationPanel from '@/hud/ConservationPanel';
 import TemporalHud from '@/hud/TemporalHud';
 import { LabTransition, StasisField } from '@/hud/StageOverlays';
 import { Kbd } from '@/hud/controls';
 import { useKeyboardShortcuts, useResponsivePanels } from '@/hud/useKeyboardShortcuts';
 import { gsap, prefersReducedMotion, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
+
+// The 3D stage (three.js, React Three Fiber, post-processing) loads after the HUD, so the
+// page is usable quickly; the opening sequence waits for it to report ready.
+const StageCanvas = lazy(() => import('@/stage/StageCanvas'));
 
 const Index = () => {
   const mode = useAppStore((state) => state.mode);
@@ -58,7 +63,9 @@ const Index = () => {
     <div data-hud-mode={mode} className="relative h-screen w-full overflow-hidden bg-background">
       <div className="absolute inset-0">
         <ErrorBoundary fallback={(reset) => <StageFallback reset={reset} />}>
-          <StageCanvas />
+          <Suspense fallback={null}>
+            <StageCanvas />
+          </Suspense>
         </ErrorBoundary>
       </div>
       <StasisField />
@@ -68,6 +75,7 @@ const Index = () => {
       <Countdown />
       <BootSequence />
       <MissionLog />
+      <LabNotebook />
 
       <ErrorBoundary fallback={(reset) => <HudFallback reset={reset} />}>
         <div ref={hudRef} className="hud-shell z-10">
@@ -82,7 +90,7 @@ const Index = () => {
             {mode === 'rocket' && <MissionReport />}
           </div>
           <div data-zone="right" className="flex min-h-0 flex-col items-end gap-3 [grid-area:right]">
-            {mode === 'spacetime' ? <BodyInspector /> : <FlightDirector />}
+            {mode === 'spacetime' ? <><BodyInspector /><ConservationPanel /></> : <FlightDirector />}
             <ObjectivesPanel />
           </div>
           <div data-zone="temporal" className="flex min-w-0 items-end justify-center [grid-area:temporal]">

@@ -2,7 +2,8 @@ import { useEffect, useRef, useMemo } from 'react';
 import type { RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
-import { Html, WorldEffects, useWorldActive } from '@/stage/World';
+import { Html, WorldEffects } from '@/stage/World';
+import { useWorldActive } from '@/stage/worldContext';
 import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
 import { useFlightStore } from '@/stores/flightStore';
 import ForceVectors from './ForceVectors';
@@ -14,7 +15,10 @@ import { LaunchComplex } from './RocketVisuals';
 import { createAtmosphereMaterial, createSurfaceMaterial } from '@/stage/materials';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
 import type { WeatherConditionId } from './weatherPresets';
-import { WeatherEnvironment, WeatherShakeGroup, createLightningStrikeState } from './WeatherEffects';
+import { WeatherEnvironment, WeatherShakeGroup } from './WeatherEffects';
+import { createLightningStrikeState } from './lightningStrike';
+import { liveFlight } from './liveFlight';
+import { useReducedMotion } from '@/motion/useReducedMotion';
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -499,6 +503,15 @@ const RocketWorld = () => {
   const timeScale = active ? liveTimeScale : 0;
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const lightningStrikeRef = useRef(createLightningStrikeState());
+  const reduceMotion = useReducedMotion();
+
+  // A lightning strike in the flight physics also jolts the rocket on screen.
+  const strikeCount = state.events.filter((event) => event.kind === 'lightning').length;
+  useEffect(() => {
+    if (strikeCount === 0) return;
+    lightningStrikeRef.current.impulse = 1;
+    lightningStrikeRef.current.version += 1;
+  }, [strikeCount]);
   const escapedPastExosphere =
     state.phase === 'outcome' && state.outcome === 'escape' && state.altitude > EXOSPHERE_LIMIT;
   const userControlled =
@@ -558,8 +571,9 @@ const RocketWorld = () => {
         altitude={state.altitude}
         phase={state.phase}
         lightningStrike={lightningStrikeRef.current}
+        reduceMotion={reduceMotion}
       >
-        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
+        <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} activeWeather={activeWeather} flightRef={liveFlight} />
       </WeatherShakeGroup>
 
       <ForceVectors />

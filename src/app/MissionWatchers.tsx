@@ -1,156 +1,125 @@
 import { useEffect, useRef } from 'react';
+import { buildDebrief } from '@/learning/debrief';
+import { vehicleSummary } from '@/physics/rocket';
 import { useAppStore } from '@/stores/appStore';
 import { logLabEvent, type EventTone } from '@/stores/eventStore';
 import { useProgressStore } from '@/stores/progressStore';
 import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
-import { stability, universeClock, useSpacetimeStore } from '@/stores/spacetimeStore';
+import { useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
 import type { RocketState } from '@/worlds/rocket/rocketTypes';
+import { WEATHER_PRESETS } from '@/worlds/rocket/weatherPresets';
 
 const PHASE_EVENT: Partial<Record<RocketState['phase'], string>> = {
   launching: 'Liftoff',
-  coasting: 'Engine cutoff · coasting',
 };
 
 const OUTCOME_EVENT: Partial<Record<RocketState['outcome'], [string, EventTone]>> = {
   orbiting: ['Stable orbit achieved', 'ok'],
   escape: ['Escape velocity reached', 'ok'],
-  suborbital: ['Suborbital trajectory', 'warn'],
+  suborbital: ['Fell back to the surface', 'warn'],
   crashed: ['Impact with the surface', 'danger'],
   burnup: ['Burn-up during ascent', 'danger'],
 };
 
-// Universe expansion starts after this many real seconds of forward time.
-const EXPANSION_DELAY_S = 600;
-const EXPANSION_RATE = 0.00018;
+const FAILURE_OUTCOMES = new Set<RocketState['outcome']>(['crashed', 'suborbital', 'burnup']);
+const PREDICTIONS_FOR_FORECASTER = 3;
 
 /**
- * Background rules that watch the simulations and award objectives, plus the
- * slow universe-expansion clock. Renders nothing.
+ * Background rules that award objectives from what the labs actually do. Spacetime
+ * objectives that depend on orbits, flybys and impacts are judged inside the simulator
+ * (src/app/missionTracker.ts); this handles the rest. Renders nothing.
  */
 const MissionWatchers = () => {
   const mode = useAppStore((state) => state.mode);
   const timeScale = useTimeStore((state) => state.timeScale);
   const isPlaying = useTimeStore((state) => state.isPlaying);
-  const bodies = useSpacetimeStore((state) => state.bodies);
   const realisticMode = useSpacetimeStore((state) => state.realisticMode);
-  const setUniverseScale = useSpacetimeStore((state) => state.setUniverseScale);
-  const rocketParams = useRocketStore((state) => state.params);
-  const outcome = useRocketStore((state) => state.flight.outcome);
-  const phase = useRocketStore((state) => state.flight.phase);
+  const flight = useRocketStore((state) => state.flight);
   const effectiveParams = useEffectiveRocketParams();
   const unlock = useProgressStore((state) => state.unlock);
   const awardScore = useProgressStore((state) => state.awardScore);
 
-  // ─── Universe age ticker ───
-  const lastTickRef = useRef(Date.now());
+  // ─── Spacetime objectives that come from the controls ───
   useEffect(() => {
-    if (mode !== 'spacetime') return;
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const elapsed = (now - lastTickRef.current) / 1000;
-      lastTickRef.current = now;
-      // Only age the universe while time is moving forward
-      if (isPlaying && timeScale > 0) universeClock.age += elapsed;
-      setUniverseScale(1 + EXPANSION_RATE * Math.max(0, universeClock.age - EXPANSION_DELAY_S));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [mode, isPlaying, timeScale, setUniverseScale]);
-
-  // ─── Spacetime objectives ───
-  useEffect(() => {
-    if (bodies.length >= 5) unlock('system-architect');
-  }, [bodies.length, unlock]);
-
-  useEffect(() => {
-    if (mode === 'spacetime' && timeScale < 0) unlock('time-bender');
-  }, [mode, timeScale, unlock]);
+    if (mode === 'spacetime' && isPlaying && timeScale < 0) unlock('time-bender');
+  }, [isPlaying, mode, timeScale, unlock]);
 
   useEffect(() => {
     if (!realisticMode) unlock('mode-shifter');
   }, [realisticMode, unlock]);
 
-  useEffect(() => {
-    if (bodies.length >= 7 || (bodies.some((body) => body.type === 'blackhole') && bodies.some((body) => body.type === 'neutron') && bodies.length >= 5)) {
-      unlock('chaos-creator');
-    }
-  }, [bodies, unlock]);
-
-  useEffect(() => {
-    if (mode !== 'spacetime' || !isPlaying || timeScale <= 0) return;
-
-    const interval = setInterval(() => {
-      const hasStableCandidate = bodies.length >= 4
-        && bodies.some((body) => body.type === 'star')
-        && bodies.filter((body) => body.type === 'planet' || body.type === 'asteroid' || body.type === 'comet').length >= 2;
-      const hasBlackHoleCandidate = bodies.some((body) => body.type === 'blackhole')
-        && bodies.filter((body) => body.type !== 'blackhole').length >= 2;
-
-      stability.system = hasStableCandidate ? stability.system + 1 : 0;
-      stability.blackHole = hasBlackHoleCandidate ? stability.blackHole + 1 : 0;
-
-      if (stability.system === 12) {
-        awardScore(75);
-        unlock('gravity-master');
-      }
-      if (stability.blackHole >= 10) unlock('black-hole-survivor');
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [awardScore, bodies, isPlaying, mode, timeScale, unlock]);
-
   // ─── Rocket flight events for the event ribbon ───
+  const { phase, outcome } = flight;
   const loggedPhaseRef = useRef<RocketState['phase']>('idle');
   useEffect(() => {
     if (phase === loggedPhaseRef.current) return;
+    const previous = loggedPhaseRef.current;
     loggedPhaseRef.current = phase;
     if (phase === 'outcome') {
       const entry = OUTCOME_EVENT[outcome];
       if (entry) logLabEvent('rocket', entry[0], entry[1]);
-    } else if (PHASE_EVENT[phase]) {
+    } else if (PHASE_EVENT[phase] && previous === 'idle') {
       logLabEvent('rocket', PHASE_EVENT[phase]!);
     }
   }, [outcome, phase]);
 
-  // ─── Rocket objectives (once per flight outcome) ───
-  const previousOutcomeRef = useRef<RocketState['outcome']>('none');
+  // ─── Rocket objectives, prediction and notebook: once per launch ───
+  // Keyed by the launch's seed, so replaying the ending after a rewind doesn't count twice.
+  const recordedLaunchRef = useRef<number | null>(null);
   useEffect(() => {
-    if (phase !== 'outcome') {
-      previousOutcomeRef.current = outcome;
-      return;
+    if (flight.phase !== 'outcome' || flight.outcome === 'none') return;
+    if (recordedLaunchRef.current === flight.seed) return;
+    recordedLaunchRef.current = flight.seed;
+
+    const rocket = useRocketStore.getState();
+    const result = flight.outcome;
+    const flown = effectiveParams; // judged on the conditions actually flown (settings + weather)
+
+    // Lab notebook: the run, its cause and whether the prediction held.
+    const debrief = buildDebrief(flown, flight);
+    rocket.recordNotebookEntry({
+      outcome: result,
+      prediction: rocket.prediction,
+      params: flown,
+      weather: Array.from(rocket.activeWeather, (id) => WEATHER_PRESETS[id].name),
+      metrics: {
+        deltaV: vehicleSummary(flown).deltaV,
+        peakAltitude: flight.maxAltitude,
+        maxQ: flight.maxDynamicPressure,
+        heat: flight.heat,
+        flightTime: flight.elapsed,
+      },
+      cause: debrief.causes[0] ?? debrief.headline,
+    });
+
+    // Predict First
+    if (rocket.prediction && rocket.prediction === result) {
+      awardScore(25);
+      if (rocket.countCorrectPrediction() >= PREDICTIONS_FOR_FORECASTER) unlock('forecaster');
+      if (FAILURE_OUTCOMES.has(result)) unlock('failure-analyst');
+      if (result === 'orbiting') unlock('orbit-call');
     }
-    if (previousOutcomeRef.current === outcome) return;
-    previousOutcomeRef.current = outcome;
 
-    const succeeded = outcome === 'orbiting' || outcome === 'escape';
-    const survived = outcome !== 'crashed' && outcome !== 'burnup';
+    const reachedSpace = result === 'orbiting' || result === 'escape';
+    const survived = result !== 'crashed' && result !== 'burnup';
 
-    if (outcome === 'orbiting') {
+    if (result === 'orbiting') {
       awardScore(80);
       unlock('first-stable-orbit');
     }
-    if (outcome === 'escape') {
+    if (result === 'escape') {
       awardScore(90);
       unlock('escape-velocity-achieved');
     }
 
-    const difficultWeather =
-      Math.abs(effectiveParams.crosswind) >= 20
-      && effectiveParams.windShear >= 0.5
-      && effectiveParams.thermalLoad >= 0.45;
+    const difficultWeather = Math.abs(flown.crosswind) >= 20 && flown.windShear >= 0.5 && flown.thermalLoad >= 0.45;
     if (difficultWeather && survived) unlock('storm-runner');
-
-    if (rocketParams.stageSeparation && succeeded) unlock('staging-specialist');
-
-    const preciseFlight = Math.abs(rocketParams.padTilt) <= 1 && Math.abs(rocketParams.crosswind) <= 8;
-    if (preciseFlight && succeeded) unlock('precision-pilot');
-
-    const heavyLiftConfig = rocketParams.thrustForce >= 70 && rocketParams.fuelMass >= 120;
-    if (heavyLiftConfig && survived) unlock('heavy-lift');
-
-    const thickAtmosphere = rocketParams.atmosphericDensity >= 0.75 && rocketParams.atmosphericPressure >= 1.1;
-    if (thickAtmosphere && survived) unlock('dense-atmosphere-run');
-  }, [awardScore, effectiveParams, outcome, phase, rocketParams, unlock]);
+    if (flown.stageSeparation && reachedSpace) unlock('staging-specialist');
+    if (Math.abs(flown.padTilt) <= 1 && Math.abs(flown.crosswind) <= 8 && reachedSpace) unlock('precision-pilot');
+    if (flown.thrustForce >= 70 && flown.fuelMass >= 120 && reachedSpace) unlock('heavy-lift');
+    if (flown.atmosphericDensity >= 0.75 && flown.atmosphericPressure >= 1.1 && reachedSpace) unlock('dense-atmosphere-run');
+  }, [awardScore, effectiveParams, flight, unlock]);
 
   return null;
 };

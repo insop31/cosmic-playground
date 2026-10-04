@@ -6,11 +6,15 @@ import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
 import { useEventStore, type EventTone, type LabEvent } from '@/stores/eventStore';
 import { useRocketStore } from '@/stores/rocketStore';
-import { universeClock } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
 import { IconButton } from './controls';
 import { SPEED_CHIPS } from './timeSteps';
-import { simTelemetry } from '@/sim/schedule';
+import { simTelemetry } from '@/physics/schedule';
+import { SIM_STEP, type TimelineMarker } from '@/physics/simulation';
+import { formatDuration, simSecondsToDays } from '@/physics/units';
+import { useSimStore } from '@/stores/simStore';
+import { useUnlockTimeBender } from './useUnlockTimeBender';
+import { simulationControls } from '@/worlds/spacetime/liveWorld';
 import { resetActiveLab } from './useKeyboardShortcuts';
 
 const RIBBON_WINDOW_MS = 60_000;
@@ -56,14 +60,14 @@ const useNow = (intervalMs: number) => {
 const MissionClock = () => {
   const mode = useAppStore((state) => state.mode);
   const elapsed = useRocketStore((state) => state.flight.elapsed);
-  useNow(1000); // universe age lives outside React state
+  const simTime = useSimStore((state) => state.timeline.simTime);
   const isRocket = mode === 'rocket';
 
   return (
     <div className="grid shrink-0 leading-tight">
-      <span className="hud-label text-[9.5px]">{isRocket ? 'Mission time' : 'Universe age'}</span>
-      <span className="hud-num text-[13px] text-foreground">
-        {isRocket ? `T+${formatClock(elapsed)}` : formatClock(universeClock.age)}
+      <span className="hud-label text-[9.5px]">{isRocket ? 'Mission time' : 'Time elapsed'}</span>
+      <span className="hud-num text-[13px] text-foreground" title={isRocket ? undefined : 'Simulated time: one year is one orbit at 1 AU.'}>
+        {isRocket ? `T+${formatClock(elapsed)}` : formatDuration(simSecondsToDays(simTime))}
       </span>
     </div>
   );
@@ -131,6 +135,69 @@ const EventRibbon = () => {
   );
 };
 
+/* ─── Spacetime history (scrub to rewind) ──────────────────────────────────── */
+
+const MARKER_CLASS: Record<TimelineMarker['kind'], string> = {
+  merge: 'bg-danger',
+  absorb: 'bg-[#c084fc]',
+  bounce: 'bg-warn',
+  fragment: 'bg-burn',
+  tidal: 'bg-[#e879f9]',
+};
+
+const HistoryTrack = () => {
+  const { step, historyStart, historyEnd, markers } = useSimStore((state) => state.timeline);
+  const events = useEventStore((state) => state.events);
+  const latest = [...events].reverse().find((event) => event.mode === 'spacetime');
+  const unlockTimeBender = useUnlockTimeBender();
+  const span = Math.max(historyEnd - historyStart, 1);
+  const behind = (historyEnd - step) * SIM_STEP;
+  const clamped = Math.min(Math.max(step, historyStart), historyEnd);
+  const pct = (s: number) => ((s - historyStart) / span) * 100;
+
+  const seek = (target: number) => {
+    simulationControls.current?.seek(target);
+    if (target < step) unlockTimeBender();
+  };
+
+  return (
+    <div className="temporal-ribbon grid min-w-0 gap-1">
+      <div className="flex min-w-0 items-baseline justify-between gap-3">
+        <span className="hud-label shrink-0 text-[9.5px]">
+          {behind > 0.01 ? <span className="text-warn">{behind.toFixed(1)} s before now</span> : `History · last ${Math.round(span * SIM_STEP)} s`}
+        </span>
+        <span className={cn('min-w-0 truncate text-right text-[11.5px]', latest ? TONE_TEXT[latest.tone] : 'text-hud-faint')} aria-live="polite">
+          {latest ? latest.label : 'No events yet'}
+        </span>
+      </div>
+      <div className="relative h-3">
+        <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-[hsl(var(--hud-line)/0.18)]" />
+        <div className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-primary/50" style={{ width: `${pct(clamped)}%` }} />
+        {markers.map((marker) => (
+          <span
+            key={`${marker.step}-${marker.title}`}
+            title={`${marker.title} · ${((historyEnd - marker.step) * SIM_STEP).toFixed(1)} s ago`}
+            className={cn('absolute top-1/2 h-2.5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full', MARKER_CLASS[marker.kind])}
+            style={{ left: `${pct(marker.step)}%` }}
+          />
+        ))}
+        <input
+          type="range"
+          aria-label="Rewind through history"
+          min={historyStart}
+          max={Math.max(historyEnd, historyStart + 1)}
+          step={1}
+          value={clamped}
+          onPointerDown={() => useTimeStore.getState().pause()}
+          onKeyDown={() => useTimeStore.getState().pause()}
+          onChange={(e) => seek(Number(e.target.value))}
+          className="history-scrub absolute inset-x-0 top-1/2 -translate-y-1/2"
+        />
+      </div>
+    </div>
+  );
+};
+
 /* ─── Transport ────────────────────────────────────────────────────────────── */
 
 const TemporalHud = () => {
@@ -143,10 +210,11 @@ const TemporalHud = () => {
     play: state.play,
   })));
   const rewinding = isPlaying && timeScale < 0;
+  const mode = useAppStore((state) => state.mode);
 
   return (
     <div className="temporal hud-panel pointer-events-auto grid w-full gap-2 px-3 pb-2.5 pt-2">
-      <EventRibbon />
+      {mode === 'spacetime' ? <HistoryTrack /> : <EventRibbon />}
 
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex shrink-0 items-center gap-0.5">

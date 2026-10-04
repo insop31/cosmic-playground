@@ -1,11 +1,11 @@
-import { predictPath, type PredictionRequest, type PredictionResult } from './predict';
+import { predictPath, type Prediction, type PredictionRequest } from './predict';
 
 /**
  * Latest-wins front end for the prediction worker: while one prediction runs,
  * only the newest request waits; older ones are dropped. Falls back to the
  * main thread where workers are unavailable (tests, old browsers).
  */
-type Listener = (result: PredictionResult) => void;
+type Listener = (prediction: Prediction) => void;
 
 let worker: Worker | null = null;
 let busy = false;
@@ -16,10 +16,10 @@ let listener: Listener | null = null;
 const getWorker = () => {
   if (worker || typeof Worker === 'undefined') return worker;
   try {
-    worker = new Worker(new URL('./predictor.worker.ts', import.meta.url), { type: 'module' });
-    worker.onmessage = (event: MessageEvent<{ id: number; result: PredictionResult }>) => {
+    worker = new Worker(new URL('../workers/predict.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (event: MessageEvent<{ id: number; prediction: Prediction }>) => {
       busy = false;
-      listener?.(event.data.result);
+      listener?.(event.data.prediction);
       flush();
     };
     worker.onerror = () => {

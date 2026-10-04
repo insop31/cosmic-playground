@@ -13,7 +13,6 @@ type MissionQueues = Record<AppMode, MissionCard[]>;
 
 const ACTIVE_MISSION_LIMIT = 3;
 const MISSION_EXIT_DELAY_MS = 900;
-const GRAVITY_MASTER_EXPERIMENTS = 8;
 const MODES: AppMode[] = ['spacetime', 'rocket'];
 
 export const PACKS_BY_MODE: Record<AppMode, ChallengePack[]> = {
@@ -179,7 +178,6 @@ export const useProgressStore = create<ProgressState>()((set, get) => {
       if (experimentKeys.has(key)) return;
       const nextKeys = new Set(experimentKeys).add(key);
       set((state) => ({ experimentKeys: nextKeys, score: state.score + points }));
-      if (nextKeys.size >= GRAVITY_MASTER_EXPERIMENTS) get().unlock('gravity-master');
     },
 
     setActivePack: (mode, packId) => {

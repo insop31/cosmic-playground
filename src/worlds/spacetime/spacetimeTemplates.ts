@@ -536,15 +536,15 @@ export const SPACETIME_TEMPLATES: SpacetimeTemplate[] = [
         { x: 74, y: 44, radius: 1.6, color: '#a8c6d8' },
       ],
     },
-    // Starting conditions found by searching with the real integrator
-    // (see src/test/sim.test.ts): closest pass about 1.5 u behind the giant,
-    // and the comet's orbital energy rises from about −0.21 to −0.02.
+    // Starting conditions found by searching with the simulation's own physics
+    // (checked in src/test/sim.test.ts): closest pass about 1.7 u behind the giant,
+    // and the comet's orbital energy rises from about −0.23 to −0.04.
     createBodies: () => {
       const sun: [number, number, number] = [0, 0, 0];
       const giantPos: [number, number, number] = [18, 0, 0];
       const cometPos: [number, number, number] = [24, 0, 0];
-      const circular24 = circularOrbitSpeed(DEFAULT_STAR_MASS, 24);
-      const lean = 0.4; // radians inward from the prograde direction
+      const launchSpeed = circularOrbitSpeed(DEFAULT_STAR_MASS, 24) * 0.95;
+      const lean = 0.25; // radians inward from the prograde direction
       return [
         createStar({ name: 'Sun', position: sun, mass: DEFAULT_STAR_MASS, radius: 2.4, color: '#ffcc00', velocity: [0, 0, 0] }),
         createPlanet({
@@ -566,7 +566,7 @@ export const SPACETIME_TEMPLATES: SpacetimeTemplate[] = [
           mass: 1e13,
           radius: 0.2,
           color: '#a8c6d8',
-          velocity: [-Math.sin(lean) * circular24, 0, Math.cos(lean) * circular24],
+          velocity: [-Math.sin(lean) * launchSpeed, 0, Math.cos(lean) * launchSpeed],
         },
       ];
     },

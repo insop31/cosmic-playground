@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { altitudeKm, escapeFraction, UNITS_NOTE } from '@/sim/units';
+import { altitudeKm, escapeFraction, UNITS_NOTE } from '@/worlds/rocket/units';
+import { useEffectiveRocketParams } from '@/stores/rocketStore';
 import { useRocketStore } from '@/stores/rocketStore';
 import { InfoTip } from './controls';
 
@@ -50,15 +51,16 @@ const Tape = ({ label, unit, value, step, digits }: TapeProps) => {
 
 /** Altitude and speed tapes, shown beside the rail while flying. */
 const FlightTapes = () => {
-  const { phase, py, velocity } = useRocketStore(useShallow((state) => ({
+  const { phase, altitude, velocity } = useRocketStore(useShallow((state) => ({
     phase: state.flight.phase,
-    py: state.flight.position[1],
+    altitude: state.flight.altitude,
     velocity: state.flight.velocity,
   })));
+  const params = useEffectiveRocketParams();
   if (phase === 'idle') return null;
-  const alt = altitudeKm(py);
+  const alt = altitudeKm(altitude);
   const speed = Math.hypot(velocity[0], velocity[1]);
-  const ofEscape = escapeFraction(speed);
+  const ofEscape = escapeFraction(params, speed, altitude);
 
   return (
     <div className="pointer-events-auto flex flex-col gap-2">

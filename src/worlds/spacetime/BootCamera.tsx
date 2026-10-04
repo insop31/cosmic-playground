@@ -3,7 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import { gsap, motionDuration } from '@/motion/gsap';
-import { liveWorld } from '@/sim/liveWorld';
+import { liveWorld } from './liveWorld';
 import { useAppStore } from '@/stores/appStore';
 import { wellField } from './wellField';
 

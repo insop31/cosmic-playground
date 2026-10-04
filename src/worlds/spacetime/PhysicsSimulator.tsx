@@ -1,213 +1,92 @@
-import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import type { RefObject } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
-import { Html } from '@/stage/World';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useFrame } from '@react-three/fiber';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
-import { CelestialBody } from './types';
-import {
-  FIXED_SUBSTEP,
-  MAX_HISTORY,
-  MAX_SIM_BODIES,
-  adaptiveDt,
-  effectiveGravity,
-  spawnOrbitalVelocity,
-  stepWorld,
-  type BodyType,
-  type PhysicsBody,
-  type SimImpact,
-} from '@/sim/nbody';
-import { planForwardSteps, planRewindSteps, reportSpacetimeSpeed, substepCap } from '@/sim/schedule';
-import { liveWorld } from '@/sim/liveWorld';
+import { Html } from '@/stage/World';
+import type { CelestialBody } from './types';
+import { conicPoints } from '@/physics/orbits';
+import { MAX_FRAME_DELTA, reportSpacetimeSpeed } from '@/physics/schedule';
+import type { SimSnapshot } from '@/physics/simulation';
+import { SimulationClient } from '@/physics/simulationClient';
+import type { SimMessage } from '@/physics/simulationProtocol';
+import { missionTracker } from '@/app/missionTracker';
+import { logLabEvent } from '@/stores/eventStore';
+import { useProgressStore } from '@/stores/progressStore';
+import { useSimStore } from '@/stores/simStore';
+import { useSpacetimeStore } from '@/stores/spacetimeStore';
 import { BodyRenderer, MAX_TRAIL_POINTS, type MeshEntry } from './BodyVisuals';
+import ImpactCameraDirector, { type ImpactPopupState } from './ImpactCameraDirector';
+import { clearLiveWorld, liveOrbit, liveWorld, publishSnapshot, simulationControls } from './liveWorld';
 import { surfaceHeight, updateWells } from './wellField';
 
-/** Shown as a floating message box at the impact midpoint (world space). */
-export type ImpactPopupState = SimImpact;
-
-interface WorldSnapshot {
-  id: string;
-  px: number; py: number; pz: number;
-  vx: number; vy: number; vz: number;
+interface TrailBuffer {
+  data: Float32Array;
+  head: number;
+  len: number;
+  /** Simulated time of the newest point. */
+  lastTime: number;
 }
 
 export interface PhysicsSimulatorProps {
   bodies: CelestialBody[];
+  /** Changing this restarts the simulation from `bodies` and clears rewind history. */
+  epoch: number;
+  /** Signed simulation speed; 0 while paused or hidden. */
   timeScale: number;
-  realisticMode?: boolean;
-  onBodyRemoved: (id: string) => void;
-  onBodyUpdated: (id: string, mass: number, radius: number) => void;
-  universeScale?: number;
-  gridSize?: number;
+  realisticMode: boolean;
+  /** Fractional expansion rate per simulated second; 0 disables expansion. */
+  expansionRate: number;
+  /** How many recent positions each trail shows (graphics quality). */
+  trailPoints: number;
   controlsRef: RefObject<OrbitControlsImpl | null>;
 }
 
-interface CameraSnapshot {
-  position: THREE.Vector3;
-  target: THREE.Vector3;
-  fov: number;
-}
+const CONIC_SEGMENTS = 160;
+/** Trails gain a point at most this often in simulated time, so warp shows longer arcs. */
+const TRAIL_SPACING = 1 / 30;
+/** The HUD (timeline, conservation, objectives) refreshes at most this often. */
+const HUD_INTERVAL_MS = 200;
 
-const ImpactCameraDirector = ({
-  activeImpact,
-  controlsRef,
-}: {
-  activeImpact: ImpactPopupState | null;
-  controlsRef: RefObject<OrbitControlsImpl | null>;
-}) => {
-  // Worlds always use a perspective camera (see stage/World.tsx).
-  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
-  const snapshotRef = useRef<CameraSnapshot | null>(null);
-  const focusTargetRef = useRef(new THREE.Vector3());
-  /** True once auto framing has converged; then OrbitControls (scroll/drag) can move the camera. */
-  const settledOnImpactRef = useRef(false);
-  /** If the user moves the camera during the popup, do not snap back when the popup timer ends. */
-  const userAdjustedDuringPopupRef = useRef(false);
-  const scratchDir = useRef(new THREE.Vector3());
-  const scratchDesiredPos = useRef(new THREE.Vector3());
+const EMPTY_META = new Map<string, CelestialBody>();
 
-  useEffect(() => {
-    const controls = controlsRef.current;
-    if (!controls) return;
-
-    if (activeImpact) {
-      settledOnImpactRef.current = false;
-      userAdjustedDuringPopupRef.current = false;
-      if (!snapshotRef.current) {
-        snapshotRef.current = {
-          position: camera.position.clone(),
-          target: controls.target.clone(),
-          fov: camera.fov,
-        };
-      }
-      focusTargetRef.current.set(...activeImpact.position);
-    }
-  }, [activeImpact, camera, controlsRef]);
-
-  useFrame((_, delta) => {
-    const controls = controlsRef.current;
-    if (!controls) return;
-
-    const dt = Math.min(delta, 0.05);
-    const damping = 5.5;
-    const minDistance = controls.minDistance ?? 8;
-    const maxDistance = controls.maxDistance ?? 200;
-
-    if (activeImpact) {
-      const snapshot = snapshotRef.current;
-      if (!snapshot) return;
-
-      const direction = scratchDir.current.copy(snapshot.position).sub(snapshot.target);
-      if (direction.lengthSq() < 1e-6) direction.set(0, 1, 1);
-      direction.normalize();
-
-      const desiredDistance = THREE.MathUtils.clamp(12, minDistance + 1, Math.min(maxDistance, 18));
-      const desiredPosition = scratchDesiredPos.current
-        .copy(focusTargetRef.current)
-        .addScaledVector(direction, desiredDistance);
-      const desiredFov = 42;
-      const desiredCamY = desiredPosition.y + 1.25;
-
-      if (!settledOnImpactRef.current) {
-        camera.position.x = THREE.MathUtils.damp(camera.position.x, desiredPosition.x, damping, dt);
-        camera.position.y = THREE.MathUtils.damp(camera.position.y, desiredCamY, damping, dt);
-        camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredPosition.z, damping, dt);
-        controls.target.x = THREE.MathUtils.damp(controls.target.x, focusTargetRef.current.x, damping, dt);
-        controls.target.y = THREE.MathUtils.damp(controls.target.y, focusTargetRef.current.y, damping, dt);
-        controls.target.z = THREE.MathUtils.damp(controls.target.z, focusTargetRef.current.z, damping, dt);
-        camera.fov = THREE.MathUtils.damp(camera.fov, desiredFov, 4.5, dt);
-        camera.updateProjectionMatrix();
-        controls.update();
-
-        const dx = camera.position.x - desiredPosition.x;
-        const dy = camera.position.y - desiredCamY;
-        const dz = camera.position.z - desiredPosition.z;
-        const posOk = dx * dx + dy * dy + dz * dz < 0.08;
-        const targetOk = controls.target.distanceTo(focusTargetRef.current) < 0.14;
-        const fovOk = Math.abs(camera.fov - desiredFov) < 0.45;
-        if (posOk && targetOk && fovOk) settledOnImpactRef.current = true;
-        return;
-      }
-
-      // Framing done: release camera so the user can zoom/pan while the popup stays for its time limit.
-      if (!userAdjustedDuringPopupRef.current) {
-        const dx2 = camera.position.x - desiredPosition.x;
-        const dy2 = camera.position.y - desiredCamY;
-        const dz2 = camera.position.z - desiredPosition.z;
-        const stillAtImpact =
-          dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < 0.2
-          && controls.target.distanceTo(focusTargetRef.current) < 0.22
-          && Math.abs(camera.fov - desiredFov) < 0.65;
-        if (!stillAtImpact) userAdjustedDuringPopupRef.current = true;
-      }
-      return;
-    }
-
-    const snapshot = snapshotRef.current;
-    if (!snapshot) return;
-
-    if (userAdjustedDuringPopupRef.current) {
-      snapshotRef.current = null;
-      userAdjustedDuringPopupRef.current = false;
-      return;
-    }
-
-    camera.position.x = THREE.MathUtils.damp(camera.position.x, snapshot.position.x, damping, dt);
-    camera.position.y = THREE.MathUtils.damp(camera.position.y, snapshot.position.y, damping, dt);
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, snapshot.position.z, damping, dt);
-    controls.target.x = THREE.MathUtils.damp(controls.target.x, snapshot.target.x, damping, dt);
-    controls.target.y = THREE.MathUtils.damp(controls.target.y, snapshot.target.y, damping, dt);
-    controls.target.z = THREE.MathUtils.damp(controls.target.z, snapshot.target.z, damping, dt);
-    camera.fov = THREE.MathUtils.damp(camera.fov, snapshot.fov, 4.5, dt);
-    camera.updateProjectionMatrix();
-    controls.update();
-
-    const settled =
-      camera.position.distanceTo(snapshot.position) < 0.05 &&
-      controls.target.distanceTo(snapshot.target) < 0.05 &&
-      Math.abs(camera.fov - snapshot.fov) < 0.1;
-
-    if (settled) snapshotRef.current = null;
-  });
-
-  return null;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PhysicsSimulator
-// ─────────────────────────────────────────────────────────────────────────────
-const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
-  bodies,
-  timeScale,
-  realisticMode = true,
-  onBodyRemoved,
-  onBodyUpdated,
-  universeScale = 1,
-  gridSize = 120,
-  controlsRef,
-}) => {
-  const physicsRef     = useRef<PhysicsBody[]>([]);
+/**
+ * Renders the Spacetime simulation, which runs in a Web Worker (or in-process where
+ * workers are unavailable). Each frame asks it to advance by the frame's time × the
+ * speed; each state it sends back moves the meshes, trails and gravity wells, and
+ * feeds the HUD, the inspector and the objectives.
+ */
+const PhysicsSimulator = ({ bodies, epoch, timeScale, realisticMode, expansionRate, trailPoints, controlsRef }: PhysicsSimulatorProps) => {
+  const clientRef = useRef<SimulationClient | null>(null);
   const meshEntriesRef = useRef(new Map<string, MeshEntry>());
-  const historyRef     = useRef<WorldSnapshot[][]>([]);
-  const accumRef       = useRef(0);
-  const rewindAccumRef = useRef(0);
-  const [renderList, setRenderList] = useState<CelestialBody[]>([]);
+  const trailsRef = useRef(new Map<string, TrailBuffer>());
+  const epochRef = useRef<number | null>(null);
+  // Ids the simulation has been told about this run, ids it removed itself (collisions,
+  // rewinds) and the ids React held last time, to work out adds and removals.
+  const knownIdsRef = useRef(new Set<string>());
+  const coreRemovedRef = useRef(new Set<string>());
+  const prevPropIdsRef = useRef(new Set<string>());
+  const metaRef = useRef<ReadonlyMap<string, CelestialBody>>(EMPTY_META);
+  const configRef = useRef({ realisticMode, expansionRate });
+  configRef.current = { realisticMode, expansionRate };
+  const trailPointsRef = useRef(trailPoints);
+  trailPointsRef.current = Math.min(trailPoints, MAX_TRAIL_POINTS);
+  const lastHudRef = useRef(0);
+  const hudTimerRef = useRef<number | null>(null);
+  const lastStateRef = useRef<{ simTime: number; at: number } | null>(null);
+
+  // ── Collision reports (one at a time; the newest waits behind it) ──
   const [activeImpact, setActiveImpact] = useState<ImpactPopupState | null>(null);
   const [hasPendingImpact, setHasPendingImpact] = useState(false);
-  // Holds the most recent collision that arrived while a popup was already showing.
-  // At most one item — always replaced by the newest so the queue never grows unbounded.
   const pendingImpactRef = useRef<ImpactPopupState | null>(null);
-  const activeImpactRef  = useRef<ImpactPopupState | null>(null);
+  const activeImpactRef = useRef<ImpactPopupState | null>(null);
+  const impactSeqRef = useRef(0);
 
-  const queueImpactPopups = useCallback((items: ImpactPopupState[]) => {
-    if (items.length === 0) return;
-    const latest = items[items.length - 1];
+  const queueImpactPopup = useCallback((item: ImpactPopupState) => {
     if (!activeImpactRef.current) {
-      activeImpactRef.current = latest;
-      setActiveImpact(latest);
+      activeImpactRef.current = item;
+      setActiveImpact(item);
     } else {
-      // Replace pending with newest — prevents unbounded queue buildup
-      pendingImpactRef.current = latest;
+      pendingImpactRef.current = item;
       setHasPendingImpact(true);
     }
   }, []);
@@ -220,207 +99,276 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
     setActiveImpact(next);
   }, []);
 
-  // ── Sync incoming React bodies → physicsRef ──────────────────────────────
-  useEffect(() => {
-    const effectiveG  = effectiveGravity(realisticMode);
-    const currentIds  = new Set(physicsRef.current.map(b => b.id));
-    const incomingIds = new Set(bodies.map(b => b.id));
+  const clearImpacts = useCallback(() => {
+    pendingImpactRef.current = null;
+    activeImpactRef.current = null;
+    setActiveImpact(null);
+    setHasPendingImpact(false);
+  }, []);
 
-    for (const body of bodies) {
-      if (currentIds.has(body.id)) continue;
-      const pos         = new THREE.Vector3(...body.position);
-      const providedVel = new THREE.Vector3(...(body.velocity ?? [0, 0, 0]));
-      const vel         = providedVel.lengthSq() > 1e-12
-        ? providedVel.clone()
-        : spawnOrbitalVelocity(pos, physicsRef.current, effectiveG);
+  // ── Selected body: its predicted orbit (dashed) ──
+  const conicLine = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array((CONIC_SEGMENTS + 1) * 3), 3));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.LineDashedMaterial({ color: '#4ade80', dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.85, depthWrite: false });
+    const line = new THREE.Line(geometry, material);
+    line.frustumCulled = false;
+    line.renderOrder = 2;
+    return line;
+  }, []);
+  useEffect(() => () => {
+    conicLine.geometry.dispose();
+    (conicLine.material as THREE.Material).dispose();
+  }, [conicLine]);
 
-      physicsRef.current.push({
-        id:             body.id,
-        position:       pos.clone(),
-        velocity:       vel,
-        force:          new THREE.Vector3(),
-        mass:           body.mass,
-        radius:         body.radius,
-        type:           body.type as BodyType,
-        color:          body.color,
-        trailData:      new Float32Array(MAX_TRAIL_POINTS * 3),
-        trailHead:      0,
-        trailLen:       0,
-        motionState:    'bound',
-        isCloseApproach: false,
-      });
+  const updateConic = () => {
+    const id = useSpacetimeStore.getState().selectedBodyId;
+    const orbit = id ? liveOrbit(id) : null;
+    const parent = orbit ? liveWorld.find(orbit.parentId) : undefined;
+    if (!orbit || !parent) {
+      conicLine.geometry.setDrawRange(0, 0);
+      return;
     }
-
-    physicsRef.current = physicsRef.current.filter(b => incomingIds.has(b.id));
-    for (const id of currentIds) {
-      if (!incomingIds.has(id)) meshEntriesRef.current.delete(id);
-    }
-    setRenderList([...bodies]);
-  }, [bodies, realisticMode]);
-
-  // ── Trails: one point per substep, so a trail always spans the same simulated time ──
-  const recordTrails = (bods: PhysicsBody[], removed: Set<string>) => {
-    for (const body of bods) {
-      if (removed.has(body.id)) continue;
-      const idx = body.trailHead * 3;
-      body.trailData[idx]     = body.position.x;
-      body.trailData[idx + 1] = surfaceHeight(body.position.x, body.position.z) + 0.06;
-      body.trailData[idx + 2] = body.position.z;
-      body.trailHead = (body.trailHead + 1) % MAX_TRAIL_POINTS;
-      body.trailLen  = Math.min(body.trailLen + 1, MAX_TRAIL_POINTS);
-    }
+    const points = conicPoints(orbit.elements, parent.position.x, parent.position.z, CONIC_SEGMENTS);
+    const attr = conicLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    points.forEach(([x, z], k) => {
+      arr[k * 3] = x;
+      arr[k * 3 + 1] = surfaceHeight(x, z) + 0.1;
+      arr[k * 3 + 2] = z;
+    });
+    attr.needsUpdate = true;
+    conicLine.geometry.setDrawRange(0, points.length);
+    conicLine.computeLineDistances();
+    (conicLine.material as THREE.LineDashedMaterial).color.set(orbit.bound ? '#4ade80' : '#f5b83d');
   };
 
-  // ── Mesh sync (once per frame; bypasses React re-render) ─────────────────
-  // Bodies rest in their own well on the visual sheet; physics stays at y = 0.
-  const syncMeshes = (bods: PhysicsBody[]) => {
-    for (const body of bods) {
+  // ── Trails: a point per TRAIL_SPACING of simulated time, resting on the sheet ──
+  const appendTrail = (id: string, x: number, z: number, simTime: number) => {
+    let trail = trailsRef.current.get(id);
+    if (!trail) {
+      trail = { data: new Float32Array(MAX_TRAIL_POINTS * 3), head: 0, len: 0, lastTime: -Infinity };
+      trailsRef.current.set(id, trail);
+    }
+    if (simTime - trail.lastTime < TRAIL_SPACING) return;
+    trail.lastTime = simTime;
+    const idx = trail.head * 3;
+    trail.data[idx] = x;
+    trail.data[idx + 1] = surfaceHeight(x, z) + 0.06;
+    trail.data[idx + 2] = z;
+    trail.head = (trail.head + 1) % MAX_TRAIL_POINTS;
+    trail.len = Math.min(trail.len + 1, MAX_TRAIL_POINTS);
+  };
+
+  const clearTrails = () => {
+    trailsRef.current.clear();
+    for (const entry of meshEntriesRef.current.values()) entry.trailLine.geometry.setDrawRange(0, 0);
+  };
+
+  /** Move meshes and trails to the live state; bodies missing from it are hidden. */
+  const syncMeshes = () => {
+    const present = new Set<string>();
+    for (const body of liveWorld.bodies) {
+      present.add(body.id);
       const entry = meshEntriesRef.current.get(body.id);
       if (!entry) continue;
-
-      const group = entry.groupRef.current;
-      if (group) {
-        group.position.set(
-          body.position.x,
-          surfaceHeight(body.position.x, body.position.z) + body.radius * 0.85,
-          body.position.z,
-        );
-      }
-
-      if (entry.meshRef.current)
-        entry.meshRef.current.scale.setScalar(body.radius);
-
+      const { x, z } = body.position;
+      entry.groupRef.current?.position.set(x, surfaceHeight(x, z) + body.radius * 0.85, z);
+      entry.meshRef.current?.scale.setScalar(body.radius);
       if (entry.glowRef.current) {
         entry.glowRef.current.scale.setScalar(body.radius * 1.8);
         const mat = entry.glowRef.current.material as THREE.MeshBasicMaterial;
-        if (mat) mat.opacity = body.motionState === 'escaping' ? 0.18 : 0.08;
+        if (mat) mat.opacity = body.motion === 'escaping' ? 0.18 : 0.08;
       }
-
-      // Unroll ring-buffer into the LineGeometry attribute in correct order
-      const arr  = entry.trailAttr.array as Float32Array;
-      const len  = body.trailLen;
-      const head = body.trailHead;
-      for (let k = 0; k < len; k++) {
-        const src = ((head - len + k + MAX_TRAIL_POINTS) % MAX_TRAIL_POINTS) * 3;
-        const dst = k * 3;
-        arr[dst]     = body.trailData[src];
-        arr[dst + 1] = body.trailData[src + 1];
-        arr[dst + 2] = body.trailData[src + 2];
+      const trail = trailsRef.current.get(body.id);
+      const arr = entry.trailAttr.array as Float32Array;
+      const shown = trail ? Math.min(trail.len, trailPointsRef.current) : 0;
+      for (let k = 0; k < shown; k++) {
+        const src = ((trail!.head - shown + k + MAX_TRAIL_POINTS) % MAX_TRAIL_POINTS) * 3;
+        arr[k * 3] = trail!.data[src];
+        arr[k * 3 + 1] = trail!.data[src + 1];
+        arr[k * 3 + 2] = trail!.data[src + 2];
       }
       entry.trailAttr.needsUpdate = true;
-      entry.trailLine.geometry.setDrawRange(0, len);
+      entry.trailLine.geometry.setDrawRange(0, shown);
+    }
+    for (const [id, entry] of meshEntriesRef.current) {
+      const visible = present.has(id);
+      if (entry.groupRef.current) entry.groupRef.current.visible = visible;
+      entry.trailLine.visible = visible;
     }
   };
 
-  /** Publishes the frame's end state to the well field and the live-world window. */
-  const publishFrame = () => {
-    updateWells(physicsRef.current);
-    liveWorld.bodies = physicsRef.current;
-    liveWorld.effectiveG = effectiveGravity(realisticMode);
+  /** HUD refresh: timeline, conservation and the objectives that judge the simulation. */
+  const flushHud = () => {
+    hudTimerRef.current = null;
+    lastHudRef.current = performance.now();
+    const snapshot = liveWorld.snapshot;
+    if (!snapshot) return;
+    useSimStore.getState().setSnapshot(snapshot);
+    const { unlock } = useProgressStore.getState();
+    const typeOf = (id: string) => metaRef.current.get(id)?.type;
+    missionTracker.update(snapshot, typeOf).forEach(unlock);
   };
 
-  // ── Master physics step ───────────────────────────────────────────────────
-  /** Runs one substep; returns true if any body was removed. */
-  const stepPhysics = (bods: PhysicsBody[], dt: number) => {
-    // Snapshot for time-rewind
-    historyRef.current.push(bods.map(b => ({
-      id: b.id,
-      px: b.position.x, py: b.position.y, pz: b.position.z,
-      vx: b.velocity.x, vy: b.velocity.y, vz: b.velocity.z,
-    })));
-    if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
+  const scheduleHud = () => {
+    if (hudTimerRef.current !== null) return;
+    const wait = Math.max(0, HUD_INTERVAL_MS - (performance.now() - lastHudRef.current));
+    hudTimerRef.current = window.setTimeout(flushHud, wait);
+  };
 
-    // Integrate, resolve collisions, classify bound/escaping (src/sim/nbody.ts)
-    const { impacts, removed } = stepWorld(bods, effectiveGravity(realisticMode), dt);
-    if (impacts.length) {
-      queueImpactPopups(impacts.map(impact => ({
-        ...impact,
+  const handleMessage = (message: SimMessage) => {
+    if (message.type !== 'state' || message.epoch !== epochRef.current) return;
+    const { result, snapshot } = message;
+    const store = useSpacetimeStore.getState();
+
+    for (const impact of result.impacts) {
+      queueImpactPopup({
+        id: `impact-${impactSeqRef.current++}`,
+        title: impact.title,
+        detail: impact.detail,
+        stats: impact.kind === 'tidal'
+          ? 'Momentum kept: 100% · The energy for the stream came from the black hole’s tides.'
+          : `Momentum kept: 100% · Impact energy turned to heat: ${Math.round(impact.kineticEnergyLost * 100)}%`,
         position: [impact.position[0], surfaceHeight(impact.position[0], impact.position[2]) + 2.5, impact.position[2]],
-      })));
+      });
+      logLabEvent('spacetime', impact.title, impact.kind === 'bounce' ? 'warn' : 'danger');
     }
-
-    recordTrails(bods, removed);
-
-    // Remove absorbed bodies from physics and React state
-    if (removed.size > 0) {
-      physicsRef.current = physicsRef.current.filter(b => !removed.has(b.id));
-      for (const id of removed) meshEntriesRef.current.delete(id);
-      setRenderList(prev => prev.filter(b => !removed.has(b.id)));
-      removed.forEach(id => onBodyRemoved(id));
-      // Notify parent of mass/radius changes on survivors (e.g. after absorbing mass)
-      for (const body of physicsRef.current) {
-        const orig = bodies.find(b => b.id === body.id);
-        if (orig && (orig.mass !== body.mass || orig.radius !== body.radius)) {
-          onBodyUpdated(body.id, body.mass, body.radius);
-        }
+    if (result.impacts.length > 0) {
+      const { unlock } = useProgressStore.getState();
+      missionTracker.noteImpacts(result.impacts).forEach(unlock);
+    }
+    for (const body of result.spawned) {
+      knownIdsRef.current.add(body.id);
+      store.addSimulatedBody(body);
+    }
+    for (const id of result.removed) {
+      coreRemovedRef.current.add(id);
+      trailsRef.current.delete(id);
+      store.dropSimulatedBody(id);
+    }
+    for (const body of result.restored) {
+      coreRemovedRef.current.delete(body.id);
+      knownIdsRef.current.add(body.id);
+      store.addSimulatedBody(body);
+    }
+    for (const update of result.updated) {
+      const current = metaRef.current.get(update.id);
+      if (current && (current.mass !== update.mass || current.radius !== update.radius)) {
+        store.updateBody(update.id, update.mass, update.radius);
       }
-      return true;
     }
-    return false;
+
+    publishSnapshot(snapshot, metaRef.current);
+    updateWells(liveWorld.bodies);
+    if (result.direction === 1 && result.stepsTaken > 0) {
+      for (const body of liveWorld.bodies) appendTrail(body.id, body.position.x, body.position.z, snapshot.simTime);
+    }
+
+    // Achieved speed, for the time controls (crowded systems can't always reach full warp).
+    const now = performance.now();
+    const last = lastStateRef.current;
+    if (last && result.direction === 1) reportSpacetimeSpeed(snapshot.simTime - last.simTime, (now - last.at) / 1000, result.limited);
+    lastStateRef.current = { simTime: snapshot.simTime, at: now };
+
+    scheduleHud();
   };
+  const handleMessageRef = useRef(handleMessage);
+  handleMessageRef.current = handleMessage;
 
-  // ── Frame loop ────────────────────────────────────────────────────────────
+  // ── Simulation lifetime ──
+  useEffect(() => {
+    const client = new SimulationClient((message) => handleMessageRef.current(message));
+    clientRef.current = client;
+    simulationControls.current = {
+      seek: (step) => {
+        if (epochRef.current !== null) client.send({ type: 'seek', epoch: epochRef.current, step });
+      },
+      setPinned: (id, pinned) => {
+        if (epochRef.current !== null) client.send({ type: 'pin', epoch: epochRef.current, id, pinned });
+      },
+    };
+    return () => {
+      client.dispose();
+      clientRef.current = null;
+      epochRef.current = null;
+      simulationControls.current = null;
+      clearLiveWorld();
+      if (hudTimerRef.current !== null) window.clearTimeout(hudTimerRef.current);
+    };
+  }, []);
+
+  // ── Keep the simulation's body list in step with the store ──
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!client) return;
+    const propIds = new Set(bodies.map((b) => b.id));
+    metaRef.current = new Map(bodies.map((b) => [b.id, b]));
+
+    if (epochRef.current !== epoch) {
+      // Reset, template, saved system or first run: start a fresh simulation.
+      epochRef.current = epoch;
+      knownIdsRef.current = new Set(propIds);
+      coreRemovedRef.current = new Set();
+      prevPropIdsRef.current = propIds;
+      lastStateRef.current = null;
+      clearTrails();
+      clearImpacts();
+      useSimStore.getState().clear();
+      client.send({
+        type: 'load',
+        epoch,
+        bodies,
+        config: { realistic: configRef.current.realisticMode, expansionRate: configRef.current.expansionRate },
+      });
+      return;
+    }
+
+    for (const body of bodies) {
+      if (knownIdsRef.current.has(body.id)) continue;
+      knownIdsRef.current.add(body.id);
+      client.send({ type: 'add', epoch, body });
+    }
+    for (const id of prevPropIdsRef.current) {
+      if (propIds.has(id) || coreRemovedRef.current.has(id)) continue; // the simulation removed it itself
+      client.send({ type: 'remove', epoch, id });
+      trailsRef.current.delete(id);
+    }
+    prevPropIdsRef.current = propIds;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bodies, epoch]);
+
+  useEffect(() => {
+    if (epochRef.current === null) return;
+    clientRef.current?.send({ type: 'config', epoch: epochRef.current, config: { realistic: realisticMode } });
+  }, [realisticMode]);
+
+  useEffect(() => {
+    if (epochRef.current === null) return;
+    clientRef.current?.send({ type: 'config', epoch: epochRef.current, config: { expansionRate } });
+  }, [expansionRate]);
+
+  // ── Frame loop: ask the simulation to advance (or rewind) by this frame's time ──
   useFrame((_, delta) => {
-    if (timeScale === 0) {
-      publishFrame();
-      syncMeshes(physicsRef.current);
-      return;
+    const client = clientRef.current;
+    if (client && epochRef.current !== null && timeScale !== 0) {
+      client.tick(epochRef.current, Math.min(delta, MAX_FRAME_DELTA) * timeScale);
     }
-    let bods = physicsRef.current.slice(0, MAX_SIM_BODIES);
-
-    // Rewind: restore from history at the rate forward time produced it
-    if (timeScale < 0) {
-      const plan = planRewindSteps(rewindAccumRef.current, delta, timeScale, FIXED_SUBSTEP);
-      rewindAccumRef.current = plan.carry;
-      for (let s = 0; s < plan.steps; s++) {
-        const snap = historyRef.current.pop();
-        if (!snap) break;
-        for (const entry of snap) {
-          const b = bods.find(x => x.id === entry.id);
-          if (b) {
-            b.position.set(entry.px, entry.py, entry.pz);
-            b.velocity.set(entry.vx, entry.vy, entry.vz);
-          }
-        }
-      }
-      publishFrame();
-      syncMeshes(bods);
-      return;
-    }
-
-    // Forward: fixed substeps; warp runs more of them, within a per-frame work budget
-    const plan = planForwardSteps(accumRef.current, delta, timeScale, FIXED_SUBSTEP, substepCap(bods.length));
-    accumRef.current = plan.carry;
-    for (let s = 0; s < plan.steps; s++) {
-      const dt = adaptiveDt(FIXED_SUBSTEP, bods);
-      // An absorbed body must stop pulling on the others for the rest of the frame.
-      if (stepPhysics(bods, dt)) bods = physicsRef.current.slice(0, MAX_SIM_BODIES);
-    }
-    // Drain remainder if no full substep fired (e.g. first frame, slow motion)
-    if (plan.steps === 0 && accumRef.current > 0) {
-      const dt = adaptiveDt(accumRef.current, bods);
-      stepPhysics(bods, dt);
-      accumRef.current = 0;
-    }
-    reportSpacetimeSpeed(plan.simulated, delta, plan.limited);
-
-    publishFrame();
-    syncMeshes(physicsRef.current);
+    syncMeshes();
+    updateConic();
   });
 
   return (
     <>
-      <ImpactCameraDirector
-        activeImpact={activeImpact}
-        controlsRef={controlsRef}
-      />
+      <primitive object={conicLine} />
+      <ImpactCameraDirector activeImpact={activeImpact} controlsRef={controlsRef} />
       {activeImpact && (
         <Html
           key={activeImpact.id}
           position={activeImpact.position}
           center
           style={{ pointerEvents: 'none' }}
-          zIndexRange={[500, 0]}
         >
           <div
             className="scene-label scene-label-accent w-[340px] border-l-primary px-4 py-3.5"
@@ -445,9 +393,10 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
                 </svg>
               </button>
             </div>
-            <p className="text-[13px] leading-relaxed text-foreground/85">
-              {activeImpact.detail}
-            </p>
+            <p className="text-[13px] leading-relaxed text-foreground/85">{activeImpact.detail}</p>
+            {activeImpact.stats && (
+              <p className="hud-num mt-2 text-[11.5px] leading-snug text-hud-dim">{activeImpact.stats}</p>
+            )}
             {hasPendingImpact && (
               <p className="mt-2.5 border-t border-white/[0.07] pt-2 font-mono text-[11px] text-primary/80">
                 +1 more collision — dismiss to view
@@ -456,7 +405,7 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
           </div>
         </Html>
       )}
-      {renderList.map(body => (
+      {bodies.map((body) => (
         <BodyRenderer key={body.id} body={body} meshEntriesRef={meshEntriesRef} />
       ))}
     </>
@@ -464,3 +413,4 @@ const PhysicsSimulator: React.FC<PhysicsSimulatorProps> = ({
 };
 
 export default PhysicsSimulator;
+

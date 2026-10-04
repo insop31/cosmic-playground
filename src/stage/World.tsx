@@ -1,9 +1,10 @@
-import { createContext, useContext, useMemo, type ComponentProps, type ReactNode } from 'react';
+import { useMemo, type ComponentProps, type ReactNode } from 'react';
 import { createPortal, useFrame, useThree } from '@react-three/fiber';
 import { Html as DreiHtml } from '@react-three/drei';
 import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { useQualityTier } from '@/stores/appStore';
+import { WorldActiveContext, useWorldActive } from './worldContext';
 
 /**
  * A world is one lab's 3D content (Spacetime or Rocket) living in its own
@@ -14,10 +15,6 @@ import { useQualityTier } from '@/stores/appStore';
  * active world is rendered, receives pointer events and shows DOM labels; the
  * inactive world stays mounted (keeping its simulation state) but invisible.
  */
-const WorldActiveContext = createContext(true);
-
-export const useWorldActive = () => useContext(WorldActiveContext);
-
 export interface WorldCameraOptions {
   position: [number, number, number];
   fov: number;

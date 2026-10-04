@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AppMode } from '@/lib/challengePacks';
+import { setMotionOverride } from '@/motion/preference';
 
 export type QualityTier = 'high' | 'medium' | 'low';
 export type QualitySetting = 'auto' | QualityTier;
@@ -9,6 +10,7 @@ const QUALITY_KEY = 'cosmic-playground.quality';
 export type LibraryTab = 'bodies' | 'systems' | 'saved';
 
 const INTRO_KEY = 'cosmic-playground.intro-seen';
+const DISPLAY_KEY = 'cosmic-playground.display';
 const LAST_LAB_KEY = 'cosmic-playground.last-lab';
 
 const readStorage = (key: string) => {
@@ -26,6 +28,33 @@ const writeStorage = (key: string, value: string) => {
   }
 };
 
+interface DisplayPreferences {
+  /** null follows the system's "reduce motion" setting. */
+  reduceMotion: boolean | null;
+  highContrast: boolean;
+}
+
+const readDisplay = (): DisplayPreferences => {
+  try {
+    const parsed = JSON.parse(readStorage(DISPLAY_KEY) ?? '{}') as Partial<DisplayPreferences>;
+    return {
+      reduceMotion: typeof parsed.reduceMotion === 'boolean' ? parsed.reduceMotion : null,
+      highContrast: parsed.highContrast === true,
+    };
+  } catch {
+    return { reduceMotion: null, highContrast: false };
+  }
+};
+
+/** Mirror display preferences on <html> (CSS) and in the motion setting (GSAP, 3D). */
+const applyDisplay = (display: DisplayPreferences) => {
+  setMotionOverride(display.reduceMotion);
+  if (typeof document !== 'undefined') document.documentElement.classList.toggle('high-contrast', display.highContrast);
+};
+
+const INITIAL_DISPLAY = readDisplay();
+applyDisplay(INITIAL_DISPLAY);
+
 const isNarrow = (maxWidth: number) => typeof window !== 'undefined' && window.innerWidth < maxWidth;
 
 /**
@@ -42,6 +71,10 @@ interface AppState {
   /** Section shown in the Spacetime tool panel. */
   spacetimeTab: LibraryTab;
   missionLogOpen: boolean;
+  /** Spacetime conservation graphs expanded. */
+  conservationOpen: boolean;
+  /** Lab notebook dialog open. */
+  notebookOpen: boolean;
   /** Showing the opening sequence (first visit, or replayed). */
   booting: boolean;
   /** Timestamps (ms since page load) of real start-up milestones, for the boot log. */
@@ -50,6 +83,9 @@ interface AppState {
   quality: QualitySetting;
   /** Tier picked automatically from frame rate (used when quality is 'auto'). */
   autoTier: QualityTier;
+  /** null follows the system's "reduce motion" setting. */
+  reduceMotion: boolean | null;
+  highContrast: boolean;
   setMode: (mode: AppMode) => void;
   toggleMode: () => void;
   setHudHidden: (hidden: boolean) => void;
@@ -61,12 +97,16 @@ interface AppState {
   setSpacetimeTab: (tab: LibraryTab) => void;
   setMissionLogOpen: (open: boolean) => void;
   toggleMissionLog: () => void;
+  toggleConservation: () => void;
+  setNotebookOpen: (open: boolean) => void;
   markReady: (milestone: keyof AppState['readiness']) => void;
   /** Leaves the opening sequence into the chosen lab. */
   finishBoot: (mode: AppMode) => void;
   replayIntro: () => void;
   setQuality: (quality: QualitySetting) => void;
   setAutoTier: (tier: QualityTier) => void;
+  setReduceMotion: (value: boolean | null) => void;
+  setHighContrast: (value: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -76,10 +116,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
   missionsCollapsed: isNarrow(1280),
   spacetimeTab: 'bodies',
   missionLogOpen: false,
+  conservationOpen: false,
+  notebookOpen: false,
   booting: readStorage(INTRO_KEY) !== '1',
   readiness: {},
   quality: (['high', 'medium', 'low'] as const).find((q) => q === readStorage(QUALITY_KEY)) ?? 'auto',
   autoTier: 'high',
+  reduceMotion: INITIAL_DISPLAY.reduceMotion,
+  highContrast: INITIAL_DISPLAY.highContrast,
   setMode: (mode) => {
     writeStorage(LAST_LAB_KEY, mode);
     set({ mode });
@@ -100,6 +144,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setSpacetimeTab: (spacetimeTab) => set({ spacetimeTab }),
   setMissionLogOpen: (missionLogOpen) => set({ missionLogOpen }),
   toggleMissionLog: () => set((state) => ({ missionLogOpen: !state.missionLogOpen })),
+  toggleConservation: () => set((state) => ({ conservationOpen: !state.conservationOpen })),
+  setNotebookOpen: (notebookOpen) => set({ notebookOpen }),
   markReady: (milestone) => set((state) => (
     state.readiness[milestone] ? state : { readiness: { ...state.readiness, [milestone]: Math.round(performance.now()) } }
   )),
@@ -114,7 +160,26 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ quality });
   },
   setAutoTier: (autoTier) => set({ autoTier }),
+  setReduceMotion: (reduceMotion) => {
+    const display = { reduceMotion, highContrast: get().highContrast };
+    writeStorage(DISPLAY_KEY, JSON.stringify(display));
+    applyDisplay(display);
+    set({ reduceMotion });
+  },
+  setHighContrast: (highContrast) => {
+    const display = { reduceMotion: get().reduceMotion, highContrast };
+    writeStorage(DISPLAY_KEY, JSON.stringify(display));
+    applyDisplay(display);
+    set({ highContrast });
+  },
 }));
+
+/** Scene detail per quality tier (resolution and glow are set in StageCanvas and World). */
+export const QUALITY_DETAIL: Record<QualityTier, { stars: number; gridResolution: number; trailPoints: number }> = {
+  high: { stars: 4200, gridResolution: 200, trailPoints: 200 },
+  medium: { stars: 2800, gridResolution: 160, trailPoints: 140 },
+  low: { stars: 1500, gridResolution: 120, trailPoints: 80 },
+};
 
 /** The quality tier actually in effect. */
 export const useQualityTier = () =>

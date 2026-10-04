@@ -42,11 +42,11 @@ describe('progress store', () => {
     expect(useProgressStore.getState().experimentKeys.size).toBe(2);
   });
 
-  it('unlocks Gravity Master after eight distinct experiments', () => {
+  it('does not hand out Gravity Master for experimenting alone (it is judged from real orbits)', () => {
     const { registerExperiment } = useProgressStore.getState();
     for (let i = 0; i < 8; i += 1) registerExperiment(`exp-${i}`, 0);
-    expect(useProgressStore.getState().achievements['gravity-master']).toBe(true);
-    expect(useProgressStore.getState().score).toBe(140);
+    expect(useProgressStore.getState().achievements['gravity-master']).toBe(false);
+    expect(useProgressStore.getState().score).toBe(0);
   });
 
   it('scores an objective only the first time it is unlocked', () => {

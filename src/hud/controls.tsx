@@ -38,11 +38,15 @@ interface HudSliderProps {
   info?: string;
   disabled?: boolean;
   onChange: (value: number) => void;
+  /** Value actually flown (after weather), shown when it differs from `value`. */
+  flownValue?: number;
 }
 
-export const HudSlider = ({ label, value, min, max, step, unit = '', format, info, disabled, onChange }: HudSliderProps) => {
+export const HudSlider = ({ label, value, min, max, step, unit = '', format, info, disabled, onChange, flownValue }: HudSliderProps) => {
   const id = useId();
-  const display = format ? format(value) : value.toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0);
+  const show = (v: number) => (format ? format(v) : v.toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0));
+  const display = show(value);
+  const changedByWeather = flownValue !== undefined && Math.abs(flownValue - value) > 1e-9;
   return (
     <div className={cn('grid gap-2', disabled && 'opacity-40')}>
       <div className="flex items-center justify-between gap-2">
@@ -51,6 +55,9 @@ export const HudSlider = ({ label, value, min, max, step, unit = '', format, inf
           {info && <InfoTip label={label}>{info}</InfoTip>}
         </span>
         <span className="hud-num shrink-0 text-[12px] text-primary">
+          {changedByWeather && (
+            <span className="mr-1.5 text-warn" title="Value actually flown, after the weather">→ {show(flownValue!)}</span>
+          )}
           {display}
           {unit && <span className="ml-0.5 text-hud-dim">{unit}</span>}
         </span>

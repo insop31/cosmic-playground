@@ -4,35 +4,51 @@ import * as THREE from 'three';
 import { FlameParticles, SmokeParticles } from './Particles';
 import { RocketVehicle } from './RocketVisuals';
 import type { RocketParams, RocketState } from './rocketTypes';
-import { MAX_FRAME_DELTA, planRocketSteps } from '@/sim/schedule';
+import type { WeatherConditionId } from './weatherPresets';
+import { MAX_FRAME_DELTA, ROCKET_STEP_CAP, planForwardSteps } from '@/physics/schedule';
 import {
-  TRAJECTORY_LIMIT,
-  stepAscent,
-  stepEscape,
-  stepOrbit,
-  type AscentState,
-  type AscentStep,
-} from '@/sim/rocket';
+  FLIGHT_DT,
+  ORBIT_TIME_COMPRESSION,
+  altitudeOf,
+  initialFlightState,
+  stepFlight,
+  type FlightEnvironment,
+  type FlightState,
+  type FlightVerdict,
+} from '@/physics/rocket';
+import { isBurning } from './liveFlight';
 
 interface RocketModelProps {
   params: RocketParams;
   state: RocketState;
   onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
   timeScale: number;
+  activeWeather: Set<WeatherConditionId>;
+  /** Shared with the force arrows and the HUD, so they read the exact flight state. */
+  flightRef: React.MutableRefObject<FlightState | null>;
 }
 
 const ROCKET_SCALE = 1.75;
+const TRAJECTORY_LIMIT = 2400;
 const MAX_HISTORY = 3600;
+// After the verdict the flight keeps going for the camera; long coasts play faster.
+const COAST_SPEEDUP: Partial<Record<RocketState['outcome'], number>> = {
+  orbiting: ORBIT_TIME_COMPRESSION,
+  suborbital: 4,
+  escape: 2,
+};
+
+interface HistoryEntry {
+  flight: FlightState;
+  uiState: RocketState;
+  /** Seconds of 1× time this frame covered; rewind pops entries at the same rate. */
+  span: number;
+}
 
 const appendTrajectoryPoints = (trajectory: [number, number][], points: [number, number][]) => {
   if (points.length === 0) return trajectory;
   const next = trajectory.concat(points);
   return next.length > TRAJECTORY_LIMIT ? next.slice(next.length - TRAJECTORY_LIMIT) : next;
-};
-
-const computeRocketAngle = (vx: number, vy: number) => {
-  const safeVy = Math.abs(vy) < 0.001 ? (vy >= 0 ? 0.001 : -0.001) : vy;
-  return Math.atan2(vx, safeVy);
 };
 
 const smoothRotateZ = (current: number, target: number, factor: number) => {
@@ -43,185 +59,172 @@ const smoothRotateZ = (current: number, target: number, factor: number) => {
 const smoothMove = (current: number, target: number, smoothing: number, dt: number) =>
   THREE.MathUtils.damp(current, target, smoothing, dt);
 
-interface HistoryEntry {
-  vx: number;
-  vy: number;
-  px: number;
-  py: number;
-  fuel: number;
-  /** Simulated seconds this step covered; rewind pops at the same rate. */
-  dt: number;
-  uiState: RocketState;
-}
+/** World rotation of the rocket's axis: its attitude is measured from the local vertical. */
+const worldAxisAngle = (params: RocketParams, flight: FlightState) => {
+  const rx = flight.px;
+  const ry = flight.py + params.planetRadius;
+  const r = Math.hypot(rx, ry) || 1;
+  const upX = rx / r;
+  const upY = ry / r;
+  const bx = Math.cos(flight.attitude) * upX + Math.sin(flight.attitude) * upY;
+  const by = Math.cos(flight.attitude) * upY - Math.sin(flight.attitude) * upX;
+  return Math.atan2(bx, by);
+};
 
-const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelProps) => {
+/**
+ * The launch vehicle and its flight. Each frame runs fixed 1/60 s steps of the
+ * flight model (src/physics/rocket.ts): one at 1×, 64 at 64×, so warp is exactly
+ * many ordinary steps. Rewind restores recorded states at the rate they were made.
+ */
+const RocketModel = ({ params, state, onUpdateState, timeScale, activeWeather, flightRef }: RocketModelProps) => {
   const groupRef = useRef<THREE.Group>(null);
-  const velocityRef = useRef<[number, number]>([0, 0]);
-  const posRef = useRef<[number, number]>([0, 0]);
-  const fuelRef = useRef(1);
+  const envRef = useRef<FlightEnvironment>({ lightning: false, seed: state.seed });
+  const accumRef = useRef(0);
+  const rewindAccumRef = useRef(0);
   const prevPhaseRef = useRef(state.phase);
   const historyRef = useRef<HistoryEntry[]>([]);
-  const rewindAccumRef = useRef(0);
+  if (!flightRef.current) flightRef.current = initialFlightState(params);
 
-  const resetRefs = () => {
-    velocityRef.current = [0, 0];
-    posRef.current = [0, 0];
-    fuelRef.current = 1;
-    historyRef.current = [];
+  // Start from the pad on reset and on every new launch.
+  const resetFlight = () => {
+    envRef.current = { lightning: activeWeather.has('lightning'), seed: state.seed };
+    flightRef.current = initialFlightState(params, envRef.current);
+    accumRef.current = 0;
     rewindAccumRef.current = 0;
+    historyRef.current = [];
     if (groupRef.current) {
       groupRef.current.position.set(0, 1.2, 0);
       groupRef.current.rotation.set(0, 0, 0);
+      groupRef.current.visible = true;
     }
   };
-
-  // Reset refs when state resets to idle, or when a fresh launch starts
-  if (state.phase === 'idle' && prevPhaseRef.current !== 'idle') resetRefs();
-  if (state.phase === 'launching' && prevPhaseRef.current === 'idle') resetRefs();
+  if (state.phase === 'idle' && prevPhaseRef.current !== 'idle') resetFlight();
+  if (state.phase === 'launching' && prevPhaseRef.current === 'idle') resetFlight();
   prevPhaseRef.current = state.phase;
 
-  const placeVehicle = (px: number, py: number, vx: number, vy: number, renderDt: number, follow: number, turn: number) => {
-    const group = groupRef.current!;
+  const placeRocket = (flight: FlightState, renderDt: number, follow = 16, turn = 12) => {
+    const group = groupRef.current;
+    if (!group) return;
     group.position.set(
-      smoothMove(group.position.x, px * 2, follow, renderDt),
-      smoothMove(group.position.y, 1.2 + py * 2, follow, renderDt),
+      smoothMove(group.position.x, flight.px * 2, follow, renderDt),
+      smoothMove(group.position.y, 1.2 + Math.max(flight.py, -1000) * 2, follow, renderDt),
       smoothMove(group.position.z, 0, follow, renderDt),
     );
-    group.rotation.z = smoothRotateZ(group.rotation.z, -computeRocketAngle(vx, vy), Math.min(1, renderDt * turn));
+    group.rotation.z = smoothRotateZ(group.rotation.z, -worldAxisAngle(params, flight), Math.min(1, renderDt * turn));
+  };
+
+  /** Telemetry fields copied from the flight into the store each frame. */
+  const telemetry = (flight: FlightState, prev: RocketState): Partial<RocketState> => {
+    const altitude = Math.max(altitudeOf(params, flight), 0);
+    return {
+      altitude,
+      maxAltitude: Math.max(prev.maxAltitude, altitude),
+      fuel: params.fuelMass > 0 ? (flight.fuel1 + flight.fuel2) / params.fuelMass : 0,
+      velocity: [flight.vx, flight.vy],
+      elapsed: flight.elapsed,
+      position: [flight.px, flight.py, 0],
+      heat: flight.heat,
+      stageSeparated: flight.stageSeparated,
+      dynamicPressure: flight.q,
+      maxDynamicPressure: flight.maxQ,
+      events: flight.events.length !== prev.events.length ? flight.events : prev.events,
+    };
   };
 
   useFrame((_, delta) => {
-    if (!groupRef.current) return;
+    const group = groupRef.current;
+    const flight = flightRef.current;
+    if (!group || !flight) return;
+    // A burnt-up rocket is gone; everything else stays visible.
+    group.visible = !(state.phase === 'outcome' && state.outcome === 'burnup');
     if (timeScale === 0) return;
 
-    // Rewind: pop history at the same simulated rate it was recorded
+    // ── Rewind: restore recorded frames at the rate they were recorded ──
     if (timeScale < 0) {
       if (state.phase === 'idle') return;
       const history = historyRef.current;
       let owed = rewindAccumRef.current + Math.min(delta, MAX_FRAME_DELTA) * Math.abs(timeScale);
-      let lastSnap: HistoryEntry | null = null;
-      while (history.length > 0 && owed >= history[history.length - 1].dt) {
-        const snap = history.pop()!;
-        owed -= snap.dt;
-        lastSnap = snap;
+      let restored: HistoryEntry | null = null;
+      while (history.length > 0 && owed >= history[history.length - 1].span) {
+        restored = history.pop()!;
+        owed -= restored.span;
       }
       rewindAccumRef.current = history.length > 0 ? owed : 0;
-
-      if (lastSnap) {
-        const snap = lastSnap;
-        velocityRef.current = [snap.vx, snap.vy];
-        posRef.current = [snap.px, snap.py];
-        fuelRef.current = snap.fuel;
-        groupRef.current.position.set(snap.px * 2, 1.2 + snap.py * 2, 0);
-        groupRef.current.rotation.z = -computeRocketAngle(snap.vx, snap.vy);
-        onUpdateState(() => ({
-          ...snap.uiState,
-          position: [snap.px, snap.py, 0],
-          altitude: snap.py,
-          velocity: [snap.vx, snap.vy],
-          fuel: snap.fuel,
-        }));
+      if (restored) {
+        const entry = restored;
+        flightRef.current = entry.flight;
+        accumRef.current = 0;
+        group.position.set(entry.flight.px * 2, 1.2 + entry.flight.py * 2, 0);
+        group.rotation.z = -worldAxisAngle(params, entry.flight);
+        onUpdateState(() => entry.uiState);
       }
       return;
     }
 
-    const isEscaping = state.phase === 'outcome' && state.outcome === 'escape';
-    const isOrbiting = state.phase === 'outcome' && state.outcome === 'orbiting' && state.orbit;
-    if (state.phase !== 'launching' && state.phase !== 'coasting' && !isEscaping && !isOrbiting) {
-      return;
-    }
+    const inFlight = state.phase === 'launching' || state.phase === 'coasting';
+    const coastingAfterVerdict = state.phase === 'outcome' && state.outcome in COAST_SPEEDUP
+      && !(state.outcome === 'suborbital' && altitudeOf(params, flight) <= 0);
+    if (!inFlight && !coastingAfterVerdict) return;
 
-    // Warp runs several ordinary steps instead of one long one (src/sim/schedule.ts)
-    const { steps, dt } = planRocketSteps(delta, timeScale);
-    const renderDt = Math.min(delta, 0.05);
-    let sim: AscentState = {
-      px: posRef.current[0],
-      py: posRef.current[1],
-      vx: velocityRef.current[0],
-      vy: velocityRef.current[1],
-      fuel: fuelRef.current,
-      elapsed: state.elapsed,
-      maxAltitude: state.maxAltitude,
-    };
-    let orbit = state.orbit;
-    let launching = state.phase === 'launching';
-    let cutoff = false;
-    let ended: AscentStep | null = null;
-    const points: [number, number][] = [];
-
-    for (let i = 0; i < steps; i++) {
-      historyRef.current.push({ vx: sim.vx, vy: sim.vy, px: sim.px, py: sim.py, fuel: sim.fuel, dt, uiState: state });
+    const speedup = coastingAfterVerdict ? COAST_SPEEDUP[state.outcome] ?? 1 : 1;
+    const frameTime = Math.min(delta, MAX_FRAME_DELTA) * timeScale;
+    const plan = planForwardSteps(accumRef.current + frameTime * speedup, FLIGHT_DT, ROCKET_STEP_CAP);
+    accumRef.current = plan.carry;
+    if (plan.steps > 0) {
+      historyRef.current.push({ flight, uiState: state, span: (plan.steps * FLIGHT_DT) / speedup });
       if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
-
-      if (isOrbiting && orbit) {
-        const result = stepOrbit(sim, orbit, dt);
-        sim = result.next;
-        orbit = result.orbit;
-      } else if (isEscaping) {
-        sim = stepEscape(sim, dt);
-      } else {
-        const result = stepAscent(sim, params, launching, dt);
-        sim = result.next;
-        if (result.cutoff) {
-          cutoff = true;
-          launching = false;
-        }
-        if (result.outcome) {
-          ended = result;
-          break;
-        }
-      }
-      points.push([sim.px, sim.py]);
     }
 
-    velocityRef.current = [sim.vx, sim.vy];
-    posRef.current = [sim.px, sim.py];
-    fuelRef.current = sim.fuel;
+    const renderDt = Math.min(delta, 0.05);
+    let current = flight;
+    let verdict: FlightVerdict | null = null;
+    const points: [number, number][] = [];
+    for (let n = 0; n < plan.steps; n++) {
+      const result = stepFlight(params, current, FLIGHT_DT, { env: envRef.current, coastOnly: coastingAfterVerdict });
+      current = result.state;
+      if (n % 4 === 3 || n === plan.steps - 1) points.push([current.px, current.py]);
+      if (coastingAfterVerdict && altitudeOf(params, current) <= 0) break; // the arc reached the ground
+      if (!coastingAfterVerdict && result.verdict) {
+        verdict = result.verdict;
+        break;
+      }
+    }
+    flightRef.current = current;
+    placeRocket(current, renderDt);
+    if (plan.steps === 0) return;
 
-    if (ended) {
-      const { outcome, orbit: endOrbit } = ended;
-      const grounded = outcome === 'crashed' || outcome === 'suborbital';
+    if (verdict) {
+      const result = verdict;
       onUpdateState((prev) => ({
         ...prev,
+        ...telemetry(current, prev),
         phase: 'outcome',
-        outcome: outcome!,
-        fuel: Math.max(sim.fuel, 0),
-        elapsed: sim.elapsed,
-        maxAltitude: sim.maxAltitude,
-        position: [sim.px, grounded ? 0 : sim.py, 0],
-        altitude: grounded ? 0 : prev.altitude,
-        velocity: outcome === 'orbiting' ? [sim.vx, sim.vy] : prev.velocity,
-        orbit: endOrbit,
-        trajectory: appendTrajectoryPoints(prev.trajectory, grounded ? points : [...points, [sim.px, sim.py]]),
+        outcome: result.outcome,
+        outcomeReason: result.reason,
+        orbit: result.orbit,
+        trajectory: appendTrajectoryPoints(prev.trajectory, points),
       }));
       return;
     }
 
-    placeVehicle(sim.px, sim.py, sim.vx, sim.vy, renderDt, isOrbiting ? 18 : 16, isOrbiting ? 10 : isEscaping ? 9 : 12);
-
     onUpdateState((prev) => ({
       ...prev,
-      phase: cutoff && prev.phase === 'launching' ? 'coasting' : prev.phase,
-      altitude: sim.py,
-      maxAltitude: sim.maxAltitude,
-      fuel: Math.max(sim.fuel, 0),
-      velocity: isEscaping ? prev.velocity : [sim.vx, sim.vy],
-      elapsed: isEscaping ? prev.elapsed : sim.elapsed,
-      position: [sim.px, sim.py, 0],
-      orbit: isOrbiting ? orbit : null,
+      ...telemetry(current, prev),
+      phase: coastingAfterVerdict ? prev.phase : isBurning(current) ? 'launching' : 'coasting',
       trajectory: appendTrajectoryPoints(prev.trajectory, points),
     }));
   });
 
-  const isThrusting = state.phase === 'launching' && fuelRef.current > 0;
+  const flight = flightRef.current;
+  const isThrusting = (state.phase === 'launching' || state.phase === 'coasting') && isBurning(flight);
 
   return (
     <group ref={groupRef} position={[0, 1.2, 0]} scale={[ROCKET_SCALE, ROCKET_SCALE, ROCKET_SCALE]}>
       <RocketVehicle
         thrusting={isThrusting}
-        intensity={params.thrustForce / 30}
+        intensity={(flight.stage === 2 ? params.stage2Thrust * 2 : params.thrustForce) / 30}
         stageSeparation={params.stageSeparation}
-        separated={params.stageSeparation && (state.phase === 'coasting' || (state.phase === 'outcome' && state.fuel <= 0))}
+        separated={state.stageSeparated}
       />
 
       {/* Flame */}

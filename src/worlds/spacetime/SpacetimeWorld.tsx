@@ -2,9 +2,11 @@ import { useCallback, useRef } from 'react';
 import type { ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { WorldEffects, useWorldActive } from '@/stage/World';
-import { bodyLabel, useSpacetimeStore } from '@/stores/spacetimeStore';
-import { logLabEvent } from '@/stores/eventStore';
+import { WorldEffects } from '@/stage/World';
+import { useWorldActive } from '@/stage/worldContext';
+import { HUBBLE_RATE, MAX_UNIVERSE_SCALE } from '@/physics/constants';
+import { useUniverseScale } from './useUniverseScale';
+import { useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useEffectiveTimeScale } from '@/stores/timeStore';
 import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
@@ -12,7 +14,7 @@ import PhysicsSimulator from './PhysicsSimulator';
 import PlacementController from './PlacementController';
 import FocusController from './FocusController';
 import BootCamera from './BootCamera';
-import { useAppStore, useQualityTier } from '@/stores/appStore';
+import { QUALITY_DETAIL, useAppStore, useQualityTier } from '@/stores/appStore';
 
 // Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
 const GRID_SIZE = 220;
@@ -22,24 +24,17 @@ const SPACE = '#05070d';
 const SpacetimeWorld = () => {
   const active = useWorldActive();
   const bodies = useSpacetimeStore((state) => state.bodies);
+  const epoch = useSpacetimeStore((state) => state.epoch);
   const realisticMode = useSpacetimeStore((state) => state.realisticMode);
-  const universeScale = useSpacetimeStore((state) => state.universeScale);
+  const expansionEnabled = useSpacetimeStore((state) => state.expansionEnabled);
   const aiming = useSpacetimeStore((state) => Boolean(state.pendingPlacement));
-  const removeBody = useSpacetimeStore((state) => state.removeBody);
-  const onBodyUpdated = useSpacetimeStore((state) => state.updateBody);
   const booting = useAppStore((state) => state.booting);
-  const tier = useQualityTier();
+  const detail = QUALITY_DETAIL[useQualityTier()];
+  const universeScale = useUniverseScale();
   const liveTimeScale = useEffectiveTimeScale();
   // A hidden world is paused.
   const timeScale = active ? liveTimeScale : 0;
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-
-  // The simulator only removes a body when another one absorbs it.
-  const onBodyRemoved = useCallback((id: string) => {
-    const body = useSpacetimeStore.getState().bodies.find((entry) => entry.id === id);
-    if (body) logLabEvent('spacetime', `${bodyLabel(body)} absorbed in a collision`, 'danger');
-    removeBody(id);
-  }, [removeBody]);
 
   // Clicking empty space clears the selection (a drag that turned the view doesn't count).
   const pressRef = useRef<{ x: number; y: number } | null>(null);
@@ -64,18 +59,17 @@ const SpacetimeWorld = () => {
       <hemisphereLight args={['#8fb8ff', '#1a0f2e', 0.35]} />
       <directionalLight position={[30, 40, 20]} intensity={0.75} color="#e8f0ff" />
 
-      <Starfield />
+      <Starfield count={detail.stars} />
 
-      <SpacetimeGrid gridSize={GRID_SIZE} gridResolution={tier === 'low' ? 120 : 200} universeScale={universeScale} onPointerDown={onGridDown} onPointerUp={onGridUp} />
+      <SpacetimeGrid gridSize={GRID_SIZE} gridResolution={detail.gridResolution} universeScale={universeScale} onPointerDown={onGridDown} onPointerUp={onGridUp} />
 
       <PhysicsSimulator
         bodies={bodies}
+        epoch={epoch}
         timeScale={timeScale}
-        onBodyRemoved={onBodyRemoved}
-        onBodyUpdated={onBodyUpdated}
-        universeScale={universeScale}
-        gridSize={GRID_SIZE}
         realisticMode={realisticMode}
+        expansionRate={expansionEnabled && universeScale < MAX_UNIVERSE_SCALE ? HUBBLE_RATE : 0}
+        trailPoints={detail.trailPoints}
         controlsRef={controlsRef}
       />
 

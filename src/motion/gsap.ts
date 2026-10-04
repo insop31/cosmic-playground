@@ -33,10 +33,12 @@ export const DUR = {
 
 gsap.defaults({ ease: 'hud', duration: DUR.med });
 
-export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+import { onMotionChange, reducedMotion } from './preference';
 
-export const prefersReducedMotion = () =>
-  typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION_QUERY).matches;
+export { REDUCED_MOTION_QUERY } from './preference';
+
+/** Reduced motion, from the system setting or the user's choice in Help and settings. */
+export const prefersReducedMotion = reducedMotion;
 
 /**
  * Duration helper for choreographed moments: returns 0 under reduced motion
@@ -48,13 +50,12 @@ export const motionDuration = (seconds: number) => (prefersReducedMotion() ? 0 :
  * Reduced motion: every GSAP tween and timeline completes (almost) instantly,
  * so camera flights become cuts and entrances simply appear. Callbacks still
  * fire, so nothing that depends on a tween finishing is skipped. Follows the
- * system setting live.
+ * system setting and the in-app override live.
  */
 if (typeof window !== 'undefined') {
-  const query = window.matchMedia(REDUCED_MOTION_QUERY);
-  const apply = () => gsap.globalTimeline.timeScale(query.matches ? 1000 : 1);
+  const apply = () => gsap.globalTimeline.timeScale(reducedMotion() ? 1000 : 1);
   apply();
-  query.addEventListener('change', apply);
+  onMotionChange(apply);
 }
 
 export { gsap, useGSAP, CustomEase, DrawSVGPlugin, Flip, ScrambleTextPlugin, SplitText, TextPlugin };

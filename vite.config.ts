@@ -20,11 +20,17 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         // Long-lived vendor chunks: the 3D stack changes far less often than app code.
-        manualChunks: {
-          three: ["three"],
-          r3f: ["@react-three/fiber", "@react-three/drei", "@react-three/postprocessing"],
-          gsap: ["gsap", "@gsap/react"],
-          react: ["react", "react-dom", "react-router-dom"],
+        // Assign each package explicitly: the object form also pulls shared dependencies
+        // (React's JSX runtime) into the 3D chunks, which would put them on the first load.
+        manualChunks: (id) => {
+          // Vite's dynamic-import helper is used by the app too; keep it out of the 3D chunks.
+          if (id.includes('vite/preload-helper')) return 'react';
+          if (!id.includes('node_modules')) return undefined;
+          if (/node_modules\/three\//.test(id)) return 'three';
+          if (/node_modules\/(@react-three|three-stdlib|postprocessing|maath|troika-[^/]+|three-mesh-bvh|camera-controls|meshline|stats-gl|detect-gpu|@monogrid)\//.test(id)) return 'r3f';
+          if (/node_modules\/(gsap|@gsap)\//.test(id)) return 'gsap';
+          if (/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run|zustand|use-sync-external-store|@babel\/runtime)\//.test(id)) return 'react';
+          return undefined;
         },
       },
     },

@@ -8,7 +8,9 @@ export interface FlightSample {
   speed: number;
   /** Dynamic pressure proxy q = ½ρv² (scene units). */
   q: number;
-  /** Aerodynamic heating index: 0 none, ~1 severe. */
+  /** Altitude in scene units (for comparing speed with escape speed at that height). */
+  alt: number;
+  /** Heat-shield load: accumulated heating as a fraction of the limit (burn-up at 1). */
   heat: number;
 }
 

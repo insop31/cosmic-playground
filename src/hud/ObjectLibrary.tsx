@@ -9,6 +9,8 @@ import type { LibraryTab } from '@/stores/appStore';
 import { useProgressStore } from '@/stores/progressStore';
 import { UNLOCKS } from '@/lib/unlocks';
 import { HudSlider, HudSwitch, IconButton, Segmented } from './controls';
+import ShareFileButtons from './ShareFileButtons';
+import { exportSavedWork, importSavedWork } from './sharing';
 
 interface PlanetPreset {
   name: string;
@@ -67,6 +69,8 @@ interface ObjectLibraryProps {
   velocityScale: number;
   realisticMode: boolean;
   onRealisticModeChange: (value: boolean) => void;
+  expansionEnabled: boolean;
+  onExpansionChange: (value: boolean) => void;
   savedScenarios: SavedSpacetimeScenario[];
   onSaveScenario: (name: string) => boolean;
   onLoadScenario: (scenarioId: string) => void;
@@ -147,6 +151,8 @@ const ObjectLibrary = ({
   velocityScale,
   realisticMode,
   onRealisticModeChange,
+  expansionEnabled,
+  onExpansionChange,
   savedScenarios,
   onSaveScenario,
   onLoadScenario,
@@ -342,6 +348,12 @@ const ObjectLibrary = ({
                       checked={realisticMode}
                       onCheckedChange={onRealisticModeChange}
                     />
+                    <HudSwitch
+                      label="Universe expansion"
+                      hint={expansionEnabled ? 'Unbound bodies drift apart; orbits keep their size' : 'Off: space does not expand'}
+                      checked={expansionEnabled}
+                      onCheckedChange={onExpansionChange}
+                    />
                   </div>
 
                   <div className="grid gap-2 border-t border-white/[0.06] pt-4">
@@ -493,6 +505,11 @@ const ObjectLibrary = ({
                         ))}
                       </ul>
                     )}
+                  </div>
+
+                  <div className="grid gap-1.5 border-t border-white/[0.06] pt-4">
+                    <span className="hud-label">Share as a file</span>
+                    <ShareFileButtons onExport={exportSavedWork} onImport={importSavedWork} />
                   </div>
                 </div>
               )}

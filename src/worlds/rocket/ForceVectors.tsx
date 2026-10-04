@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@/stage/World';
-import { ascentForces } from '@/sim/rocket';
+import { forceBreakdown } from '@/physics/rocket';
 import { useFlightStore } from '@/stores/flightStore';
 import { useRocketStore } from '@/stores/rocketStore';
 import { applyWeatherToParams } from './weatherPresets';
+import { liveFlight } from './liveFlight';
 
 const FORCES = [
   { key: 'thrust', label: 'Thrust', color: '#ff7a3d' },
@@ -52,16 +53,13 @@ const ForceVectors = () => {
   useFrame(() => {
     const group = groupRef.current;
     if (!group || !active) return;
-    const { flight, params, activeWeather } = useRocketStore.getState();
+    const state = liveFlight.current;
+    if (!state) return;
+    const { params, activeWeather } = useRocketStore.getState();
     const effective = applyWeatherToParams(params, activeWeather);
-    const [px, py] = flight.position;
-    group.position.set(px * 2, 1.2 + py * 2 + 1.4, 0);
+    group.position.set(state.px * 2, 1.2 + state.py * 2 + 1.4, 0);
 
-    const forces = ascentForces(
-      { px, py, vx: flight.velocity[0], vy: flight.velocity[1], fuel: flight.fuel, elapsed: flight.elapsed, maxAltitude: flight.maxAltitude },
-      effective,
-      flight.phase === 'launching',
-    );
+    const forces = forceBreakdown(effective, state);
     for (const { key } of FORCES) {
       const [ax, ay] = forces[key];
       const magnitude = Math.hypot(ax, ay);

@@ -24,7 +24,11 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { liftoffTwr } from '@/sim/rocket';
+import { vehicleSummary } from '@/physics/rocket';
+import { liftoffTwr } from '@/worlds/rocket/units';
+import type { LaunchOutcome } from '@/worlds/rocket/rocketTypes';
+import ShareFileButtons from './ShareFileButtons';
+import { exportSavedWork, importSavedWork } from './sharing';
 import { useAppStore } from '@/stores/appStore';
 import { useFlightStore, type RocketStep } from '@/stores/flightStore';
 import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
@@ -44,22 +48,24 @@ import {
 import { HudSlider, HudSwitch, IconButton } from './controls';
 
 const PARAMETER_INFO: Record<keyof RocketParams, string> = {
-  launchAngle: 'Pitch at liftoff, measured from vertical. Steeper climbs out of the air faster; shallower builds the sideways speed an orbit needs.',
-  thrustForce: 'How hard the engines push. Thrust must exceed the vehicle’s weight to leave the pad.',
-  fuelMass: 'Propellant carried. More fuel burns for longer but makes the vehicle heavier at liftoff.',
-  dryMass: 'Structure and payload: the mass left when the tanks are empty.',
-  burnDuration: 'How long the engines fire. The same fuel over a shorter burn means more thrust per second.',
-  dragCoefficient: 'How much the vehicle’s shape resists moving through air.',
-  gravity: 'Surface gravity of the planet. Earth is 9.8 m/s².',
-  planetRadius: 'Size of the planet, which sets how the orbit is drawn.',
-  atmosphericDensity: 'How thick the air is. Denser air means more drag and more heating.',
-  crosswind: 'Steady sideways wind at the pad, in metres per second.',
-  windShear: 'How much the wind changes with height. Strong shear pushes the vehicle around as it climbs.',
-  thermalLoad: 'How sensitive the vehicle is to aerodynamic heating at high speed.',
-  ambientTemperature: 'Air temperature at launch. Hot air slightly reduces engine performance.',
-  atmosphericPressure: 'Surface air pressure. Engines perform a little worse in thick, high-pressure air.',
-  padTilt: 'How far the pad leans off vertical, which adds to the launch angle.',
-  stageSeparation: 'Shows the first stage separating and falling away at burnout. (This simplified model does not change the vehicle’s mass at separation.)',
+  launchAngle: 'After a short vertical climb the rocket tips over by this angle, then follows its own direction of travel (a gravity turn). More tilt builds sideways speed sooner but keeps the rocket lower in the thick air.',
+  thrustForce: 'Controls how hard the engine pushes. More thrust improves acceleration and helps fight gravity and drag.',
+  fuelMass: 'Defines how much propellant the rocket carries. More fuel extends powered flight but also makes the rocket heavier.',
+  dryMass: 'The structural mass left after fuel is gone. A heavier dry mass makes the vehicle harder to accelerate.',
+  burnDuration: 'Sets how long the engine burns. Longer burns spread thrust out over more time instead of delivering it all at once.',
+  dragCoefficient: 'Represents how much aerodynamic resistance the rocket shape creates while moving through air.',
+  gravity: 'Adjusts the planet gravity pulling the rocket downward. Higher gravity makes reaching orbit much harder.',
+  planetRadius: 'Sets the size of the planet. With the same surface gravity, a bigger planet holds on more strongly at altitude, so it needs more speed to orbit or escape.',
+  atmosphericDensity: 'Controls how thick the air is. Denser air increases drag and makes ascent less efficient.',
+  crosswind: 'Applies a sideways wind that pushes the rocket left or right during ascent.',
+  windShear: 'Adds altitude-dependent wind variation so winds can shift as the rocket climbs.',
+  thermalLoad: 'Increases heating and drag at high speed. Too much heating overloads the heat shield and the rocket burns up.',
+  ambientTemperature: 'Changes launch-day temperature, slightly affecting engine efficiency and performance.',
+  atmosphericPressure: 'Adjusts surface pressure, which changes how efficiently the engine performs near the ground.',
+  padTilt: 'Tilts the launch pad away from perfectly upright. Small tilt changes can nudge the rocket into a different trajectory.',
+  stageSeparation: 'Splits the rocket into two stages. When stage 1 runs dry its empty structure (half the dry mass) is dropped. Stage 2 coasts to the top of the climb and burns there, which is how real rockets reach orbit.',
+  stage2Thrust: 'Thrust of the upper-stage engine. It only has to push the light upper stage, so it can be much smaller than stage 1.',
+  stage2FuelShare: 'Share of the propellant carried by stage 2. A small upper stage is usually enough to turn a high climb into an orbit; a big one can reach escape.',
 };
 
 type SliderKey = Exclude<keyof RocketParams, 'stageSeparation'>;
@@ -70,7 +76,7 @@ const VEHICLE: SliderDef[] = [
   { key: 'burnDuration', label: 'Burn duration', min: 3,  max: 30,  step: 0.5, unit: ' s' },
   { key: 'fuelMass',     label: 'Fuel mass',     min: 20, max: 200, step: 5,   unit: ' kg' },
   { key: 'dryMass',      label: 'Dry mass',      min: 5,  max: 80,  step: 1,   unit: ' kg' },
-  { key: 'launchAngle',  label: 'Launch angle',  min: 0,  max: 45,  step: 1,   unit: '°' },
+  { key: 'launchAngle',  label: 'Pitch-over',    min: 0,  max: 45,  step: 1,   unit: '°' },
 ];
 const AIR: SliderDef[] = [
   { key: 'atmosphericDensity',  label: 'Air density',      min: 0,   max: 1,   step: 0.05, unit: '' },
@@ -80,6 +86,10 @@ const AIR: SliderDef[] = [
   { key: 'thermalLoad',         label: 'Heating sensitivity', min: 0, max: 1,  step: 0.05, unit: '' },
   { key: 'ambientTemperature',  label: 'Temperature',      min: -60, max: 60,  step: 1,    unit: ' °C' },
   { key: 'atmosphericPressure', label: 'Air pressure',     min: 0.6, max: 1.4, step: 0.02, unit: ' atm' },
+];
+const STAGE_TWO: SliderDef[] = [
+  { key: 'stage2Thrust',    label: 'Stage 2 thrust', min: 3, max: 40,  step: 1,    unit: ' kN' },
+  { key: 'stage2FuelShare', label: 'Stage 2 fuel',   min: 0.05, max: 0.5, step: 0.01, unit: '' },
 ];
 const LAUNCH: SliderDef[] = [
   { key: 'gravity',      label: 'Surface gravity', min: 1,  max: 25,  step: 0.5, unit: ' m/s²' },
@@ -180,6 +190,10 @@ const PresetMenu = () => {
             </ul>
           )}
         </div>
+        <div className="mt-3 border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
+          <p className="hud-label mb-2">Share as a file</p>
+          <ShareFileButtons onExport={exportSavedWork} onImport={importSavedWork} />
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -272,12 +286,73 @@ const TwrReadout = ({ params }: { params: RocketParams }) => {
   );
 };
 
+const VehicleReadout = ({ params }: { params: RocketParams }) => {
+  const summary = vehicleSummary(params);
+  return (
+    <div className="grid gap-1.5 rounded-[5px] border border-[hsl(var(--hud-line)/0.12)] bg-white/[0.015] px-3 py-2.5">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        <span className="hud-label text-[9.5px]">Δv budget</span>
+        <span className="hud-num text-right text-[12.5px] text-foreground">{summary.deltaV.toFixed(2)} u/s</span>
+        <span className="hud-label text-[9.5px]">Engine Isp</span>
+        <span className="hud-num text-right text-[12.5px] text-foreground">{summary.ispSeaLevel.toFixed(0)} s</span>
+        <span className="hud-label text-[9.5px]">Burn time</span>
+        <span className="hud-num text-right text-[12.5px] text-foreground">{summary.burnTimes.map((t) => `${t.toFixed(1)} s`).join(' + ')}</span>
+      </div>
+      <p className="text-[11.5px] leading-snug text-hud-dim">
+        Orbit needs about {summary.orbitSpeed.toFixed(2)} u/s sideways up high; escape needs {summary.escapeSpeed.toFixed(2)} u/s from the ground.
+        Gravity and drag eat into the budget on the way.
+      </p>
+    </div>
+  );
+};
+
+/* ─── Predict first ────────────────────────────────────────────────────────── */
+
+const PREDICTION_CHOICES: { id: Exclude<LaunchOutcome, 'none'>; label: string }[] = [
+  { id: 'orbiting', label: 'Orbit' },
+  { id: 'suborbital', label: 'Falls back' },
+  { id: 'escape', label: 'Escape' },
+  { id: 'crashed', label: 'Crash' },
+  { id: 'burnup', label: 'Burn-up' },
+];
+
+const PredictionPicker = ({ disabled }: { disabled: boolean }) => {
+  const prediction = useRocketStore((state) => state.prediction);
+  const setPrediction = useRocketStore((state) => state.setPrediction);
+  return (
+    <div className="grid gap-1.5">
+      <p className="hud-label text-[9.5px]">Predict first: what will happen?</p>
+      <div role="radiogroup" aria-label="Predicted outcome" className="flex flex-wrap gap-1">
+        {PREDICTION_CHOICES.map((choice) => (
+          <button
+            key={choice.id}
+            type="button"
+            role="radio"
+            aria-checked={prediction === choice.id}
+            disabled={disabled}
+            onClick={() => setPrediction(prediction === choice.id ? null : choice.id)}
+            className={cn(
+              'hud-focus h-7 rounded-[4px] border px-2 text-[12px] transition-colors disabled:opacity-40',
+              prediction === choice.id
+                ? 'border-primary/50 bg-primary/15 text-primary'
+                : 'border-[hsl(var(--hud-line)/0.14)] text-hud-dim hover:text-foreground',
+            )}
+          >
+            {choice.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 /* ─── Panel ────────────────────────────────────────────────────────────────── */
 
 /** Rocket Lab tool panel: a three-step launch setup, then Ignite. */
 const LaunchSetup = () => {
-  const params = useEffectiveRocketParams();
-  const { phase, activeWeather, setParam, toggleWeather, resetFlight } = useRocketStore(useShallow((state) => ({
+  const flown = useEffectiveRocketParams();
+  const { params, phase, activeWeather, setParam, toggleWeather, resetFlight } = useRocketStore(useShallow((state) => ({
+    params: state.params,
     phase: state.flight.phase,
     activeWeather: state.activeWeather,
     setParam: state.setParam,
@@ -307,10 +382,12 @@ const LaunchSetup = () => {
           label={def.label}
           info={PARAMETER_INFO[def.key]}
           value={params[def.key]}
+          flownValue={flown[def.key]}
           min={def.min}
           max={def.max}
           step={def.step}
           unit={def.unit}
+          format={def.key === 'stage2FuelShare' ? (v) => `${Math.round(v * 100)}%` : undefined}
           disabled={locked}
           onChange={(v) => setParam(def.key, v)}
         />
@@ -360,7 +437,7 @@ const LaunchSetup = () => {
       <div className="hud-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {step === 'vehicle' && (
           <div className="grid gap-4">
-            <TwrReadout params={params} />
+            <TwrReadout params={flown} />
             {sliders(VEHICLE)}
             <HudSwitch
               label="Stage separation"
@@ -369,6 +446,8 @@ const LaunchSetup = () => {
               disabled={locked}
               onCheckedChange={(checked) => setParam('stageSeparation', checked)}
             />
+            {params.stageSeparation && sliders(STAGE_TWO)}
+            <VehicleReadout params={flown} />
           </div>
         )}
 
@@ -438,7 +517,7 @@ const LaunchSetup = () => {
 
         {step === 'launch' && (
           <div className="grid gap-4">
-            <SetupCoach params={params} />
+            <SetupCoach params={flown} />
             <ScenarioPicker disabled={locked} />
             {sliders(LAUNCH)}
             <div className="grid grid-cols-3 gap-2 rounded-[5px] border border-[hsl(var(--hud-line)/0.12)] bg-white/[0.015] p-3">
@@ -450,6 +529,11 @@ const LaunchSetup = () => {
         )}
       </div>
 
+      {phase === 'idle' && countdown === null && (
+        <div className="shrink-0 border-t border-[hsl(var(--hud-line)/0.1)] px-3 pt-2.5">
+          <PredictionPicker disabled={locked} />
+        </div>
+      )}
       <div className="flex shrink-0 gap-2 border-t border-[hsl(var(--hud-line)/0.1)] p-3">
         {!locked && stepIndex < STEPS.length - 1 && (
           <button

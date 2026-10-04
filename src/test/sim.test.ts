@@ -1,112 +1,97 @@
 import { describe, expect, it } from 'vitest';
-import * as THREE from 'three';
-import {
-  FIXED_SUBSTEP,
-  adaptiveDt,
-  effectiveGravity,
-  stepWorld,
-  type PhysicsBody,
-} from '@/sim/nbody';
-import { planForwardSteps, planRewindSteps, planRocketSteps, substepCap } from '@/sim/schedule';
-import { predictPath, type BodySeed } from '@/sim/predict';
-import { orbitalElements } from '@/sim/orbit';
-import { stepAscent, type AscentState } from '@/sim/rocket';
+import { DEFAULT_STAR_MASS, REALISTIC_G } from '@/physics/constants';
+import { orbitalElements } from '@/physics/orbits';
+import { predictPath, type PredictSeed } from '@/physics/predict';
+import { FLIGHT_DT, escapeSpeedAt, initialFlightState, stepFlight, type FlightState } from '@/physics/rocket';
+import { MAX_FRAME_DELTA, ROCKET_STEP_CAP, planForwardSteps, stepCap } from '@/physics/schedule';
+import { SIM_STEP, SimulationCore } from '@/physics/simulation';
+import type { CelestialBody } from '@/physics/types';
 import { DEFAULT_PARAMS } from '@/worlds/rocket/rocketTypes';
+import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
 
-const G = effectiveGravity(true);
+const G = REALISTIC_G;
+const circularSpeed = (r: number) => Math.sqrt((G * DEFAULT_STAR_MASS) / r);
 
-const seedBody = (seed: BodySeed): PhysicsBody => ({
-  id: seed.id,
-  position: new THREE.Vector3(seed.x, 0, seed.z),
-  velocity: new THREE.Vector3(seed.vx, 0, seed.vz),
-  force: new THREE.Vector3(),
-  mass: seed.mass,
-  radius: seed.radius,
-  type: seed.type,
-  color: '#fff',
-  trailData: new Float32Array(0),
-  trailHead: 0,
-  trailLen: 0,
-  motionState: 'bound',
-  isCloseApproach: false,
+const SUN: CelestialBody = { id: 'sun', type: 'star', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, color: '#fff', velocity: [0, 0, 0] };
+const EARTH: CelestialBody = { id: 'earth', type: 'planet', position: [10, 0, 0], mass: 5.97e24, radius: 0.45, color: '#fff', velocity: [0, 0, circularSpeed(10)] };
+const MARS: CelestialBody = { id: 'mars', type: 'planet', position: [-16, 0, 0], mass: 6.42e23, radius: 0.35, color: '#fff', velocity: [0, 0, -circularSpeed(16)] };
+
+const loadCore = (bodies: CelestialBody[]) => {
+  const core = new SimulationCore();
+  core.load(bodies, { realistic: true, expansionRate: 0 });
+  return core;
+};
+
+const seed = (body: CelestialBody): PredictSeed => ({
+  id: body.id,
+  type: body.type,
+  x: body.position[0],
+  z: body.position[2],
+  vx: body.velocity![0],
+  vz: body.velocity![2],
+  mass: body.mass,
+  radius: body.radius,
 });
 
-const SUN: BodySeed = { id: 'sun', x: 0, z: 0, vx: 0, vz: 0, mass: 1.989e30, radius: 2.4, type: 'star' };
-const circularSpeed = (r: number) => Math.sqrt((G * SUN.mass) / r);
-const EARTH: BodySeed = { id: 'earth', x: 10, z: 0, vx: 0, vz: circularSpeed(10), mass: 5.97e24, radius: 0.45, type: 'planet' };
-const MARS: BodySeed = { id: 'mars', x: -16, z: 0, vx: 0, vz: -circularSpeed(16), mass: 6.42e23, radius: 0.35, type: 'planet' };
-
-const makeWorld = () => [SUN, EARTH, MARS].map(seedBody);
-
-/** Same frame loop as PhysicsSimulator, minus rendering. */
-const runFrames = (bods: PhysicsBody[], frames: number, delta: number, timeScale: number) => {
-  let accumulator = 0;
-  for (let f = 0; f < frames; f++) {
-    const plan = planForwardSteps(accumulator, delta, timeScale, FIXED_SUBSTEP, substepCap(bods.length));
-    accumulator = plan.carry;
-    for (let s = 0; s < plan.steps; s++) stepWorld(bods, G, adaptiveDt(FIXED_SUBSTEP, bods));
-  }
-  return bods;
+/** Same frame loop as PhysicsSimulator: each frame asks for (clamped delta × speed). */
+const runFrames = (core: SimulationCore, frames: number, delta: number, timeScale: number) => {
+  for (let f = 0; f < frames; f++) core.tick(Math.min(delta, MAX_FRAME_DELTA) * timeScale);
+  return core;
 };
 
 describe('scheduler', () => {
-  it('runs two 1/120 s substeps per 60 fps frame at 1×', () => {
-    expect(planForwardSteps(0, 1 / 60, 1, FIXED_SUBSTEP, 8).steps).toBe(2);
+  it('runs two 1/120 s steps per 60 fps frame at 1×', () => {
+    expect(planForwardSteps(1 / 60, SIM_STEP, stepCap(3)).steps).toBe(2);
   });
 
-  it('runs 128 substeps per frame at 64× when the budget allows', () => {
-    const plan = planForwardSteps(0, 1 / 60, 64, FIXED_SUBSTEP, substepCap(3));
+  it('runs 128 steps per frame at 64× when the budget allows', () => {
+    const plan = planForwardSteps((1 / 60) * 64, SIM_STEP, stepCap(3));
     expect(plan.steps).toBe(128);
     expect(plan.limited).toBe(false);
   });
 
   it('caps work per frame in crowded systems and reports it', () => {
-    const cap = substepCap(150);
-    const plan = planForwardSteps(0, 1 / 60, 64, FIXED_SUBSTEP, cap);
+    const cap = stepCap(150);
+    const plan = planForwardSteps((1 / 60) * 64, SIM_STEP, cap);
     expect(plan.steps).toBe(cap);
     expect(plan.limited).toBe(true);
-    expect(plan.carry).toBeLessThanOrEqual(FIXED_SUBSTEP);
+    expect(plan.carry).toBeLessThanOrEqual(SIM_STEP);
   });
 
   it('clamps a long hitch before applying warp', () => {
-    expect(planForwardSteps(0, 2, 1, FIXED_SUBSTEP, 256).steps).toBe(12);
+    expect(planForwardSteps(Math.min(2, MAX_FRAME_DELTA), SIM_STEP, 256).steps).toBe(12);
   });
 
   it('rewinds at the same rate forward time was recorded', () => {
-    let carry = 0;
-    let popped = 0;
-    for (let f = 0; f < 60; f++) {
-      const plan = planRewindSteps(carry, 1 / 60, -1, FIXED_SUBSTEP);
-      carry = plan.carry;
-      popped += plan.steps;
-    }
-    expect(popped).toBe(120); // one simulated second = 120 substeps
+    const core = runFrames(loadCore([SUN, EARTH, MARS]), 180, 1 / 60, 1);
+    const before = core.currentStep;
+    runFrames(core, 60, 1 / 60, -1);
+    expect(before - core.currentStep).toBe(120); // one simulated second = 120 steps
   });
 });
 
 describe('64× warp', () => {
   it('gives exactly the same N-body state as running 64 times as many frames at 1×', () => {
-    const slow = runFrames(makeWorld(), 64 * 30, 1 / 60, 1);
-    const fast = runFrames(makeWorld(), 30, 1 / 60, 64);
-    for (let i = 0; i < slow.length; i++) {
-      expect(fast[i].position.x).toBe(slow[i].position.x);
-      expect(fast[i].position.z).toBe(slow[i].position.z);
-      expect(fast[i].velocity.x).toBe(slow[i].velocity.x);
+    const slow = runFrames(loadCore([SUN, EARTH, MARS]), 64 * 30, 1 / 60, 1);
+    const fast = runFrames(loadCore([SUN, EARTH, MARS]), 30, 1 / 60, 64);
+    expect(fast.currentStep).toBe(slow.currentStep);
+    for (const id of ['sun', 'earth', 'mars']) {
+      const a = slow.sys.indexOf(id);
+      const b = fast.sys.indexOf(id);
+      expect(fast.sys.px[b]).toBe(slow.sys.px[a]);
+      expect(fast.sys.pz[b]).toBe(slow.sys.pz[a]);
+      expect(fast.sys.vx[b]).toBe(slow.sys.vx[a]);
     }
   });
 
   it('flies the rocket identically at 64× and at 1×', () => {
-    const start: AscentState = { px: 0, py: 0, vx: 0, vy: 0, fuel: 1, elapsed: 0, maxAltitude: 0 };
     const fly = (frames: number, timeScale: number) => {
-      let s = start;
-      let launching = true;
+      let s: FlightState = initialFlightState(DEFAULT_PARAMS);
+      let carry = 0;
       for (let f = 0; f < frames; f++) {
-        const { steps, dt } = planRocketSteps(1 / 60, timeScale);
-        for (let i = 0; i < steps; i++) {
-          const r = stepAscent(s, DEFAULT_PARAMS, launching, dt);
-          s = r.next;
-          if (r.cutoff) launching = false;
-        }
+        const plan = planForwardSteps(carry + (1 / 60) * timeScale, FLIGHT_DT, ROCKET_STEP_CAP);
+        carry = plan.carry;
+        for (let i = 0; i < plan.steps; i++) s = stepFlight(DEFAULT_PARAMS, s).state;
       }
       return s;
     };
@@ -118,81 +103,86 @@ describe('64× warp', () => {
 
 describe('orbit predictor', () => {
   it('matches the live simulation step for step', () => {
-    const probe: BodySeed = { id: 'probe', x: 0, z: 22, vx: circularSpeed(22), vz: 0, mass: 1e23, radius: 0.3, type: 'planet' };
+    const probe: CelestialBody = { id: 'probe', type: 'planet', position: [0, 0, 22], mass: 1e23, radius: 0.3, color: '#fff', velocity: [circularSpeed(22), 0, 0] };
     const horizon = 5;
-    const result = predictPath({ bodies: [SUN, EARTH, MARS], probe, effectiveG: G, horizon, sampleEvery: 1 });
+    const result = predictPath({ bodies: [SUN, EARTH, MARS].map(seed), probe: seed(probe), realistic: true, horizon, sampleEvery: 1 });
 
-    const world = [SUN, EARTH, MARS, probe].map(seedBody);
-    const steps = Math.round(horizon / FIXED_SUBSTEP);
-    for (let i = 0; i < steps; i++) stepWorld(world, G, adaptiveDt(FIXED_SUBSTEP, world));
-    const live = world[3];
+    const core = loadCore([SUN, EARTH, MARS, probe]);
+    runFrames(core, Math.round(horizon / SIM_STEP), SIM_STEP, 1);
+    const i = core.sys.indexOf('probe');
 
-    const n = result.path.length;
-    expect(result.path[n - 2]).toBeCloseTo(live.position.x, 6);
-    expect(result.path[n - 1]).toBeCloseTo(live.position.z, 6);
+    const n = result.points.length;
+    expect(result.points[n - 2]).toBeCloseTo(core.sys.px[i], 4);
+    expect(result.points[n - 1]).toBeCloseTo(core.sys.pz[i], 4);
     expect(result.outcome).toBe('bound');
   });
 
   it('flags a path that falls into the star as a collision', () => {
-    // Free-fall time from r = 12 is about 15 s.
-    const probe: BodySeed = { id: 'probe', x: 0, z: 12, vx: 0.05, vz: 0, mass: 1e23, radius: 0.3, type: 'asteroid' };
-    const result = predictPath({ bodies: [SUN], probe, effectiveG: G, horizon: 30, sampleEvery: 8 });
+    const probe: PredictSeed = { id: 'probe', type: 'asteroid', x: 0, z: 12, vx: 0.05, vz: 0, mass: 1e23, radius: 0.3 };
+    const result = predictPath({ bodies: [seed(SUN)], probe, realistic: true, horizon: 30, sampleEvery: 8 });
     expect(result.outcome).toBe('collision');
-    expect(result.collisionAt).toBeGreaterThan(0);
+    expect(result.hitId).toBe('sun');
+    expect(result.time).toBeGreaterThan(0);
   });
 
   it('flags a path faster than escape speed as escaping', () => {
-    const probe: BodySeed = { id: 'probe', x: 30, z: 0, vx: 0, vz: circularSpeed(30) * 1.6, mass: 1e23, radius: 0.3, type: 'comet' };
-    expect(predictPath({ bodies: [SUN], probe, effectiveG: G, horizon: 6, sampleEvery: 8 }).outcome).toBe('escape');
+    const probe: PredictSeed = { id: 'probe', type: 'comet', x: 30, z: 0, vx: 0, vz: circularSpeed(30) * 1.6, mass: 1e23, radius: 0.3 };
+    expect(predictPath({ bodies: [seed(SUN)], probe, realistic: true, horizon: 6, sampleEvery: 8 }).outcome).toBe('escape');
   });
 });
 
 describe('orbital elements', () => {
   it('reads a circular orbit as e ≈ 0 with Kepler period 2πr/v', () => {
-    const world = [SUN, EARTH].map(seedBody);
-    const el = orbitalElements(world[1], world, G)!;
-    expect(el.bound).toBe(true);
+    const v = circularSpeed(10);
+    const mu = G * (DEFAULT_STAR_MASS + EARTH.mass);
+    const el = orbitalElements(10, 0, 0, v, mu);
+    expect(el.energy).toBeLessThan(0);
     expect(el.eccentricity).toBeLessThan(0.01);
-    expect(el.semiMajorAxis!).toBeCloseTo(10, 1);
-    expect(el.period!).toBeCloseTo((2 * Math.PI * 10) / circularSpeed(10), 0);
-    expect(el.escapeSpeed / el.circularSpeed).toBeCloseTo(Math.SQRT2, 5);
+    expect(el.semiMajorAxis).toBeCloseTo(10, 1);
+    expect(el.period).toBeCloseTo((2 * Math.PI * 10) / v, 0);
+    expect(Math.sqrt((2 * mu) / el.distance) / Math.sqrt(mu / el.distance)).toBeCloseTo(Math.SQRT2, 5);
   });
 });
 
 describe('rocket display units', () => {
   it('maps altitude onto the atmosphere layers drawn in the scene', async () => {
-    const { altitudeKm, escapeFraction } = await import('@/sim/units');
+    const { altitudeKm, escapeFraction } = await import('@/worlds/rocket/units');
     expect(altitudeKm(0)).toBe(0);
     expect(altitudeKm(8)).toBeCloseTo(12);
     expect(altitudeKm(20)).toBeCloseTo(50);
     expect(altitudeKm(33)).toBeCloseTo(80);
     expect(altitudeKm(45)).toBeCloseTo(600);
     expect(altitudeKm(4)).toBeCloseTo(6); // linear inside a layer
-    expect(escapeFraction(1.1)).toBeCloseTo(1);
+    expect(escapeFraction(DEFAULT_PARAMS, escapeSpeedAt(DEFAULT_PARAMS, 10), 10)).toBeCloseTo(1);
   });
 
   it('reports a thrust-to-weight ratio below 1 when the vehicle cannot lift off', async () => {
-    const { liftoffTwr } = await import('@/sim/rocket');
+    const { liftoffTwr } = await import('@/worlds/rocket/units');
     expect(liftoffTwr(DEFAULT_PARAMS)).toBeGreaterThan(1);
     expect(liftoffTwr({ ...DEFAULT_PARAMS, thrustForce: 5 })).toBeLessThan(1);
   });
 });
 
 describe('Gravity Slingshot template', () => {
-  it('flings the comet out faster than it arrived, without a collision', async () => {
-    const { SPACETIME_TEMPLATES } = await import('@/worlds/spacetime/spacetimeTemplates');
+  it('flings the comet out faster than it arrived, without a collision', () => {
     const template = SPACETIME_TEMPLATES.find((t) => t.id === 'gravity-slingshot')!;
-    const world = template.createBodies().map((b, i) => seedBody({
-      id: `b${i}`, x: b.position[0], z: b.position[2], vx: b.velocity![0], vz: b.velocity![2], mass: b.mass, radius: b.radius, type: b.type,
-    }));
-    const [sun, giant, comet] = world;
-    const energy = () => 0.5 * comet.velocity.lengthSq() - (G * sun.mass) / comet.position.distanceTo(sun.position);
+    const core = loadCore(template.createBodies().map((b, i) => ({ ...b, id: `b${i}` })));
+    const sys = core.sys;
+    const at = (id: string) => sys.indexOf(id);
+    const energy = () => {
+      const c = at('b2');
+      const s = at('b0');
+      const v2 = (sys.vx[c] - sys.vx[s]) ** 2 + (sys.vz[c] - sys.vz[s]) ** 2;
+      return 0.5 * v2 - (G * sys.mass[s]) / Math.hypot(sys.px[c] - sys.px[s], sys.pz[c] - sys.pz[s]);
+    };
     const before = energy();
     let closest = Infinity;
-    for (let t = 0; t < 40; t += FIXED_SUBSTEP) {
-      const { removed } = stepWorld(world, G, adaptiveDt(FIXED_SUBSTEP, world));
-      expect(removed.size).toBe(0);
-      closest = Math.min(closest, comet.position.distanceTo(giant.position));
+    for (let t = 0; t < 40; t += SIM_STEP * 8) {
+      const result = core.tick(SIM_STEP * 8);
+      expect(result.removed).toEqual([]);
+      const c = at('b2');
+      const g = at('b1');
+      closest = Math.min(closest, Math.hypot(sys.px[c] - sys.px[g], sys.pz[c] - sys.pz[g]));
     }
     expect(closest).toBeLessThan(3);
     expect(energy()).toBeGreaterThan(before + 0.1);

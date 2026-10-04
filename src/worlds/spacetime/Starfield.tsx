@@ -1,5 +1,6 @@
 import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useReducedMotion } from '@/motion/useReducedMotion';
 import * as THREE from 'three';
 import { NOISE_GLSL } from '@/stage/materials';
 
@@ -145,7 +146,10 @@ const Starfield = ({ count = 4200, innerRadius = 90, depth = 160, nebula = true 
     nebulaMaterial.dispose();
   }, [geometry, material, nebulaMaterial]);
 
+  // Reduced motion: the sky holds still (no twinkle, no drift).
+  const still = useReducedMotion();
   useFrame((state) => {
+    if (still) return;
     const t = state.clock.elapsedTime;
     material.uniforms.uTime.value = t;
     nebulaMaterial.uniforms.uTime.value = t;

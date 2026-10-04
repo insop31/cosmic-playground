@@ -2,7 +2,8 @@ import { Settings2 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useAppStore, useQualityTier, type QualitySetting } from '@/stores/appStore';
-import { IconButton, Kbd } from './controls';
+import { systemPrefersReducedMotion } from '@/motion/preference';
+import { HudSwitch, IconButton, Kbd } from './controls';
 import { SHORTCUTS } from './shortcuts';
 
 const QUALITY_OPTIONS: { value: QualitySetting; label: string }[] = [
@@ -10,6 +11,12 @@ const QUALITY_OPTIONS: { value: QualitySetting; label: string }[] = [
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
+];
+
+const MOTION_OPTIONS: { value: 'system' | 'reduce' | 'full'; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'reduce', label: 'Reduced' },
+  { value: 'full', label: 'Full' },
 ];
 
 const QUALITY_NOTE: Record<Exclude<QualitySetting, 'auto'>, string> = {
@@ -23,6 +30,11 @@ const SettingsMenu = () => {
   const quality = useAppStore((state) => state.quality);
   const setQuality = useAppStore((state) => state.setQuality);
   const replayIntro = useAppStore((state) => state.replayIntro);
+  const reduceMotion = useAppStore((state) => state.reduceMotion);
+  const setReduceMotion = useAppStore((state) => state.setReduceMotion);
+  const highContrast = useAppStore((state) => state.highContrast);
+  const setHighContrast = useAppStore((state) => state.setHighContrast);
+  const motion = reduceMotion === null ? 'system' : reduceMotion ? 'reduce' : 'full';
   const tier = useQualityTier();
 
   return (
@@ -59,9 +71,33 @@ const SettingsMenu = () => {
 
         <section className="mt-3 grid gap-2 border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
           <p className="hud-label">Motion</p>
+          <div role="radiogroup" aria-label="Motion" className="grid grid-cols-3 gap-0.5 rounded-[5px] bg-white/[0.03] p-[3px]">
+            {MOTION_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={motion === option.value}
+                onClick={() => setReduceMotion(option.value === 'system' ? null : option.value === 'reduce')}
+                className={cn(
+                  'hud-focus h-7 rounded-[4px] text-[12px] transition-colors',
+                  motion === option.value ? 'bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]' : 'text-hud-dim hover:text-foreground',
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <p className="text-[11.5px] leading-snug text-hud-dim">
-            Camera flights and interface animations follow your system’s “reduce motion” setting.
+            Reduced turns camera flights into cuts, stops camera shake and skips interface animations.
+            {motion === 'system' && ` Your system currently asks for ${systemPrefersReducedMotion() ? 'reduced' : 'full'} motion.`}
           </p>
+          <HudSwitch
+            label="High contrast"
+            hint="Solid panels and brighter secondary text"
+            checked={highContrast}
+            onCheckedChange={setHighContrast}
+          />
           <button
             type="button"
             onClick={replayIntro}

@@ -252,61 +252,66 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 1ms !important;
-  }
-}
-
-/* Small press feedback for icon buttons (replaces per-button animation code). */
-.press {
-  transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.press:hover { transform: scale(1.06); }
-.press:active { transform: scale(0.94); }
-
-/* Visible keyboard focus everywhere. */
-:focus-visible {
-  outline: 2px solid hsl(var(--primary));
-  outline-offset: 2px;
-}
-
-/* Reduced motion: follows the system setting, or the in-app toggle (html.reduce-motion). */
+/*
+ * Reduced motion follows the system setting unless the user overrides it in
+ * Help and settings: html.reduce-motion forces it on, html.allow-motion off.
+ */
 @media (prefers-reduced-motion: reduce) {
   html:not(.allow-motion) *,
   html:not(.allow-motion) *::before,
   html:not(.allow-motion) *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
 }
 html.reduce-motion *,
 html.reduce-motion *::before,
 html.reduce-motion *::after {
-  animation-duration: 0.01ms !important;
+  animation-duration: 1ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition-duration: 1ms !important;
   scroll-behavior: auto !important;
 }
 
-/* High contrast: solid panels and full-strength secondary text. */
+/* High contrast: near-solid panels, brighter secondary text and hairlines. */
 html.high-contrast {
-  --muted-foreground: 215 30% 88%;
-  --border: 215 30% 55%;
+  --hud-surface-alpha: 0.97;
+  --hud-line-alpha: 0.4;
+  --hud-dim: 215 30% 86%;
+  --hud-faint: 215 22% 76%;
+  --muted-foreground: 215 30% 86%;
+  --border: 216 40% 55%;
 }
-html.high-contrast .glass-panel,
-html.high-contrast .glass-panel-strong {
-  background: hsl(240 35% 7% / 0.94);
-  border-color: hsl(215 30% 70% / 0.6);
+html.high-contrast .hud-panel,
+html.high-contrast .scene-label {
   backdrop-filter: none;
 }
-html.high-contrast [class*="text-muted-foreground"] {
-  color: hsl(var(--muted-foreground)) !important;
+
+/* Scrubber for the Spacetime history track: the track is drawn by the HUD, only the thumb shows. */
+.history-scrub {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
 }
-html.high-contrast [class*="text-foreground/"] {
-  color: hsl(var(--foreground)) !important;
+.history-scrub::-webkit-slider-runnable-track { background: transparent; }
+.history-scrub::-moz-range-track { background: transparent; }
+.history-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--hud-surface)), 0 0 8px hsl(var(--primary) / 0.7);
 }
+.history-scrub::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+}
+.history-scrub:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; border-radius: 4px; }

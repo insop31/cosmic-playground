@@ -8,7 +8,8 @@ import { useRocketStore } from '@/stores/rocketStore';
 import { useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
 import type { RocketState } from '@/worlds/rocket/rocketTypes';
-import { altitudeKm } from '@/sim/units';
+import { altitudeKm } from '@/worlds/rocket/units';
+import { useUniverseScale } from '@/worlds/spacetime/useUniverseScale';
 import { IconButton, Kbd, Readout } from './controls';
 import SettingsMenu from './SettingsMenu';
 import { LAB_META } from './labs';
@@ -65,7 +66,7 @@ const formatSpeed = (timeScale: number, isPlaying: boolean) => {
 
 const SpacetimeTelemetry = () => {
   const bodies = useSpacetimeStore((state) => state.bodies.length);
-  const universeScale = useSpacetimeStore((state) => state.universeScale);
+  const universeScale = useUniverseScale();
   const { timeScale, isPlaying } = useTimeStore(useShallow((state) => ({ timeScale: state.timeScale, isPlaying: state.isPlaying })));
 
   return (

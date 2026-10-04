@@ -19,6 +19,7 @@ const SpacetimeDrawer = () => {
     pendingPlacement: state.pendingPlacement,
     placementVelocityScale: state.placementVelocityScale,
     realisticMode: state.realisticMode,
+    expansionEnabled: state.expansionEnabled,
     savedScenarios: state.savedScenarios,
     beginPlacement: state.beginPlacement,
     applyTemplate: state.applyTemplate,
@@ -28,6 +29,7 @@ const SpacetimeDrawer = () => {
     removeAll: state.removeAll,
     setVelocityScale: state.setVelocityScale,
     setRealisticMode: state.setRealisticMode,
+    setExpansionEnabled: state.setExpansionEnabled,
     saveScenario: state.saveScenario,
     loadScenario: state.loadScenario,
     deleteScenario: state.deleteScenario,
@@ -52,6 +54,8 @@ const SpacetimeDrawer = () => {
       onVelocityScaleChange={store.setVelocityScale}
       realisticMode={store.realisticMode}
       onRealisticModeChange={store.setRealisticMode}
+      expansionEnabled={store.expansionEnabled}
+      onExpansionChange={store.setExpansionEnabled}
       savedScenarios={store.savedScenarios}
       onSaveScenario={store.saveScenario}
       onLoadScenario={store.loadScenario}

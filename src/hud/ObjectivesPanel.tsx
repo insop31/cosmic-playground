@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef } from 'react';
-import { CheckCircle2, ChevronUp, Circle, Target } from 'lucide-react';
+import { BookOpen, CheckCircle2, ChevronUp, Circle, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
@@ -12,6 +12,9 @@ import {
   type MissionCard,
 } from '@/stores/progressStore';
 import { HudSelect, IconButton } from './controls';
+import { useRocketStore } from '@/stores/rocketStore';
+import { useSpacetimeStore } from '@/stores/spacetimeStore';
+import type { ChallengePack } from '@/lib/challengePacks';
 import { LAB_META } from './labs';
 
 const ProgressRing = ({ value, total, size = 36 }: { value: number; total: number; size?: number }) => {
@@ -80,6 +83,30 @@ const ObjectiveItem = ({ card }: { card: MissionCard }) => {
         <p className="text-[12px] leading-snug text-hud-dim">{mission.description}</p>
       </div>
     </li>
+  );
+};
+
+/** A teacher pack's notes and the button that sets up its lesson. */
+const TeacherNotes = ({ pack }: { pack: ChallengePack }) => {
+  const flying = useRocketStore((state) => state.flight.phase === 'launching' || state.flight.phase === 'coasting');
+  const guide = pack.teacher!;
+  const load = () => {
+    if (guide.templateId) useSpacetimeStore.getState().applyTemplate(guide.templateId);
+    if (guide.rocketSettings) useRocketStore.getState().applyLessonSettings(guide.rocketSettings);
+  };
+  return (
+    <div aria-label="Teacher notes" className="grid gap-2 rounded-[5px] border border-[hsl(var(--violet)/0.35)] bg-[hsl(var(--violet)/0.06)] p-2.5">
+      <p className="hud-label flex items-center gap-1.5 text-[9.5px] text-[hsl(var(--violet))]"><BookOpen size={12} /> Teacher notes</p>
+      <p className="text-[12px] leading-snug text-foreground/90">{guide.notes}</p>
+      <button
+        type="button"
+        onClick={load}
+        disabled={pack.mode === 'rocket' && flying}
+        className="hud-focus justify-self-start rounded-[4px] border border-[hsl(var(--violet)/0.45)] px-2.5 py-1 text-[12px] text-[hsl(var(--violet))] transition-colors hover:bg-[hsl(var(--violet)/0.12)] disabled:opacity-40"
+      >
+        Load lesson setup
+      </button>
+    </div>
   );
 };
 
@@ -153,9 +180,10 @@ const ObjectivesPanel = () => {
             value={activePack.id}
             onChange={(packId) => setActivePack(mode, packId)}
             className="w-full"
-            options={PACKS_BY_MODE[mode].map((pack) => ({ value: pack.id, label: pack.name, hint: `${pack.missions.length}` }))}
+            options={PACKS_BY_MODE[mode].map((pack) => ({ value: pack.id, label: pack.name, hint: pack.teacher ? 'Teacher' : `${pack.missions.length}` }))}
           />
           <p className="text-[12px] leading-snug text-hud-dim">{activePack.description}</p>
+          {activePack.teacher && <TeacherNotes pack={activePack} />}
           <p className="hud-num text-[11px] text-hud-faint">
             {mode === 'spacetime' ? 'Experiments run' : 'Flight tests'}: <span className="text-foreground/80">{experimentCount}</span>
           </p>

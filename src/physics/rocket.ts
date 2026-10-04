@@ -423,8 +423,8 @@ const logEvent = (s: FlightState, events: FlightEventRecord[], kind: FlightEvent
   events.push(record);
 };
 
-/** Accelerations (ax, ay) at a state; also returns q and the heating rate. */
-const forces = (params: RocketParams, s: FlightState, thrustAcc: number, coastOnly: boolean) => {
+/** Unit vectors at the rocket: local up, downrange tangent, and the rocket's axis. */
+const frame = (params: RocketParams, s: FlightState) => {
   const rx = s.px;
   const ry = s.py + params.planetRadius;
   const r = Math.max(Math.hypot(rx, ry), 1e-6);
@@ -432,42 +432,97 @@ const forces = (params: RocketParams, s: FlightState, thrustAcc: number, coastOn
   const upY = ry / r;
   const downX = upY;          // downrange tangent: up rotated clockwise
   const downY = -upX;
-  const mu = gravitationalParameter(params);
-  let ax = -(mu / (r * r)) * upX;
-  let ay = -(mu / (r * r)) * upY;
-
-  // Thrust along the rocket's axis.
   const bx = Math.cos(s.attitude) * upX + Math.sin(s.attitude) * downX;
   const by = Math.cos(s.attitude) * upY + Math.sin(s.attitude) * downY;
-  ax += bx * thrustAcc;
-  ay += by * thrustAcc;
+  return { r, upX, upY, downX, downY, bx, by };
+};
 
-  if (coastOnly) return { ax, ay, q: 0, heating: 0 };
-
-  // Drag relative to the moving air, nose-on and side-on.
-  const altitude = r - params.planetRadius;
-  const rho = airDensity(params, altitude);
+/** Speed of the wind at the rocket (along the downrange tangent). */
+const windSpeedAt = (params: RocketParams, s: FlightState, altitude: number) => {
+  if (!s.liftedOff) return 0;
   const shear = Math.sin(s.elapsed * 0.9 + altitude * 0.35) * params.windShear;
-  const wind = s.liftedOff ? params.crosswind * WIND_SCALE * (1 + shear) * Math.exp(-Math.max(altitude, 0) / WIND_SCALE_HEIGHT) : 0;
-  const relX = s.vx - wind * downX;
-  const relY = s.vy - wind * downY;
+  return params.crosswind * WIND_SCALE * (1 + shear) * Math.exp(-Math.max(altitude, 0) / WIND_SCALE_HEIGHT);
+};
+
+/** Drag relative to air moving at `wind` along the tangent, nose-on and side-on. */
+const aeroAcceleration = (params: RocketParams, s: FlightState, f: ReturnType<typeof frame>, rho: number, wind: number) => {
+  const relX = s.vx - wind * f.downX;
+  const relY = s.vy - wind * f.downY;
   const relSpeed = Math.hypot(relX, relY);
   const mass = vehicleMass(params, s);
-  const axial = relX * bx + relY * by;
-  const sideX = relX - axial * bx;
-  const sideY = relY - axial * by;
+  const axial = relX * f.bx + relY * f.by;
+  const sideX = relX - axial * f.bx;
+  const sideY = relY - axial * f.by;
   const sideSpeed = Math.hypot(sideX, sideY);
   const thermalPenalty = 1 + params.thermalLoad * Math.max(0, relSpeed - 0.3) * rho * 1.8;
   const axialDrag = (0.5 * rho * Math.abs(axial) * params.dragCoefficient * FRONTAL_AREA * thermalPenalty) / mass;
   const sideDrag = (0.5 * rho * sideSpeed * SIDE_DRAG_COEFFICIENT * SIDE_AREA) / mass;
-  ax -= axialDrag * axial * bx + sideDrag * sideX;
-  ay -= axialDrag * axial * by + sideDrag * sideY;
+  return {
+    ax: -(axialDrag * axial * f.bx + sideDrag * sideX),
+    ay: -(axialDrag * axial * f.by + sideDrag * sideY),
+    relSpeed,
+  };
+};
+
+/** Accelerations (ax, ay) at a state; also returns q and the heating rate. */
+const forces = (params: RocketParams, s: FlightState, thrustAcc: number, coastOnly: boolean) => {
+  const f = frame(params, s);
+  const mu = gravitationalParameter(params);
+  let ax = -(mu / (f.r * f.r)) * f.upX + f.bx * thrustAcc;
+  let ay = -(mu / (f.r * f.r)) * f.upY + f.by * thrustAcc;
+
+  if (coastOnly) return { ax, ay, q: 0, heating: 0 };
+
+  const altitude = f.r - params.planetRadius;
+  const rho = airDensity(params, altitude);
+  const aero = aeroAcceleration(params, s, f, rho, windSpeedAt(params, s, altitude));
+  ax += aero.ax;
+  ay += aero.ay;
 
   return {
     ax,
     ay,
-    q: 0.5 * rho * relSpeed * relSpeed,
-    heating: HEATING_COEFFICIENT * Math.sqrt(rho) * relSpeed ** 3 * (1 + 2 * params.thermalLoad),
+    q: 0.5 * rho * aero.relSpeed * aero.relSpeed,
+    heating: HEATING_COEFFICIENT * Math.sqrt(rho) * aero.relSpeed ** 3 * (1 + 2 * params.thermalLoad),
+  };
+};
+
+/** Thrust acceleration the engines give in this state (0 when none is burning). */
+export const thrustAccelerationNow = (params: RocketParams, s: FlightState) => {
+  if (s.engineOut) return 0;
+  if (s.stage === 1 && s.fuel1 > 0) {
+    return (params.thrustForce * THRUST_SCALE * thrustFactorAt(params, altitudeOf(params, s)) * s.engineFactor) / vehicleMass(params, s);
+  }
+  if (s.stage === 2 && s.stage2Lit && s.fuel2 > 0) {
+    return (params.stage2Thrust * THRUST_SCALE * VACUUM_THRUST_FACTOR * temperatureFactor(params) * s.engineFactor) / vehicleMass(params, s);
+  }
+  return 0;
+};
+
+export interface ForceBreakdown {
+  /** Accelerations in world space (scene units/s²). */
+  gravity: [number, number];
+  thrust: [number, number];
+  /** Air resistance in still air. */
+  drag: [number, number];
+  /** The extra push of the moving air (drag with wind minus drag without). */
+  wind: [number, number];
+}
+
+/** The forces on the vehicle right now, split up for drawing them as arrows. */
+export const forceBreakdown = (params: RocketParams, s: FlightState): ForceBreakdown => {
+  const f = frame(params, s);
+  const mu = gravitationalParameter(params);
+  const thrustAcc = thrustAccelerationNow(params, s);
+  const altitude = f.r - params.planetRadius;
+  const rho = airDensity(params, altitude);
+  const still = aeroAcceleration(params, s, f, rho, 0);
+  const windy = aeroAcceleration(params, s, f, rho, windSpeedAt(params, s, altitude));
+  return {
+    gravity: [-(mu / (f.r * f.r)) * f.upX, -(mu / (f.r * f.r)) * f.upY],
+    thrust: [f.bx * thrustAcc, f.by * thrustAcc],
+    drag: [still.ax, still.ay],
+    wind: [windy.ax - still.ax, windy.ay - still.ay],
   };
 };
 
@@ -518,7 +573,7 @@ export const stepFlight = (
   if (!coastOnly && !s.engineOut) {
     if (s.stage === 1 && s.fuel1 > 0) {
       const flow = stageOneFlow(params);
-      thrustAcc = (params.thrustForce * THRUST_SCALE * thrustFactorAt(params, altitude0) * s.engineFactor) / vehicleMass(params, s);
+      thrustAcc = thrustAccelerationNow(params, s);
       s.fuel1 = Math.max(0, s.fuel1 - flow * dt);
       if (s.fuel1 === 0) {
         if (params.stageSeparation && s.fuel2 > 0) {
@@ -545,7 +600,7 @@ export const stepFlight = (
         }
       }
       if (s.stage2Lit && s.fuel2 > 0) {
-        thrustAcc = (params.stage2Thrust * THRUST_SCALE * VACUUM_THRUST_FACTOR * temperatureFactor(params) * s.engineFactor) / vehicleMass(params, s);
+        thrustAcc = thrustAccelerationNow(params, s);
         s.fuel2 = Math.max(0, s.fuel2 - stageTwoFlow(params) * dt);
         if (s.fuel2 === 0) {
           s.stage = 0;
