@@ -9,7 +9,8 @@ import { useRocketStore } from '@/stores/rocketStore';
 import { universeClock } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
 import { IconButton } from './controls';
-import { SPEED_STEPS } from './timeSteps';
+import { SPEED_CHIPS } from './timeSteps';
+import { simTelemetry } from '@/sim/schedule';
 import { resetActiveLab } from './useKeyboardShortcuts';
 
 const RIBBON_WINDOW_MS = 60_000;
@@ -65,6 +66,24 @@ const MissionClock = () => {
         {isRocket ? `T+${formatClock(elapsed)}` : formatClock(universeClock.age)}
       </span>
     </div>
+  );
+};
+
+/**
+ * Crowded systems can't always run at full warp; say so instead of silently
+ * running slower than the selected speed.
+ */
+const WarpLimitNote = () => {
+  const mode = useAppStore((state) => state.mode);
+  const timeScale = useTimeStore((state) => state.timeScale);
+  const isPlaying = useTimeStore((state) => state.isPlaying);
+  useNow(1000);
+  const t = simTelemetry.spacetime;
+  if (mode !== 'spacetime' || !isPlaying || timeScale <= 4 || !t.limited) return null;
+  return (
+    <span className="hud-num shrink-0 text-[11px] text-warn" title="Large systems need more computation per step, so warp is capped to keep the view smooth.">
+      ≈{Math.round(t.achievedScale)}× max
+    </span>
   );
 };
 
@@ -158,7 +177,7 @@ const TemporalHud = () => {
 
         {/* Full speed chips; collapses to a single readout in narrow layouts. */}
         <div role="radiogroup" aria-label="Simulation speed" className="temporal-chips flex min-w-0 items-center gap-0.5">
-          {SPEED_STEPS.map((speed) => {
+          {SPEED_CHIPS.map((speed) => {
             const active = timeScale === speed;
             const reverse = speed < 0;
             return (
@@ -186,6 +205,7 @@ const TemporalHud = () => {
           {isPlaying ? formatStep(timeScale).replace(/^(−?[\d½]+)$/, '$1×') : 'Paused'}
         </span>
 
+        <WarpLimitNote />
         <div className="temporal-clock ml-auto flex shrink-0 items-center gap-3">
           <div className="h-6 w-px bg-[hsl(var(--hud-line)/0.14)]" />
           <MissionClock />

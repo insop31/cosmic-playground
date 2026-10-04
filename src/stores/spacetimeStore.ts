@@ -43,7 +43,7 @@ const resetSimulationClocks = () => {
 };
 
 /** Tangential speed for a circular orbit around the heaviest body. */
-const computePlacementVelocity = (position: [number, number, number], allBodies: CelestialBody[], scale: number): [number, number, number] => {
+export const computePlacementVelocity = (position: [number, number, number], allBodies: Pick<CelestialBody, 'position' | 'mass'>[], scale: number): [number, number, number] => {
   if (allBodies.length === 0) return [0, 0, 0];
   const attractor = allBodies.reduce((max, b) => (b.mass > max.mass ? b : max));
   const rx = position[0] - attractor.position[0];
@@ -60,7 +60,7 @@ const computePlacementVelocity = (position: [number, number, number], allBodies:
 };
 
 /** Pushes a spawn point out of every existing body's safety radius. */
-const resolveSpawnPosition = (position: [number, number, number], radius: number, existingBodies: CelestialBody[]) => {
+export const resolveSpawnPosition = (position: [number, number, number], radius: number, existingBodies: Pick<CelestialBody, 'position' | 'radius'>[]) => {
   let spawnPos: [number, number, number] = [...position];
   for (const existing of existingBodies) {
     const dx = spawnPos[0] - existing.position[0];
@@ -80,6 +80,10 @@ const resolveSpawnPosition = (position: [number, number, number], radius: number
 interface SpacetimeState {
   bodies: CelestialBody[];
   pendingPlacement: PendingBody | null;
+  /** Body shown in the inspector and followed by the camera. */
+  selectedBodyId: string | null;
+  /** Keep the camera centred on the selected body as it moves. */
+  followSelected: boolean;
   placementVelocityScale: number;
   realisticMode: boolean;
   universeScale: number;
@@ -87,7 +91,14 @@ interface SpacetimeState {
 
   beginPlacement: (body: Omit<CelestialBody, 'id'>) => void;
   cancelPlacement: () => void;
-  placeOnGrid: (position: [number, number, number]) => void;
+  /**
+   * Places the pending body. With an explicit velocity (drag-to-aim) the
+   * position is taken as final; otherwise it is pushed clear of other bodies
+   * and given a circular-orbit velocity scaled by placementVelocityScale.
+   */
+  placeOnGrid: (position: [number, number, number], velocity?: [number, number, number]) => void;
+  selectBody: (id: string | null) => void;
+  setFollowSelected: (follow: boolean) => void;
   removeBody: (id: string) => void;
   updateBody: (id: string, mass: number, radius: number) => void;
   removeAll: () => void;
@@ -111,6 +122,8 @@ export const bodyLabel = (body: Pick<CelestialBody, 'name' | 'type'>) =>
 export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
   bodies: [SUN, EARTH, MARS],
   pendingPlacement: null,
+  selectedBodyId: null,
+  followSelected: true,
   placementVelocityScale: 1,
   realisticMode: true,
   universeScale: 1,
@@ -118,23 +131,26 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
 
   beginPlacement: (body) => {
     const { position: _ignored, ...withoutPosition } = body;
-    set({ pendingPlacement: withoutPosition });
+    set({ pendingPlacement: withoutPosition, selectedBodyId: null });
     progress().registerExperiment(`prep:${body.type}:${Math.round(body.mass).toExponential(1)}`);
   },
 
   cancelPlacement: () => set({ pendingPlacement: null }),
 
-  placeOnGrid: (position) => {
+  placeOnGrid: (position, aimedVelocity) => {
     const { pendingPlacement, bodies, placementVelocityScale, realisticMode } = get();
     if (!pendingPlacement) return;
 
-    const spawnPos = resolveSpawnPosition(position, pendingPlacement.radius ?? 0.3, bodies);
-    const velocity = computePlacementVelocity(spawnPos, bodies, placementVelocityScale);
+    const spawnPos = aimedVelocity ? position : resolveSpawnPosition(position, pendingPlacement.radius ?? 0.3, bodies);
+    const velocity = aimedVelocity ?? computePlacementVelocity(spawnPos, bodies, placementVelocityScale);
+    // How fast the launch was relative to a circular orbit at that spot.
+    const circular = Math.hypot(...computePlacementVelocity(spawnPos, bodies, 1));
+    const speedRatio = circular > 0 ? Math.hypot(...velocity) / circular : placementVelocityScale;
     const hasHeavyAnchor = bodies.some((body) => body.mass >= 1e27);
-    if ((pendingPlacement.type === 'comet' || pendingPlacement.type === 'asteroid') && placementVelocityScale >= 1.5 && hasHeavyAnchor) {
+    if ((pendingPlacement.type === 'comet' || pendingPlacement.type === 'asteroid') && speedRatio >= 1.5 && hasHeavyAnchor) {
       progress().unlock('slingshot-expert');
     }
-    progress().registerExperiment(`place:${pendingPlacement.type}:${spawnPos[0].toFixed(1)}:${spawnPos[2].toFixed(1)}:${placementVelocityScale.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
+    progress().registerExperiment(`place:${pendingPlacement.type}:${spawnPos[0].toFixed(1)}:${spawnPos[2].toFixed(1)}:${speedRatio.toFixed(2)}:${realisticMode ? 'real' : 'arcade'}`, 18);
 
     set({
       bodies: [...bodies, { ...pendingPlacement, id: `obj_${nextId++}`, position: spawnPos, velocity }],
@@ -143,7 +159,14 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
     events().log('spacetime', `Placed ${bodyLabel(pendingPlacement)}`);
   },
 
-  removeBody: (id) => set((state) => ({ bodies: state.bodies.filter((b) => b.id !== id) })),
+  selectBody: (selectedBodyId) => set({ selectedBodyId }),
+
+  setFollowSelected: (followSelected) => set({ followSelected }),
+
+  removeBody: (id) => set((state) => ({
+    bodies: state.bodies.filter((b) => b.id !== id),
+    selectedBodyId: state.selectedBodyId === id ? null : state.selectedBodyId,
+  })),
 
   updateBody: (id, mass, radius) => set((state) => ({
     bodies: state.bodies.map((b) => (b.id === id ? { ...b, mass, radius } : b)),
@@ -152,7 +175,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
   removeAll: () => {
     stability.system = 0;
     stability.blackHole = 0;
-    set({ bodies: [] });
+    set({ bodies: [], selectedBodyId: null });
     events().log('spacetime', 'Removed every body');
   },
 
@@ -164,7 +187,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
       id: `template_${templateId}_${nextId++}_${index}`,
     }));
     resetSimulationClocks();
-    set({ bodies, pendingPlacement: null, universeScale: 1 });
+    set({ bodies, pendingPlacement: null, selectedBodyId: null, universeScale: 1 });
     events().clear('spacetime');
     events().log('spacetime', `Loaded ${template.name}`);
     progress().registerExperiment(`template:${templateId}`, 24);
@@ -172,7 +195,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
 
   reset: () => {
     resetSimulationClocks();
-    set({ bodies: [SUN, EARTH], pendingPlacement: null, universeScale: 1 });
+    set({ bodies: [SUN, EARTH], pendingPlacement: null, selectedBodyId: null, universeScale: 1 });
     events().clear('spacetime');
     events().log('spacetime', 'Lab reset');
   },
@@ -206,6 +229,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
       placementVelocityScale: scenario.placementVelocityScale,
       realisticMode: scenario.realisticMode,
       pendingPlacement: null,
+      selectedBodyId: null,
       universeScale: 1,
     });
     events().clear('spacetime');

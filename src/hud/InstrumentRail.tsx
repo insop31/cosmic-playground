@@ -21,6 +21,8 @@ const SpacetimeDrawer = () => {
     beginPlacement: state.beginPlacement,
     applyTemplate: state.applyTemplate,
     removeBody: state.removeBody,
+    selectBody: state.selectBody,
+    selectedBodyId: state.selectedBodyId,
     removeAll: state.removeAll,
     setVelocityScale: state.setVelocityScale,
     setRealisticMode: state.setRealisticMode,
@@ -40,6 +42,8 @@ const SpacetimeDrawer = () => {
       onApplyTemplate={store.applyTemplate}
       bodies={store.bodies}
       onRemoveBody={store.removeBody}
+      onSelectBody={store.selectBody}
+      selectedBodyId={store.selectedBodyId}
       onRemoveAll={store.removeAll}
       placementActive={Boolean(store.pendingPlacement)}
       velocityScale={store.placementVelocityScale}

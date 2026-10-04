@@ -1,5 +1,3 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
@@ -11,20 +9,6 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider delayDuration={150}>
-      <Toaster />
-      <Sonner
-        theme="dark"
-        position="bottom-right"
-        offset={72}
-        toastOptions={{
-          classNames: {
-            toast: 'hud-panel !bg-[hsl(var(--hud-surface)/0.92)] !border-white/10 !text-foreground font-sans',
-            title: '!text-[13px] !font-medium',
-            description: '!text-[12px] !text-hud-dim',
-            icon: '!text-ok',
-          },
-        }}
-      />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />

@@ -57,6 +57,8 @@ interface ObjectLibraryProps {
   onApplyTemplate: (templateId: string) => void;
   bodies: CelestialBody[];
   onRemoveBody: (id: string) => void;
+  onSelectBody?: (id: string) => void;
+  selectedBodyId?: string | null;
   onRemoveAll: () => void;
   placementActive: boolean;
   onVelocityScaleChange: (value: number) => void;
@@ -135,6 +137,8 @@ const ObjectLibrary = ({
   onApplyTemplate,
   bodies,
   onRemoveBody,
+  onSelectBody,
+  selectedBodyId,
   onRemoveAll,
   placementActive,
   onVelocityScaleChange,
@@ -282,7 +286,7 @@ const ObjectLibrary = ({
                   <div className="grid gap-2">
                     <div className="flex items-baseline justify-between">
                       <span className="hud-label">Planets</span>
-                      <span className="text-[11px] text-hud-faint">Pick one, then click the grid</span>
+                      <span className="text-[11px] text-hud-faint">Pick one, then click or drag on the grid</span>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5">
                       {PLANET_PRESETS.map((planet) => (
@@ -361,10 +365,21 @@ const ObjectLibrary = ({
                     ) : (
                       <ul className="grid gap-0.5">
                         {bodies.map((body) => (
-                          <li key={body.id} className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-white/[0.04]">
-                            <Orb color={body.color} type={body.type} size={10} />
-                            <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground/85">{body.name ?? TYPE_LABEL[body.type] ?? body.type}</span>
-                            <span className="hud-num shrink-0 text-[10.5px] text-hud-faint">{formatMass(body.mass)} kg</span>
+                          <li
+                            key={body.id}
+                            className={`group flex items-center gap-1 rounded-md transition-colors hover:bg-white/[0.04] ${selectedBodyId === body.id ? 'bg-primary/10' : ''}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => onSelectBody?.(body.id)}
+                              aria-pressed={selectedBodyId === body.id}
+                              title="Show details and follow"
+                              className="hud-focus flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left"
+                            >
+                              <Orb color={body.color} type={body.type} size={10} />
+                              <span className={`min-w-0 flex-1 truncate text-[12.5px] ${selectedBodyId === body.id ? 'text-primary' : 'text-foreground/85'}`}>{body.name ?? TYPE_LABEL[body.type] ?? body.type}</span>
+                              <span className="hud-num shrink-0 text-[10.5px] text-hud-faint">{formatMass(body.mass)} kg</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => onRemoveBody(body.id)}

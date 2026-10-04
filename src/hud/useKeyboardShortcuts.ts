@@ -71,6 +71,7 @@ export const useKeyboardShortcuts = () => {
         case 'Escape': {
           const spacetime = useSpacetimeStore.getState();
           if (spacetime.pendingPlacement) spacetime.cancelPlacement();
+          else if (spacetime.selectedBodyId) spacetime.selectBody(null);
           else if (app.hudHidden) app.setHudHidden(false);
           break;
         }

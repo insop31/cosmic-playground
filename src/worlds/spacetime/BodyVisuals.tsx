@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { CelestialBody } from './types';
 import {
@@ -14,6 +14,7 @@ import {
   getGlowTexture,
   type SurfaceOptions,
 } from '@/stage/materials';
+import { useSpacetimeStore } from '@/stores/spacetimeStore';
 
 export const MAX_TRAIL_POINTS = 200;
 
@@ -107,6 +108,15 @@ export const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef
   const isPlanet  = body.type === 'planet';
   const isSaturn  = body.name === 'Saturn';
   const isUranus  = body.name === 'Uranus';
+  const selected  = useSpacetimeStore((state) => state.selectedBodyId === body.id);
+
+  // Selection uses a dedicated hit sphere: halos and tails are far larger than the body.
+  const handleSelect = (event: ThreeEvent<MouseEvent>) => {
+    const store = useSpacetimeStore.getState();
+    if (store.pendingPlacement) return;
+    event.stopPropagation();
+    store.selectBody(body.id);
+  };
 
   const { trailLine, trailAttr, trailMaterial } = useMemo(() => {
     const geo  = new THREE.BufferGeometry();
@@ -265,6 +275,24 @@ export const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef
     <>
       <primitive object={trailLine} />
       <group ref={groupRef} position={body.position}>
+
+        <mesh
+          visible={false}
+          scale={Math.max(r * 1.4, 0.6)}
+          onClick={handleSelect}
+          onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+          onPointerOut={() => { document.body.style.cursor = ''; }}
+        >
+          <sphereGeometry args={[1, 12, 12]} />
+          <meshBasicMaterial />
+        </mesh>
+
+        {selected && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -r * 0.8, 0]} scale={r}>
+            <ringGeometry args={[1.55, 1.66, 96]} />
+            <meshBasicMaterial color="#3fd8f5" transparent opacity={0.85} depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
+          </mesh>
+        )}
 
         {/* Invisible proxy: physics writes motion state into its opacity */}
         <mesh ref={glowRef} visible={false}>

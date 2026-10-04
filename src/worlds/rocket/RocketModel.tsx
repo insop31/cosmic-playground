@@ -3,7 +3,16 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FlameParticles, SmokeParticles } from './Particles';
 import { RocketVehicle } from './RocketVisuals';
-import { OrbitPathState, RocketParams, RocketState } from './rocketTypes';
+import type { RocketParams, RocketState } from './rocketTypes';
+import { MAX_FRAME_DELTA, planRocketSteps } from '@/sim/schedule';
+import {
+  TRAJECTORY_LIMIT,
+  stepAscent,
+  stepEscape,
+  stepOrbit,
+  type AscentState,
+  type AscentStep,
+} from '@/sim/rocket';
 
 interface RocketModelProps {
   params: RocketParams;
@@ -13,19 +22,12 @@ interface RocketModelProps {
 }
 
 const ROCKET_SCALE = 1.75;
-const TRAJECTORY_LIMIT = 2400;
-const ESCAPE_VELOCITY = 1.1;
-const MIN_ORBITAL_SPEED = 0.32;
-const ORBIT_ALTITUDE_THRESHOLD = 45;
+const MAX_HISTORY = 3600;
 
-const appendTrajectoryPoint = (trajectory: [number, number][], point: [number, number]) => {
-  const next = [...trajectory, point];
+const appendTrajectoryPoints = (trajectory: [number, number][], points: [number, number][]) => {
+  if (points.length === 0) return trajectory;
+  const next = trajectory.concat(points);
   return next.length > TRAJECTORY_LIMIT ? next.slice(next.length - TRAJECTORY_LIMIT) : next;
-};
-
-const normalizeVector = (x: number, y: number): [number, number] => {
-  const length = Math.hypot(x, y) || 1;
-  return [x / length, y / length];
 };
 
 const computeRocketAngle = (vx: number, vy: number) => {
@@ -41,53 +43,16 @@ const smoothRotateZ = (current: number, target: number, factor: number) => {
 const smoothMove = (current: number, target: number, smoothing: number, dt: number) =>
   THREE.MathUtils.damp(current, target, smoothing, dt);
 
-const buildOrbitPath = (
-  px: number,
-  py: number,
-  vx: number,
-  vy: number,
-  planetRadius: number
-): OrbitPathState | null => {
-  const focus: [number, number] = [0, -planetRadius];
-  const rx = px - focus[0];
-  const ry = py - focus[1];
-  const radius = Math.hypot(rx, ry);
-  if (radius < planetRadius + 10) return null;
-
-  const axisDirection = normalizeVector(rx, ry);
-  const tangentSeed: [number, number] = [-axisDirection[1], axisDirection[0]];
-  const tangentDot = vx * tangentSeed[0] + vy * tangentSeed[1];
-  const tangentSign = tangentDot >= 0 ? 1 : -1;
-  const perpendicularDirection: [number, number] = [tangentSeed[0] * tangentSign, tangentSeed[1] * tangentSign];
-
-  const totalSpeed = Math.hypot(vx, vy);
-  const tangentialSpeed = Math.abs(vx * perpendicularDirection[0] + vy * perpendicularDirection[1]);
-  const radialSpeed = Math.abs(vx * axisDirection[0] + vy * axisDirection[1]);
-  const speedRatio = THREE.MathUtils.clamp(tangentialSpeed / ESCAPE_VELOCITY, 0.45, 0.92);
-  const eccentricity = THREE.MathUtils.clamp(
-    0.62 - (speedRatio - 0.55) * 0.9 + (radialSpeed / Math.max(totalSpeed, 0.001)) * 0.28,
-    0.16,
-    0.72
-  );
-  const semiMajorAxis = radius / (1 - eccentricity);
-  const semiMinorAxis = semiMajorAxis * Math.sqrt(1 - eccentricity * eccentricity);
-  const center: [number, number] = [
-    focus[0] - axisDirection[0] * semiMajorAxis * eccentricity,
-    focus[1] - axisDirection[1] * semiMajorAxis * eccentricity,
-  ];
-
-  return {
-    center,
-    focus,
-    semiMajorAxis,
-    semiMinorAxis,
-    eccentricity,
-    axisDirection,
-    perpendicularDirection,
-    angle: 0,
-    angularSpeed: THREE.MathUtils.clamp(tangentialSpeed / Math.max(radius, 1), 0.18, 0.52),
-  };
-};
+interface HistoryEntry {
+  vx: number;
+  vy: number;
+  px: number;
+  py: number;
+  fuel: number;
+  /** Simulated seconds this step covered; rewind pops at the same rate. */
+  dt: number;
+  uiState: RocketState;
+}
 
 const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelProps) => {
   const groupRef = useRef<THREE.Group>(null);
@@ -95,57 +60,67 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
   const posRef = useRef<[number, number]>([0, 0]);
   const fuelRef = useRef(1);
   const prevPhaseRef = useRef(state.phase);
-  const historyRef = useRef<{vx: number, vy: number, px: number, py: number, fuel: number, uiState: RocketState}[]>([]);
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const rewindAccumRef = useRef(0);
 
-  // Reset refs when state resets to idle
-  if (state.phase === 'idle' && prevPhaseRef.current !== 'idle') {
+  const resetRefs = () => {
     velocityRef.current = [0, 0];
     posRef.current = [0, 0];
     fuelRef.current = 1;
     historyRef.current = [];
+    rewindAccumRef.current = 0;
     if (groupRef.current) {
       groupRef.current.position.set(0, 1.2, 0);
       groupRef.current.rotation.set(0, 0, 0);
     }
-  }
-  // Also reset when launching starts fresh
-  if (state.phase === 'launching' && prevPhaseRef.current === 'idle') {
-    velocityRef.current = [0, 0];
-    posRef.current = [0, 0];
-    fuelRef.current = 1;
-    historyRef.current = [];
-    if (groupRef.current) {
-      groupRef.current.position.set(0, 1.2, 0);
-      groupRef.current.rotation.set(0, 0, 0);
-    }
-  }
+  };
+
+  // Reset refs when state resets to idle, or when a fresh launch starts
+  if (state.phase === 'idle' && prevPhaseRef.current !== 'idle') resetRefs();
+  if (state.phase === 'launching' && prevPhaseRef.current === 'idle') resetRefs();
   prevPhaseRef.current = state.phase;
+
+  const placeVehicle = (px: number, py: number, vx: number, vy: number, renderDt: number, follow: number, turn: number) => {
+    const group = groupRef.current!;
+    group.position.set(
+      smoothMove(group.position.x, px * 2, follow, renderDt),
+      smoothMove(group.position.y, 1.2 + py * 2, follow, renderDt),
+      smoothMove(group.position.z, 0, follow, renderDt),
+    );
+    group.rotation.z = smoothRotateZ(group.rotation.z, -computeRocketAngle(vx, vy), Math.min(1, renderDt * turn));
+  };
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
     if (timeScale === 0) return;
 
+    // Rewind: pop history at the same simulated rate it was recorded
     if (timeScale < 0) {
       if (state.phase === 'idle') return;
-      
-      const steps = Math.max(1, Math.round(Math.abs(timeScale)));
-      let lastSnap = null;
-      for (let s = 0; s < steps; s++) {
-        const snap = historyRef.current.pop();
-        if (!snap) break;
+      const history = historyRef.current;
+      let owed = rewindAccumRef.current + Math.min(delta, MAX_FRAME_DELTA) * Math.abs(timeScale);
+      let lastSnap: HistoryEntry | null = null;
+      while (history.length > 0 && owed >= history[history.length - 1].dt) {
+        const snap = history.pop()!;
+        owed -= snap.dt;
         lastSnap = snap;
       }
-      
+      rewindAccumRef.current = history.length > 0 ? owed : 0;
+
       if (lastSnap) {
-        velocityRef.current = [lastSnap.vx, lastSnap.vy];
-        posRef.current = [lastSnap.px, lastSnap.py];
-        fuelRef.current = lastSnap.fuel;
-        
-        groupRef.current.position.set(lastSnap.px * 2, 1.2 + lastSnap.py * 2, 0);
-        const rocketAngle = computeRocketAngle(lastSnap.vx, lastSnap.vy);
-        groupRef.current.rotation.z = -rocketAngle;
-        
-        onUpdateState(() => lastSnap.uiState);
+        const snap = lastSnap;
+        velocityRef.current = [snap.vx, snap.vy];
+        posRef.current = [snap.px, snap.py];
+        fuelRef.current = snap.fuel;
+        groupRef.current.position.set(snap.px * 2, 1.2 + snap.py * 2, 0);
+        groupRef.current.rotation.z = -computeRocketAngle(snap.vx, snap.vy);
+        onUpdateState(() => ({
+          ...snap.uiState,
+          position: [snap.px, snap.py, 0],
+          altitude: snap.py,
+          velocity: [snap.vx, snap.vy],
+          fuel: snap.fuel,
+        }));
       }
       return;
     }
@@ -156,217 +131,85 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
       return;
     }
 
-    historyRef.current.push({
-      vx: velocityRef.current[0],
-      vy: velocityRef.current[1],
+    // Warp runs several ordinary steps instead of one long one (src/sim/schedule.ts)
+    const { steps, dt } = planRocketSteps(delta, timeScale);
+    const renderDt = Math.min(delta, 0.05);
+    let sim: AscentState = {
       px: posRef.current[0],
       py: posRef.current[1],
+      vx: velocityRef.current[0],
+      vy: velocityRef.current[1],
       fuel: fuelRef.current,
-      uiState: state
-    });
-    if (historyRef.current.length > 3600) historyRef.current.shift();
+      elapsed: state.elapsed,
+      maxAltitude: state.maxAltitude,
+    };
+    let orbit = state.orbit;
+    let launching = state.phase === 'launching';
+    let cutoff = false;
+    let ended: AscentStep | null = null;
+    const points: [number, number][] = [];
 
-    const dt = Math.min(delta * timeScale, 0.1); // clamp delta for stable integration
-    const renderDt = Math.min(delta, 0.05);
-    const effectiveLaunchAngle = params.launchAngle + params.padTilt;
-    const angleRad = (effectiveLaunchAngle * Math.PI) / 180;
-    let [vx, vy] = velocityRef.current;
-    let [px, py] = posRef.current;
-    let fuel = fuelRef.current;
+    for (let i = 0; i < steps; i++) {
+      historyRef.current.push({ vx: sim.vx, vy: sim.vy, px: sim.px, py: sim.py, fuel: sim.fuel, dt, uiState: state });
+      if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
 
-    if (isOrbiting && state.orbit) {
-      const currentOrbit = state.orbit;
-      const [axisX, axisY] = currentOrbit.axisDirection;
-      const [perpX, perpY] = currentOrbit.perpendicularDirection;
-      const relFocusX = px - currentOrbit.focus[0];
-      const relFocusY = py - currentOrbit.focus[1];
-      const focusRadius = Math.max(Math.hypot(relFocusX, relFocusY), 1);
-      const orbitalRate = currentOrbit.angularSpeed * THREE.MathUtils.clamp(currentOrbit.semiMajorAxis / focusRadius, 0.75, 1.8);
-      const nextAngle = currentOrbit.angle + dt * orbitalRate;
-      const cosTheta = Math.cos(nextAngle);
-      const sinTheta = Math.sin(nextAngle);
-
-      px = currentOrbit.center[0] + axisX * currentOrbit.semiMajorAxis * cosTheta + perpX * currentOrbit.semiMinorAxis * sinTheta;
-      py = currentOrbit.center[1] + axisY * currentOrbit.semiMajorAxis * cosTheta + perpY * currentOrbit.semiMinorAxis * sinTheta;
-
-      vx = (-axisX * currentOrbit.semiMajorAxis * sinTheta + perpX * currentOrbit.semiMinorAxis * cosTheta) * orbitalRate;
-      vy = (-axisY * currentOrbit.semiMajorAxis * sinTheta + perpY * currentOrbit.semiMinorAxis * cosTheta) * orbitalRate;
-
-      velocityRef.current = [vx, vy];
-      posRef.current = [px, py];
-
-      const targetX = px * 2;
-      const targetY = 1.2 + py * 2;
-      groupRef.current.position.set(
-        smoothMove(groupRef.current.position.x, targetX, 18, renderDt),
-        smoothMove(groupRef.current.position.y, targetY, 18, renderDt),
-        smoothMove(groupRef.current.position.z, 0, 18, renderDt),
-      );
-      const rocketAngle = computeRocketAngle(vx, vy);
-      groupRef.current.rotation.z = smoothRotateZ(
-        groupRef.current.rotation.z,
-        -rocketAngle,
-        Math.min(1, renderDt * 10),
-      );
-
-      onUpdateState((prev) => ({
-        ...prev,
-        altitude: py,
-        maxAltitude: Math.max(prev.maxAltitude, py),
-        velocity: [vx, vy],
-        elapsed: prev.elapsed + dt,
-        position: [px, py, 0],
-        orbit: prev.orbit ? { ...prev.orbit, angle: nextAngle } : prev.orbit,
-        trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
-      }));
-      return;
-    }
-
-    if (isEscaping) {
-      // Just keep flying linearly out of the camera's view, but still update the trajectory trail!
-      px += vx * dt;
-      py += vy * dt;
-      posRef.current = [px, py];
-      const targetX = px * 2;
-      const targetY = 1.2 + py * 2;
-      groupRef.current.position.set(
-        smoothMove(groupRef.current.position.x, targetX, 16, renderDt),
-        smoothMove(groupRef.current.position.y, targetY, 16, renderDt),
-        smoothMove(groupRef.current.position.z, 0, 16, renderDt),
-      );
-      const rocketAngle = computeRocketAngle(vx, vy);
-      groupRef.current.rotation.z = smoothRotateZ(
-        groupRef.current.rotation.z,
-        -rocketAngle,
-        Math.min(1, renderDt * 9),
-      );
-      onUpdateState((prev) => ({
-        ...prev,
-        position: [px, py, 0],
-        altitude: py,
-        maxAltitude: Math.max(prev.maxAltitude, py),
-        trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
-      }));
-      return;
-    }
-
-    if (fuel > 0 && state.phase === 'launching') {
-      const currentMass = params.dryMass + fuel * params.fuelMass;
-      const pressureFactor = THREE.MathUtils.clamp(1.04 - (params.atmosphericPressure - 1) * 0.22, 0.78, 1.14);
-      const temperatureFactor = THREE.MathUtils.clamp(1 - (params.ambientTemperature - 15) * 0.0024, 0.82, 1.08);
-      const thrustEnvironmentFactor = pressureFactor * temperatureFactor;
-      const thrustAcc = (params.thrustForce * thrustEnvironmentFactor) / currentMass;
-      vx += Math.sin(angleRad) * thrustAcc * dt;
-      vy += Math.cos(angleRad) * thrustAcc * dt;
-      fuel -= dt / params.burnDuration;
-
-      if (fuel <= 0) {
-        fuel = 0;
-        onUpdateState((prev) => ({ ...prev, phase: 'coasting', fuel: 0 }));
+      if (isOrbiting && orbit) {
+        const result = stepOrbit(sim, orbit, dt);
+        sim = result.next;
+        orbit = result.orbit;
+      } else if (isEscaping) {
+        sim = stepEscape(sim, dt);
+      } else {
+        const result = stepAscent(sim, params, launching, dt);
+        sim = result.next;
+        if (result.cutoff) {
+          cutoff = true;
+          launching = false;
+        }
+        if (result.outcome) {
+          ended = result;
+          break;
+        }
       }
+      points.push([sim.px, sim.py]);
     }
 
-    // Gravity
-    vy -= params.gravity * dt * 0.01;
+    velocityRef.current = [sim.vx, sim.vy];
+    posRef.current = [sim.px, sim.py];
+    fuelRef.current = sim.fuel;
 
-    // Drag
-    const speed = Math.sqrt(vx * vx + vy * vy);
-    const atmosphereFactor = Math.max(0, 1 - py * 0.015) * params.atmosphericDensity;
-    const shearWave = Math.sin((state.elapsed + dt) * 0.9 + py * 0.35) * params.windShear;
-    const wind = params.crosswind * (1 + shearWave) * atmosphereFactor;
-    vx += wind * dt * 0.0011;
-
-    const thermalPenalty = 1 + params.thermalLoad * Math.max(0, speed - 0.3) * atmosphereFactor * 1.8;
-    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.003 * thermalPenalty;
-    if (speed > 0.001) {
-      vx -= (vx / speed) * dragForce * dt;
-      vy -= (vy / speed) * dragForce * dt;
-    }
-
-    px += vx * dt;
-    py += vy * dt;
-
-    velocityRef.current = [vx, vy];
-    posRef.current = [px, py];
-    fuelRef.current = fuel;
-
-    // Check crash
-    if (py < 0 && (vx !== 0 || vy !== 0)) {
-      py = 0;
+    if (ended) {
+      const { outcome, orbit: endOrbit } = ended;
+      const grounded = outcome === 'crashed' || outcome === 'suborbital';
       onUpdateState((prev) => ({
         ...prev,
         phase: 'outcome',
-        outcome: prev.maxAltitude > 25 ? 'suborbital' : 'crashed',
-        position: [px, 0, 0],
-        altitude: 0,
-        orbit: null,
+        outcome: outcome!,
+        fuel: Math.max(sim.fuel, 0),
+        elapsed: sim.elapsed,
+        maxAltitude: sim.maxAltitude,
+        position: [sim.px, grounded ? 0 : sim.py, 0],
+        altitude: grounded ? 0 : prev.altitude,
+        velocity: outcome === 'orbiting' ? [sim.vx, sim.vy] : prev.velocity,
+        orbit: endOrbit,
+        trajectory: appendTrajectoryPoints(prev.trajectory, grounded ? points : [...points, [sim.px, sim.py]]),
       }));
       return;
     }
 
-    // Escape / orbit detection
-    if (py > ORBIT_ALTITUDE_THRESHOLD) {
-      const totalSpeed = Math.sqrt(vx * vx + vy * vy);
-      const focusY = -params.planetRadius;
-      const [radialX, radialY] = normalizeVector(px, py - focusY);
-      const tangentialX = -radialY;
-      const tangentialY = radialX;
-      const tangentialSpeed = Math.abs(vx * tangentialX + vy * tangentialY);
-      const tangentialRatio = tangentialSpeed / Math.max(totalSpeed, 0.001);
-
-      if (tangentialRatio > 0.64 && tangentialSpeed > MIN_ORBITAL_SPEED && totalSpeed <= ESCAPE_VELOCITY) {
-        const orbit = buildOrbitPath(px, py, vx, vy, params.planetRadius);
-        if (orbit) {
-          onUpdateState((prev) => ({
-            ...prev,
-            phase: 'outcome',
-            outcome: 'orbiting',
-            position: [px, py, 0],
-            velocity: [vx, vy],
-            orbit,
-            trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
-          }));
-          return;
-        }
-      }
-
-      if (totalSpeed > ESCAPE_VELOCITY) {
-        onUpdateState((prev) => ({
-          ...prev,
-          phase: 'outcome',
-          outcome: 'escape',
-          position: [px, py, 0],
-          orbit: null,
-        }));
-        return;
-      }
-    }
-
-    // Update visual position
-    const targetX = px * 2;
-    const targetY = 1.2 + py * 2;
-    groupRef.current.position.set(
-      smoothMove(groupRef.current.position.x, targetX, 16, renderDt),
-      smoothMove(groupRef.current.position.y, targetY, 16, renderDt),
-      smoothMove(groupRef.current.position.z, 0, 16, renderDt),
-    );
-    const rocketAngle = computeRocketAngle(vx, vy);
-    groupRef.current.rotation.z = smoothRotateZ(
-      groupRef.current.rotation.z,
-      -rocketAngle,
-      Math.min(1, renderDt * 12),
-    );
+    placeVehicle(sim.px, sim.py, sim.vx, sim.vy, renderDt, isOrbiting ? 18 : 16, isOrbiting ? 10 : isEscaping ? 9 : 12);
 
     onUpdateState((prev) => ({
       ...prev,
-      altitude: py,
-      maxAltitude: Math.max(prev.maxAltitude, py),
-      fuel: Math.max(fuel, 0),
-      velocity: [vx, vy],
-      elapsed: prev.elapsed + dt,
-      position: [px, py, 0],
-      orbit: null,
-      trajectory: appendTrajectoryPoint(prev.trajectory, [px, py]),
+      phase: cutoff && prev.phase === 'launching' ? 'coasting' : prev.phase,
+      altitude: sim.py,
+      maxAltitude: sim.maxAltitude,
+      fuel: Math.max(sim.fuel, 0),
+      velocity: isEscaping ? prev.velocity : [sim.vx, sim.vy],
+      elapsed: isEscaping ? prev.elapsed : sim.elapsed,
+      position: [sim.px, sim.py, 0],
+      orbit: isOrbiting ? orbit : null,
+      trajectory: appendTrajectoryPoints(prev.trajectory, points),
     }));
   });
 

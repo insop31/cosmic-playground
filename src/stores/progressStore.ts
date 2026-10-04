@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { toast } from 'sonner';
 import {
   ALL_MISSIONS,
   CHALLENGE_PACKS,
@@ -60,6 +59,8 @@ interface ProgressState {
   missionQueues: MissionQueues;
   /** Distinct experiment keys seen so far; each awards points once. */
   experimentKeys: ReadonlySet<string>;
+  /** Most recent objective completion, shown briefly in the context banner. */
+  lastCompleted: { id: MissionId; at: number } | null;
   awardScore: (points: number) => void;
   unlock: (id: MissionId) => void;
   registerExperiment: (key: string, points?: number) => void;
@@ -110,6 +111,7 @@ export const useProgressStore = create<ProgressState>()((set, get) => {
       rocket: buildMissionCards(getActivePack('rocket', DEFAULT_PACK_BY_MODE.rocket), NO_ACHIEVEMENTS),
     },
     experimentKeys: new Set<string>(),
+    lastCompleted: null,
 
     awardScore: (points) => set((state) => ({ score: state.score + points })),
 
@@ -120,10 +122,8 @@ export const useProgressStore = create<ProgressState>()((set, get) => {
       set((state) => ({
         achievements: { ...state.achievements, [id]: true },
         score: state.score + (mission?.score ?? 0),
+        lastCompleted: { id, at: Date.now() },
       }));
-      if (mission) {
-        toast.success(`Objective complete · ${mission.name}`, { description: `+${mission.score} points` });
-      }
       syncQueues();
     },
 

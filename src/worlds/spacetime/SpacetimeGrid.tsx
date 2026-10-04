@@ -1,196 +1,134 @@
-import { useRef, useMemo, useCallback } from 'react';
-import { ThreeEvent, useFrame } from '@react-three/fiber';
+import { useEffect, useMemo, useRef } from 'react';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-
-interface CelestialBody {
-  id: string;
-  type: string;
-  position: [number, number, number];
-  mass: number;
-  radius: number;
-  color: string;
-}
+import { MAX_WELLS, WELL_GLSL, wellField } from './wellField';
 
 interface SpacetimeGridProps {
-  bodies: CelestialBody[];
-  /** Written by PhysicsSimulator each frame with live physics positions.
-   *  When populated the grid uses these instead of stale React state positions. */
-  livePhysicsRef?: React.MutableRefObject<Array<{ position: [number, number, number]; mass: number }>>;
   gridSize?: number;
   gridResolution?: number;
   universeScale?: number;
-  onGridClick?: (position: [number, number, number]) => void;
+  onPointerDown?: (event: ThreeEvent<PointerEvent>) => void;
+  onPointerMove?: (event: ThreeEvent<PointerEvent>) => void;
+  onPointerUp?: (event: ThreeEvent<PointerEvent>) => void;
+  onPointerLeave?: (event: ThreeEvent<PointerEvent>) => void;
 }
 
+/**
+ * The spacetime sheet. Deformation happens in the vertex shader from the live
+ * well list (wellField), so the CPU no longer rewrites 25k vertices a frame.
+ * The CPU geometry stays flat at y = 0, which is exactly the plane the physics
+ * runs on, so pointer picking returns simulation coordinates directly.
+ */
 const SpacetimeGrid = ({
-  bodies,
-  livePhysicsRef,
-  gridSize = 120,
-  gridResolution = 120,
+  gridSize = 220,
+  gridResolution = 200,
   universeScale = 1,
-  onGridClick,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerLeave,
 }: SpacetimeGridProps) => {
-  const handleGridClick = useCallback((event: ThreeEvent<PointerEvent>) => {
-    if (!onGridClick) return;
-    event.stopPropagation();
-    const { x, y, z } = event.point;
-    onGridClick([x, y, z]);
-  }, [onGridClick]);
-
   const meshRef = useRef<THREE.Mesh>(null);
-  const materialRef = useRef<THREE.ShaderMaterial>(null);
 
-  // We rebuild the geometry when gridSize or resolution changes
   const geometry = useMemo(() => {
-    const effectiveSize = gridSize * universeScale;
-    const geo = new THREE.PlaneGeometry(effectiveSize, effectiveSize, gridResolution, gridResolution);
+    const geo = new THREE.PlaneGeometry(gridSize, gridSize, gridResolution, gridResolution);
     geo.rotateX(-Math.PI / 2);
     return geo;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridSize, gridResolution, Math.round(universeScale * 10)]); // rebuild when scale changes meaningfully
+  }, [gridSize, gridResolution]);
 
-  const shaderMaterial = useMemo(() => {
-    return new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        // Stronger read on dark bg; still cyan / magenta accent family
-        uGridColor: { value: new THREE.Color(0x7ef6ff) },
-        uDepthColor: { value: new THREE.Color(0xff9fd0) },
-        uGridSize: { value: gridSize },
-        uUniverseScale: { value: universeScale },
-      },
-      vertexShader: `
-        varying float vDepth;
-        varying vec2 vUv;
-        varying vec3 vWorldPos;
-        void main() {
-          vUv = uv;
-          vDepth = -position.y;
-          vWorldPos = position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float uTime;
-        uniform vec3 uGridColor;
-        uniform vec3 uDepthColor;
-        uniform float uGridSize;
-        uniform float uUniverseScale;
-        varying float vDepth;
-        varying vec2 vUv;
-        varying vec3 vWorldPos;
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    uniforms: {
+      uWells: { value: Array.from({ length: MAX_WELLS }, () => new THREE.Vector4()) },
+      uWellCount: { value: 0 },
+      uUniverseScale: { value: 1 },
+      uHalfExtent: { value: gridSize / 2 },
+    },
+    vertexShader: /* glsl */ `
+      ${WELL_GLSL}
+      varying vec3 vWorld;
+      varying float vDepth;
+      void main() {
+        vec4 world = modelMatrix * vec4(position, 1.0);
+        float depth = surfaceDepth(world.xz);
+        world.y -= depth;
+        vWorld = world.xyz;
+        vDepth = depth;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uUniverseScale;
+      uniform float uHalfExtent;
+      varying vec3 vWorld;
+      varying float vDepth;
 
-        void main() {
-          // Grid lines
-          vec2 grid = abs(fract(vWorldPos.xz * 0.5) - 0.5);
-          float line = min(grid.x, grid.y);
-          float gridLine = 1.0 - smoothstep(0.0, 0.04, line);
-
-          // Depth-based color blend
-          float depthFactor = smoothstep(0.0, 8.0, vDepth);
-          vec3 color = mix(uGridColor, uDepthColor, depthFactor);
-          // Extra lift on lines so the mesh pops against #050a14
-          color = min(mix(color, color * 1.24, gridLine), vec3(1.0));
-
-          float alpha = gridLine * (0.34 + depthFactor * 0.5);
-          alpha = max(alpha, depthFactor * 0.2);
-
-          // Edge fade-out — fade to transparent near grid boundary
-          float halfSize = uGridSize * uUniverseScale * 0.5;
-          float edgeDist = max(abs(vWorldPos.x), abs(vWorldPos.z)) / halfSize;
-          float edgeFade = 1.0 - smoothstep(0.78, 1.0, edgeDist);
-          alpha *= edgeFade;
-
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      side: THREE.DoubleSide,
-      wireframe: false,
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridSize]); // material only rebuilt when base gridSize changes; universe scale updated via uniform
-
-  // Keep universe-scale uniform in sync without rebuilding material
-  useMemo(() => {
-    if (shaderMaterial.uniforms) {
-      shaderMaterial.uniforms.uUniverseScale.value = universeScale;
-      shaderMaterial.uniforms.uGridSize.value = gridSize;
-    }
-  }, [shaderMaterial, universeScale, gridSize]);
-
-  const deformGrid = useCallback((posArray: Float32Array) => {
-    // Prefer live physics positions (updated every frame by PhysicsSimulator)
-    // over React state positions (only updated on body add/remove)
-    const liveBods = livePhysicsRef?.current?.length ? livePhysicsRef.current : bodies;
-    const vertexCount = posArray.length / 3;
-    const VERTICAL_SCALE = 0.72;
-    const PARABOLA_DEPTH_GAIN = 1.7;
-    const PARABOLA_SOFTNESS = 4.2;
-    const MASS_LOG_MIN = 22.0;
-    const MASS_LOG_MAX = 31.0;
-    const MASS_VISUAL_MIN = 1.2;
-    const MASS_VISUAL_MAX = 40.0;
-    const MASS_CURVE = 1.55;
-    const MASS_STRENGTH_EXP = 1.22;
-
-    for (let i = 0; i < vertexCount; i++) {
-      const x = posArray[i * 3];
-      const z = posArray[i * 3 + 2];
-      let totalDisplacement = 0;
-
-      for (const body of liveBods) {
-        const dx = x - body.position[0];
-        const dz = z - body.position[2];
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        // SI masses (e.g. 1.989e30) would blow up the formula directly.
-        // Log-normalize anything above the arcade range so the grid stays visible
-        // regardless of whether realistic or arcade mode is active.
-        const visualMassBase = body.mass > 1000
-          ? (() => {
-              const logMass = Math.log10(body.mass);
-              const normalizedMass = THREE.MathUtils.clamp(
-                (logMass - MASS_LOG_MIN) / (MASS_LOG_MAX - MASS_LOG_MIN),
-                0,
-                1,
-              );
-              const curvedMass = Math.pow(normalizedMass, MASS_CURVE);
-              return THREE.MathUtils.lerp(MASS_VISUAL_MIN, MASS_VISUAL_MAX, curvedMass);
-            })()
-          : body.mass;
-        const superMassBoost = body.mass >= 4e30 ? 1.35 : body.mass >= 2e30 ? 1.15 : 1.0;
-        const visualMass = visualMassBase * superMassBoost;
-        // Smooth parabolic well: stronger center curvature without a hard tip clamp.
-        const influence = (Math.pow(visualMass, MASS_STRENGTH_EXP) * PARABOLA_DEPTH_GAIN) / (dist * dist + PARABOLA_SOFTNESS);
-        totalDisplacement += influence;
+      // Anti-aliased grid line: constant pixel width at any zoom.
+      float gridLine(vec2 coord, float widthPx) {
+        vec2 g = abs(fract(coord - 0.5) - 0.5) / max(fwidth(coord), vec2(1e-4));
+        return 1.0 - clamp(min(g.x, g.y) / widthPx, 0.0, 1.0);
       }
 
-      posArray[i * 3 + 1] = -(totalDisplacement * VERTICAL_SCALE);
+      void main() {
+        // Line spacing stretches with the universe, so expansion is visible as growing cells.
+        vec2 coord = vWorld.xz / uUniverseScale;
+        float minor = gridLine(coord / 2.0, 1.0);
+        float major = gridLine(coord / 10.0, 1.4);
+
+        vec3 cyan = vec3(0.247, 0.847, 0.961);
+        vec3 cobalt = vec3(0.227, 0.388, 1.0);
+        vec3 violet = vec3(0.56, 0.38, 1.0);
+        float d = clamp(vDepth, 0.0, 12.0);
+        vec3 lineColor = mix(cyan, cobalt, smoothstep(0.4, 3.5, d));
+        lineColor = mix(lineColor, violet, smoothstep(4.0, 9.0, d));
+
+        float lines = max(minor * 0.42, major);
+        float alpha = lines * (0.32 + 0.4 * smoothstep(0.2, 5.0, d));
+
+        // Faint fill so deep wells read as a surface, not just a wire cage.
+        vec3 fill = cobalt * 0.35;
+        float fillAlpha = 0.025 + 0.06 * smoothstep(0.5, 8.0, d);
+        vec3 color = mix(fill, lineColor, lines);
+        alpha = max(alpha, fillAlpha);
+
+        // Fade toward the sheet's edge.
+        float edge = max(abs(vWorld.x), abs(vWorld.z)) / (uHalfExtent * uUniverseScale);
+        alpha *= 1.0 - smoothstep(0.7, 1.0, edge);
+
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }), [gridSize]);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
+
+  useFrame(() => {
+    const uniforms = material.uniforms;
+    const wells = uniforms.uWells.value as THREE.Vector4[];
+    for (let i = 0; i < wellField.count; i++) {
+      wells[i].fromArray(wellField.data, i * 4);
     }
-  // livePhysicsRef is a stable ref object — its .current is read at call time,
-  // so it does not need to be in deps. bodies is included for the initial frame.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bodies]);
-
-  useFrame((state) => {
-    if (!meshRef.current) return;
-    const geo = meshRef.current.geometry as THREE.BufferGeometry;
-    const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
-    const posArray = posAttr.array as Float32Array;
-
-    deformGrid(posArray);
-    posAttr.needsUpdate = true;
-    geo.computeVertexNormals();
-
-    if (materialRef.current) {
-      materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
-    }
+    uniforms.uWellCount.value = wellField.count;
+    uniforms.uUniverseScale.value = universeScale;
+    meshRef.current?.scale.set(universeScale, 1, universeScale);
   });
 
   return (
-    <mesh ref={meshRef} geometry={geometry} material={shaderMaterial} onPointerDown={handleGridClick}>
-      <primitive object={shaderMaterial} ref={materialRef} attach="material" />
-    </mesh>
+    <mesh
+      ref={meshRef}
+      geometry={geometry}
+      material={material}
+      renderOrder={-1}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerLeave}
+    />
   );
 };
 

@@ -6,6 +6,7 @@ import FlightBar from '@/hud/FlightBar';
 import InstrumentRail from '@/hud/InstrumentRail';
 import ContextBanner from '@/hud/ContextBanner';
 import ObjectivesPanel from '@/hud/ObjectivesPanel';
+import BodyInspector from '@/hud/BodyInspector';
 import TemporalHud from '@/hud/TemporalHud';
 import { LabTransition, StasisField } from '@/hud/StageOverlays';
 import { Kbd } from '@/hud/controls';
@@ -46,7 +47,8 @@ const Index = () => {
         <div className="flex min-w-0 justify-center [grid-area:center]">
           <ContextBanner />
         </div>
-        <div className="flex min-h-0 flex-col items-end [grid-area:right]">
+        <div className="flex min-h-0 flex-col items-end gap-3 [grid-area:right]">
+          {mode === 'spacetime' && <BodyInspector />}
           <ObjectivesPanel />
         </div>
         <div className="flex min-w-0 items-end justify-center [grid-area:temporal]">

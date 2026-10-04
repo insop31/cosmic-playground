@@ -1,8 +1,9 @@
-import { memo, useRef, type ReactNode } from 'react';
-import { AlertTriangle, ArrowUpRight, Crosshair, Orbit, Pause, TrendingUp, X } from 'lucide-react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, Crosshair, Orbit, Pause, TrendingUp, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
+import { findMission, useProgressStore } from '@/stores/progressStore';
 import { useRocketStore } from '@/stores/rocketStore';
 import { bodyLabel, useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
@@ -26,6 +27,33 @@ const Enter = ({ children, className, role }: { children: ReactNode; className?:
   return <div ref={ref} className={className} role={role}>{children}</div>;
 };
 
+const NOTICE_MS = 4500;
+
+/** Shows the latest objective completion for a few seconds. */
+const ObjectiveNotice = () => {
+  const lastCompleted = useProgressStore((state) => state.lastCompleted);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!lastCompleted) return undefined;
+    setVisible(true);
+    const id = window.setTimeout(() => setVisible(false), NOTICE_MS);
+    return () => window.clearTimeout(id);
+  }, [lastCompleted]);
+
+  const mission = lastCompleted ? findMission(lastCompleted.id) : undefined;
+  if (!visible || !mission) return null;
+  return (
+    <Enter key={lastCompleted!.at} role="status" className="hud-panel flex items-center gap-2.5 border-ok/40 px-3 py-1.5">
+      <CheckCircle2 size={14} className="shrink-0 text-ok" />
+      <span className="text-[12.5px] text-foreground">
+        Objective complete · <span className="font-semibold">{mission.name}</span>
+      </span>
+      <span className="hud-num text-[11.5px] text-ok">+{mission.score}</span>
+    </Enter>
+  );
+};
+
 /** Top-centre zone: the one message that matters right now. */
 const ContextBanner = () => {
   const mode = useAppStore((state) => state.mode);
@@ -38,11 +66,12 @@ const ContextBanner = () => {
 
   return (
     <div className="flex flex-col items-center gap-2">
+      <ObjectiveNotice />
       {mode === 'spacetime' && pendingPlacement && (
         <Enter role="status" className="hud-panel pointer-events-auto flex items-center gap-2.5 border-primary/40 py-1.5 pl-3 pr-1.5">
           <Crosshair size={14} className="shrink-0 text-primary" />
           <span className="text-[12.5px] text-foreground">
-            Click the grid to place <span className="font-semibold text-primary">{bodyLabel(pendingPlacement)}</span>
+            Click to place <span className="font-semibold text-primary">{bodyLabel(pendingPlacement)}</span> in orbit, or drag to aim its launch
           </span>
           <Kbd>Esc</Kbd>
           <IconButton label="Cancel placement" size="sm" onClick={cancelPlacement}>
