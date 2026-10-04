@@ -71,6 +71,10 @@ Then open http://localhost:8080. To update an existing copy, run `git pull` and 
 
 GitHub Actions runs the type check, lint, unit tests, build, bundle budget and end-to-end tests (`.github/workflows/ci.yml`).
 
+## Deploying
+
+The app is a static site: `npm run build` writes everything to `dist/`, with no server or secrets needed. On [Vercel](https://vercel.com), import the repository (**Add New → Project**) and deploy; `vercel.json` sets the build, the output folder, a fallback to `index.html` for unknown paths, and long-term caching for the hashed files in `dist/assets`. The `engines` field in `package.json` makes Vercel use a Node.js version that Vite supports. Every push to `main` then redeploys, and pull requests get preview links.
+
 ## How it is built
 
 React 18, TypeScript and Vite; 3D with three.js and React Three Fiber; state in zustand; animation with GSAP; styling with Tailwind CSS and Radix UI primitives; zod validates imported files.
