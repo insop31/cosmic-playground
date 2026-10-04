@@ -14,7 +14,7 @@ export interface FlightSample {
   heat: number;
 }
 
-export type Milestone = 'liftoff' | 'maxq' | 'cutoff' | 'separation' | 'space';
+export type Milestone = 'liftoff' | 'maxq' | 'cutoff' | 'separation' | 'space' | 'verdict';
 
 export interface CoachLine {
   id: number;

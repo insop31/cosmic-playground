@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { buildDebrief } from '@/learning/debrief';
+import { buildDebrief, peakAltitude } from '@/learning/debrief';
 import { vehicleSummary } from '@/physics/rocket';
 import { useAppStore } from '@/stores/appStore';
 import { logLabEvent, type EventTone } from '@/stores/eventStore';
@@ -85,7 +85,7 @@ const MissionWatchers = () => {
       weather: Array.from(rocket.activeWeather, (id) => WEATHER_PRESETS[id].name),
       metrics: {
         deltaV: vehicleSummary(flown).deltaV,
-        peakAltitude: flight.maxAltitude,
+        peakAltitude: peakAltitude(flown, flight),
         maxQ: flight.maxDynamicPressure,
         heat: flight.heat,
         flightTime: flight.elapsed,

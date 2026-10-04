@@ -29,6 +29,18 @@ export interface Debrief {
 
 const GRAVITY_SCALE = 0.01;
 
+/**
+ * Highest point of the flight in scene units. The verdict often comes before the top of
+ * the arc (once the outcome is certain), so for a path that falls back or orbits this is
+ * the top of the path it is on: apoapsis = a(1 + e) − R.
+ */
+export const peakAltitude = (params: RocketParams, state: RocketState) => {
+  if (state.outcome !== 'suborbital' && state.outcome !== 'orbiting') return state.maxAltitude;
+  const elements = orbitalElements(params, { px: state.position[0], py: state.position[1], vx: state.velocity[0], vy: state.velocity[1] });
+  if (elements.energy >= 0) return state.maxAltitude;
+  return Math.max(state.maxAltitude, elements.semiMajorAxis * (1 + elements.eccentricity) - params.planetRadius);
+};
+
 /** Thrust (kN) for a lift-off thrust-to-weight of `target`. */
 const thrustForTwr = (params: RocketParams, target: number) => {
   const current = vehicleSummary(params).liftoffThrustToWeight;
@@ -41,7 +53,7 @@ export function buildDebrief(params: RocketParams, state: RocketState): Debrief 
   const numbers: DebriefNumber[] = [
     { label: 'Δv budget', value: summary.deltaV.toFixed(2) },
     { label: 'Thrust ÷ weight', value: summary.liftoffThrustToWeight.toFixed(2) },
-    { label: 'Peak altitude', value: formatAltitude(state.maxAltitude) },
+    { label: 'Peak altitude', value: formatAltitude(peakAltitude(params, state)) },
     { label: 'Max-Q', value: state.maxDynamicPressure.toFixed(2) },
     { label: 'Heat shield', value: `${Math.round(Math.min(state.heat, 1) * 100)}%` },
   ];

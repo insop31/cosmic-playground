@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef } from 'react';
 import { History, Minus, NotebookPen, RotateCcw, SlidersHorizontal } from 'lucide-react';
-import { buildDebrief } from '@/learning/debrief';
+import { buildDebrief, peakAltitude } from '@/learning/debrief';
+import { formatAltitude } from '@/physics/altitude';
 import { vehicleSummary } from '@/physics/rocket';
 import { cn } from '@/lib/utils';
 import { gsap, prefersReducedMotion, useGSAP } from '@/motion/gsap';
@@ -74,6 +75,7 @@ const MissionReport = () => {
   const resetFlight = useRocketStore((state) => state.resetFlight);
   const samples = useFlightStore((state) => state.samples);
   const maxQ = useFlightStore((state) => state.milestones.maxq);
+  const verdict = useFlightStore((state) => state.milestones.verdict);
   const highestQ = useFlightStore((state) => state.maxQ);
   const peakHeat = useFlightStore((state) => state.peakHeat);
   const scoreAtLaunch = useFlightStore((state) => state.scoreAtLaunch);
@@ -88,6 +90,10 @@ const MissionReport = () => {
   const info = outcome !== 'none' ? OUTCOME[outcome] : null;
   // The debrief is fixed by the moment the verdict came in; the camera coast afterwards doesn't change it.
   const debrief = useMemo(() => (visible ? buildDebrief(readEffectiveRocketParams(), flight) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, flight.seed]);
+  // Likewise the peak (the top of the arc it is on) and the flight time stop at the verdict.
+  const peak = useMemo(() => (visible ? peakAltitude(readEffectiveRocketParams(), flight) : 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [visible, flight.seed]);
 
@@ -177,9 +183,9 @@ const MissionReport = () => {
       )}
 
       <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2.5 border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
-        <Stat label="Max altitude" value={`${stats.maxAlt.toFixed(0)} km`} />
+        <Stat label="Peak altitude" value={formatAltitude(peak)} />
         <Stat label="Top speed" value={`${stats.topSpeed.toFixed(2)} u/s · ${Math.round(stats.topOfEscape * 100)}% esc.`} />
-        <Stat label="Flight time" value={`${elapsed.toFixed(1)} s`} />
+        <Stat label="Flight time" value={`${(verdict?.t ?? elapsed).toFixed(1)} s`} />
         <Stat label="Δv budget" value={`${deltaV.toFixed(2)} u/s`} />
         <Stat label="Max-Q" value={maxQ ? `${highestQ ? highestQ.q.toFixed(2) : ''} at ${maxQ.altKm.toFixed(0)} km` : highestQ ? highestQ.q.toFixed(2) : '—'} />
         <Stat label="Heat shield" value={peakHeat ? `${Math.round(peakHeat.heat * 100)}%` : '—'} />

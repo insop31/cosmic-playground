@@ -105,6 +105,7 @@ const FlightRecorder = () => {
 
       if (flight.phase === 'outcome' && prev.phase !== 'outcome') {
         store.setReportOpen(true);
+        store.markMilestone('verdict', t, altitudeKm(altitude));
         const tone = flight.outcome === 'orbiting' || flight.outcome === 'escape' ? 'ok' : flight.outcome === 'suborbital' ? 'warn' : 'danger';
         if (flight.outcomeReason) store.say(t, flight.outcomeReason, tone);
         else {

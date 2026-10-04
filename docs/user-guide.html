@@ -58,9 +58,9 @@
   </figure>
   <h3>Placing bodies</h3>
   <ol>
-    <li>Pick an object on the left: one of 8 real planets, a star, black hole, neutron star, asteroid or comet.</li>
-    <li>Move over the grid. The <b>preview line</b> shows the next 20 seconds: <b style="color:#16a34a">green</b> it stays in orbit, <b style="color:#ca8a04">yellow</b> it escapes, <b style="color:#dc2626">red</b> it hits something.</li>
-    <li><b>Click</b> to drop it into a circular orbit, or <b>press and drag</b> to throw it with your own speed and direction.</li>
+    <li>Pick an object in the <b>Bodies</b> panel on the left: one of 8 real planets, a star, black hole, neutron star, asteroid or comet.</li>
+    <li>Move over the grid. The <b>preview line</b> shows the next 24 simulated seconds, worked out with the same physics as the simulation: <b style="color:#16a34a">green</b> it stays in orbit, <b style="color:#ca8a04">amber</b> it escapes, <b style="color:#dc2626">red</b> it hits something (and when).</li>
+    <li><b>Click</b> to drop it into a circular orbit, or <b>press and drag</b> to throw it with your own speed and direction. <kbd>Esc</kbd> cancels.</li>
   </ol>
   <p>The <b>placement velocity</b> slider scales the orbital speed: below 1 the body falls inwards, above about 1.41 it escapes. Try it and check the preview.</p>
   <h3>What can happen</h3>
@@ -72,26 +72,26 @@
     <tr><td>Swallowed</td><td>Anything crossing a black hole's event horizon.</td></tr>
     <tr><td>Torn apart</td><td>A body that strays inside a black hole's Roche limit is stretched into a stream.</td></tr>
   </table>
-  <p>Each impact opens a short explanation with the momentum kept and the energy released, and leaves a marker on the timeline.</p>
+  <p>Each impact opens a short explanation with the momentum kept and the energy released, and leaves a marker on the history bar.</p>
 </section>
 
 <section>
   <h2>2. Measuring orbits</h2>
   <figure>
     <img src="img/spacetime-lesson.jpg" alt="The Kepler lesson loaded with teacher notes">
-    <figcaption>A teacher pack loaded: the Resonant Chain system with its lesson notes and missions.</figcaption>
+    <figcaption>A teacher pack loaded: the Resonant Chain system with its lesson notes and objectives.</figcaption>
   </figure>
   <div class="two">
     <div>
-      <h3>Orbit inspector</h3>
-      <p>Click any body (in the scene or in the Active Bodies list). The inspector shows what it orbits, its distance and speed, the size and shape of the orbit, how long one lap takes, its closest and farthest points, and <b>T² ÷ a³</b>. For every planet of the same star that number comes out the same: Kepler's third law. A dashed line in the scene shows the orbit it is following.</p>
-      <p>Tick <b>Pin in place</b> to hold a body still while it keeps pulling on the others.</p>
+      <h3>Body inspector</h3>
+      <p>Click any body (in the scene or under <i>In the scene</i> on the left). The inspector shows what it orbits, its distance and speed, the size and shape of the orbit, how long one lap takes, its closest and farthest points, and <b>T² ÷ a³</b>. For every planet of the same star that number comes out the same: Kepler's third law. A dashed line in the scene shows the orbit it is following.</p>
+      <p><b>Pin</b> holds a body still while it keeps pulling on the others; <b>Follow</b> keeps the camera on it.</p>
     </div>
     <div>
       <h3>Time and conservation</h3>
-      <p>The time bar plays, pauses, speeds up to 4× and rewinds. Drag the timeline to scrub back through the last 30 seconds; impact markers show when things happened, and absorbed bodies come back.</p>
-      <p>The <b>Conservation</b> tab plots energy, momentum and angular momentum. They stay flat while only gravity acts, and jump at a collision, where energy turns into heat.</p>
-      <p><b>Arcade gravity</b> (untick Realistic physics) is 4× stronger with a speed cap: same shapes, faster play.</p>
+      <p>The time controls at the bottom pause and play (<kbd>Space</kbd>) and run from −4× (rewind) to 64×. At 64× a year passes in under a second, with exactly the same result as at 1×. Drag the <b>history bar</b> to scrub back through the last 30 seconds; impact markers show when things happened, and absorbed bodies come back.</p>
+      <p>The <b>Conservation</b> button (top right) plots energy, momentum and angular momentum. They stay flat while only gravity acts, and jump at a collision, where energy turns into heat.</p>
+      <p><b>Arcade gravity</b> (switch off <i>Realistic gravity</i>) is 4× stronger with a speed cap: same shapes, faster play.</p>
     </div>
   </div>
 </section>
@@ -101,22 +101,22 @@
   <p>Launch a rocket from a small planet and try to reach orbit. The flight follows real physics: gravity weakens with height, the air thins with altitude, drag depends on speed through the air (and the wind), and fuel burns away, making the rocket lighter. This is the rocket equation at work.</p>
   <figure>
     <img src="img/rocket-orbit.jpg" alt="A two-stage rocket in orbit">
-    <figcaption>A two-stage launch in a stable orbit, with the flight log and telemetry.</figcaption>
+    <figcaption>A two-stage launch in a stable orbit: the mission report, the flight director and the altitude and speed tapes.</figcaption>
   </figure>
   <div class="two">
     <div>
       <h3>Before launch</h3>
       <ul>
-        <li><b>18 settings</b>: pitch-over angle, thrust, burn time, fuel and dry mass, drag, air, wind, heating, temperature, pressure, pad tilt, gravity, planet size and staging.</li>
-        <li><b>Weather</b>: 8 conditions. Each changes the values flown (shown in orange next to the slider), and some bring hazards such as lightning or frozen seals.</li>
-        <li>The <b>Vehicle</b> box shows the Δv budget (the total speed change the fuel can give), the thrust-to-weight ratio (it must be above 1 to lift off) and the speed an orbit needs.</li>
+        <li><b>Launch setup</b> has three steps. <b>Vehicle</b>: thrust, burn time, fuel and dry mass, pitch-over angle and staging. <b>Weather</b>: air, wind, heating, temperature and pressure. <b>Launch</b>: scenario, gravity, planet size and pad tilt.</li>
+        <li><b>Weather</b>: 8 conditions. Each changes the values flown (shown next to the slider), and some bring hazards such as lightning or frozen seals.</li>
+        <li>The <b>vehicle readout</b> shows the Δv budget (the total speed change the fuel can give), the thrust-to-weight ratio (it must be above 1 to lift off) and the speed an orbit needs.</li>
       </ul>
     </div>
     <div>
       <h3>Why one stage is not enough</h3>
       <p>A rocket that burns all its fuel near the ground comes back down: the lowest point of its path can never be higher than where the engine stopped. Turn on <b>stage separation</b>. Stage 1 drops away when it is empty; stage 2 coasts to the top of the climb and burns sideways there, lifting the lowest point of the path above the air.</p>
       <h3>Outcomes</h3>
-      <p><b>Orbit</b>, <b>escape</b>, <b>falls back</b>, <b>crash</b> or <b>burn-up</b>, judged from the rocket's energy and the lowest point of its path. Watch <b>Max-Q</b> (the hardest push of the air on the rocket) and the <b>heat shield</b>.</p>
+      <p><b>Orbit</b>, <b>escape</b>, <b>falls back</b>, <b>crash</b> or <b>burn-up</b>, judged from the rocket's energy and the lowest point of its path. The verdict comes as soon as the outcome is certain, often before the top of the climb. Watch <b>Max-Q</b> (the hardest push of the air on the rocket) and the <b>heat shield</b>. Turn on <i>Show forces on the vehicle</i> to see thrust, gravity, drag and wind as arrows.</p>
     </div>
   </div>
 </section>
@@ -128,20 +128,20 @@
     <figure><img src="img/notebook.jpg" alt="Lab notebook comparing two runs"><figcaption>The lab notebook compares two runs setting by setting.</figcaption></figure>
   </div>
   <ol>
-    <li><b>Predict.</b> Under the Ignite button, choose what you think will happen. You score points when you are right.</li>
-    <li><b>Launch.</b> During the flight the <b>Launch Coach</b> reads the telemetry: Max-Q, heating, staging, and how much sideways speed an orbit still needs.</li>
-    <li><b>Read the debrief.</b> What happened, why (with the numbers), and one specific change to try next.</li>
-    <li><b>Compare.</b> Every launch is written into the <b>Notebook</b> (top right). Tick two runs to see exactly which settings changed and what that did to the Δv, peak height, Max-Q and heating.</li>
+    <li><b>Predict.</b> Above the Ignite button, choose what you think will happen. You score points when you are right.</li>
+    <li><b>Launch.</b> <b>Ignite</b> starts a three-second countdown (<kbd>Enter</kbd> launches now). During the flight the <b>launch coach</b> reads the telemetry: Max-Q, heating, staging, and how much sideways speed an orbit still needs.</li>
+    <li><b>Read the mission report.</b> What happened, why (with the numbers), and one specific change to try next. After a failure, <b>Rewind 5 s</b> plays the last moments back.</li>
+    <li><b>Compare.</b> Every launch is written into the <b>Notebook</b> (in the mission report, or the notebook icon at the top of Launch setup). Tick two runs to see exactly which settings changed and what that did to the Δv, peak height, Max-Q and heating.</li>
   </ol>
   <div class="note">Change one thing at a time. If two settings change between runs, the notebook cannot tell you which one mattered.</div>
-  <h3>Missions</h3>
-  <p>Missions are checked against what really happens in the simulation, not just what you click. For example, <i>Gravity Master</i> needs planets that stay in orbit for three laps of the outermost one, and <i>Slingshot Expert</i> needs a flyby that really raises a comet's speed by 30%. There are 20 missions in 11 packs. Pick a pack in the Mission Progress panel.</p>
+  <h3>Objectives</h3>
+  <p>Objectives are checked against what really happens in the simulation, not just what you click. For example, <i>Gravity Master</i> needs planets that stay in orbit for three laps of the outermost one, and <i>Slingshot Expert</i> needs a flyby that really raises a comet's speed by 30%. There are 20 objectives in 11 courses. Pick a course in the Objectives panel on the right; the <b>Mission log</b> (<kbd>M</kbd>) lists them all. Points unlock a Gravity Slingshot system (500) and a Mars dust-storm ascent (750).</p>
 </section>
 
 <section>
   <h2>5. For teachers</h2>
   <span class="pill">Teacher packs</span>
-  <p>Each teacher pack is one lesson: notes with questions to ask, three missions, and a <b>Load lesson setup</b> button that puts the right system or rocket on every screen.</p>
+  <p>Each teacher pack is one lesson: notes with questions to ask, three objectives, and a <b>Load lesson setup</b> button that puts the right system or rocket on every screen. Choose the pack in the course menu of the Objectives panel.</p>
   <table>
     <tr><th>Lesson</th><th>Lab</th><th>Big idea</th></tr>
     <tr><td>Kepler's Laws</td><td>Spacetime</td><td>Farther planets are slower; T² ÷ a³ is the same for every planet of one star.</td></tr>
@@ -150,22 +150,24 @@
     <tr><td>The Rocket Equation</td><td>Rocket</td><td>Fuel is heavy: doubling it does not double the speed; dropping empty tanks helps.</td></tr>
     <tr><td>Weather and Launch Safety</td><td>Rocket</td><td>Wind, heat and thick air decide whether a launch is safe.</td></tr>
   </table>
-  <div class="note teacher"><b>Sharing set-ups.</b> Save a system or rocket preset, then press <b>Export file</b> to download everything saved on that computer. Students press <b>Import file</b> to add it to theirs. Files are checked before anything is stored.</div>
+  <div class="note teacher"><b>Sharing set-ups.</b> Save a system (Spacetime Lab, <i>Saved</i> tab) or a rocket preset (Launch setup, <i>Saved setups</i>), then press <b>Export file</b> to download everything saved on that computer. Students press <b>Import file</b> to add it to theirs. Files are checked before anything is stored.</div>
   <h3>Settings and accessibility</h3>
-  <p>The gear icon (top right) holds <b>graphics quality</b> (use Low on older laptops and Chromebooks), <b>reduce motion</b> (on automatically when the device asks for it) and <b>high contrast</b>.</p>
+  <p><b>Help and settings</b> (top right, or <kbd>?</kbd>) holds <b>graphics quality</b> (use Low on older laptops and Chromebooks), <b>motion</b> (follows the device setting, or choose Reduced or Full) and <b>high contrast</b>.</p>
   <table>
     <tr><th>Key</th><th>Action</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Pause or play</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Slower or faster; left of 0 rewinds</td></tr>
     <tr><td><kbd>R</kbd></td><td>Reset the current lab</td></tr>
-    <tr><td><kbd>Esc</kbd></td><td>Stop placing a body, close a dialog</td></tr>
-    <tr><td><kbd>Tab</kbd></td><td>Switch labs while the 3D view is focused (click the view first). Elsewhere Tab moves between controls as usual.</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Stop placing a body, close the inspector or a dialog</td></tr>
+    <tr><td><kbd>1</kbd> <kbd>2</kbd> / <kbd>Tab</kbd></td><td>Spacetime Lab / Rocket Lab. Tab switches labs only when no control is focused, so it still moves between controls.</td></tr>
+    <tr><td><kbd>L</kbd> <kbd>M</kbd> <kbd>H</kbd></td><td>Objectives, mission log, hide the interface</td></tr>
     <tr><td>Drag / scroll</td><td>Turn the camera / zoom</td></tr>
   </table>
   <h3>Good to know</h3>
   <ul>
     <li>Saved systems, presets, the notebook and settings are kept in the browser on that computer. Export a file to move them.</li>
     <li>The rocket's planet is small (radius around 50 km) so that orbits happen within a lesson; the physics is the same as for Earth.</li>
-    <li>Speeds above 4× and rewinds longer than 30 s are not available, to keep the simulation accurate.</li>
+    <li>Very crowded systems cannot always run at 64×; the time controls then show the speed actually reached, rather than taking less accurate steps. Rewind covers the last 30 simulated seconds.</li>
   </ul>
 </section>
 

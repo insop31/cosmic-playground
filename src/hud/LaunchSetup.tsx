@@ -10,6 +10,7 @@ import {
   CloudRain,
   FolderOpen,
   Lock,
+  NotebookPen,
   PanelLeftClose,
   Rocket,
   RotateCcw,
@@ -364,6 +365,8 @@ const LaunchSetup = () => {
   const countdown = useFlightStore((state) => state.countdown);
   const setCountdown = useFlightStore((state) => state.setCountdown);
   const setDockCollapsed = useAppStore((state) => state.setDockCollapsed);
+  const setNotebookOpen = useAppStore((state) => state.setNotebookOpen);
+  const notebookCount = useRocketStore((state) => state.notebook.length);
 
   const locked = phase !== 'idle' || countdown !== null;
   const inFlight = phase === 'launching' || phase === 'coasting';
@@ -401,6 +404,9 @@ const LaunchSetup = () => {
         <Rocket size={16} className="text-primary" />
         <h2 className="hud-title flex-1 text-foreground">Launch setup</h2>
         <PresetMenu />
+        <IconButton label={`Lab notebook (${notebookCount})`} size="sm" onClick={() => setNotebookOpen(true)}>
+          <NotebookPen size={15} />
+        </IconButton>
         <IconButton label="Close panel ([)" onClick={() => setDockCollapsed(true)} size="sm">
           <PanelLeftClose size={15} />
         </IconButton>

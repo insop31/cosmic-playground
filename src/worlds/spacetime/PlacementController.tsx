@@ -196,7 +196,7 @@ const PlacementController = () => {
 
           <Html position={onSheet(tip[0], tip[2], 1.4)} center style={{ pointerEvents: 'none' }}>
             <div className="scene-label whitespace-nowrap px-2.5 py-1.5 font-mono text-[11px] leading-tight" data-testid="placement-preview">
-              <div className="text-foreground">{bodyLabel(pending)} · {toKmPerSecond(speed).toFixed(1)} km/s</div>
+              <div className="text-foreground first-letter:uppercase">{bodyLabel(pending)} · {toKmPerSecond(speed).toFixed(1)} km/s</div>
               {style && prediction && (
                 <div style={{ color: style.color }}>
                   {prediction.outcome === 'collision'
