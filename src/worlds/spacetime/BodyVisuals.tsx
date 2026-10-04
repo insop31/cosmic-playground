@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { CelestialBody } from './SpaceScene';
+import type { CelestialBody } from './types';
 import {
   createAccretionDiskMaterial,
   createAtmosphereMaterial,
@@ -13,7 +13,7 @@ import {
   createTrailMaterial,
   getGlowTexture,
   type SurfaceOptions,
-} from '../three/materials';
+} from '@/stage/materials';
 
 export const MAX_TRAIL_POINTS = 200;
 

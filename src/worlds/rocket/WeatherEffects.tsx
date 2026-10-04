@@ -4,7 +4,7 @@
  */
 import { useRef, useMemo, useEffect, type ReactNode } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import { Html } from '@/stage/World';
 import * as THREE from 'three';
 import type { WeatherConditionId } from './weatherPresets';
 

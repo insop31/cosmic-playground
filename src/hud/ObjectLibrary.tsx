@@ -1,11 +1,11 @@
 import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FolderOpen, LayoutTemplate, Maximize2, Orbit, PanelLeftClose, Save, Sparkles, Trash2, X } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';
-import { SPACETIME_TEMPLATES } from '../space/spacetimeTemplates';
-import type { CelestialBody } from '../space/SpaceScene';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
+import type { CelestialBody } from '@/worlds/spacetime/types';
 import type { SavedSpacetimeScenario } from '@/lib/scenarioStorage';
-import { HudSlider, HudSwitch, IconButton, Segmented } from '../hud/controls';
+import { HudSlider, HudSwitch, IconButton, Segmented } from './controls';
 
 interface PlanetPreset {
   name: string;

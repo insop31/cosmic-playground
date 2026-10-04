@@ -1,5 +1,5 @@
-import type { CelestialBody } from '../components/space/SpaceScene';
-import type { RocketParams } from '../components/rocket/rocketTypes';
+import type { CelestialBody } from '@/worlds/spacetime/types';
+import type { RocketParams } from '@/worlds/rocket/rocketTypes';
 
 const SPACETIME_STORAGE_KEY = 'cosmic-playground.spacetime-scenarios';
 const ROCKET_STORAGE_KEY = 'cosmic-playground.rocket-presets';

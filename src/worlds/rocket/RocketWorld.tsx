@@ -1,24 +1,19 @@
 import { useEffect, useRef, useMemo } from 'react';
 import type { RefObject } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Stars, Html } from '@react-three/drei';
+import { useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls, Stars } from '@react-three/drei';
+import { Html, WorldEffects, useWorldActive } from '@/stage/World';
+import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
+import { useEffectiveTimeScale } from '@/stores/timeStore';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import RocketModel from './RocketModel';
 import { LaunchComplex } from './RocketVisuals';
-import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
-import { createAtmosphereMaterial, createSurfaceMaterial } from '../three/materials';
+import { createAtmosphereMaterial, createSurfaceMaterial } from '@/stage/materials';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
 import type { WeatherConditionId } from './weatherPresets';
 import { WeatherEnvironment, WeatherShakeGroup, createLightningStrikeState } from './WeatherEffects';
 
-interface RocketSceneProps {
-  params: RocketParams;
-  state: RocketState;
-  onUpdateState: (updater: (prev: RocketState) => RocketState) => void;
-  timeScale?: number;
-  activeWeather?: Set<WeatherConditionId>;
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // Simulation altitude (py) → Three.js world Y
@@ -377,7 +372,8 @@ const CinematicCamera = ({
   controlsRef: RefObject<OrbitControlsImpl | null>;
   userControlled: boolean;
 }) => {
-  const { camera } = useThree();
+  // Worlds always use a perspective camera (see stage/World.tsx).
+  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
   const targetPos = useRef(new THREE.Vector3(0, 5, 0));
   const targetCam = useRef(new THREE.Vector3(8, 6, 20));
   const orbitBlendRef = useRef(0);
@@ -482,11 +478,17 @@ const CinematicCamera = ({
   return null;
 };
 
-// ─── Root Scene ──────────────────────────────────────────────────────────────
-const RocketScene = ({
-  params, state, onUpdateState, timeScale = 1,
-  activeWeather = new Set<WeatherConditionId>(),
-}: RocketSceneProps) => {
+// ─── Root ────────────────────────────────────────────────────────────────────
+/** Rocket Lab world: rendered inside a <World> portal of the shared stage canvas. */
+const RocketWorld = () => {
+  const active = useWorldActive();
+  const params = useEffectiveRocketParams();
+  const state = useRocketStore((store) => store.flight);
+  const onUpdateState = useRocketStore((store) => store.updateFlight);
+  const activeWeather = useRocketStore((store) => store.activeWeather);
+  const liveTimeScale = useEffectiveTimeScale();
+  // A hidden world is paused.
+  const timeScale = active ? liveTimeScale : 0;
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const lightningStrikeRef = useRef(createLightningStrikeState());
   const escapedPastExosphere =
@@ -501,12 +503,7 @@ const RocketScene = ({
   const rocketWorldY = pyToWorldY(state.position[1]);
 
   return (
-    <Canvas
-      camera={{ position: [5.5, 4.8, 13.5], fov: 42, near: 0.1, far: 20000 }}
-      dpr={[1, 2]}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
-      style={{ background: '#050a14' }}
-    >
+    <>
       <color attach="background" args={['#050a14']} />
       {/* Push fog incredibly far so zooming out from orbit isn't blocked */}
       <fog attach="fog" args={['#050a14', 2000, 8000]} />
@@ -561,21 +558,16 @@ const RocketScene = ({
 
       <OrbitControls
         ref={controlsRef}
-        enabled={userControlled}
+        enabled={active && userControlled}
         enableDamping
         dampingFactor={0.05}
         minDistance={3}
         maxDistance={5000}
       />
 
-      {/* MSAA targets and the ToneMapping effect render black on some GPUs, so SMAA handles AA. */}
-      <EffectComposer multisampling={0}>
-        <Bloom mipmapBlur luminanceThreshold={0.9} luminanceSmoothing={0.25} intensity={0.65} radius={0.65} />
-        <SMAA />
-        <Vignette offset={0.32} darkness={0.5} />
-      </EffectComposer>
-    </Canvas>
+      <WorldEffects bloomThreshold={0.9} bloomIntensity={0.65} bloomRadius={0.65} vignetteDarkness={0.5} />
+    </>
   );
 };
 
-export default RocketScene;
+export default RocketWorld;

@@ -1,7 +1,7 @@
 import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { NOISE_GLSL } from '../three/materials';
+import { NOISE_GLSL } from '@/stage/materials';
 
 // Star colour by spectral class, weighted toward cooler stars like the real sky.
 const STAR_TINTS: [number, string][] = [

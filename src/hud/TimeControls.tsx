@@ -1,7 +1,7 @@
 import { Play, Pause, Rewind, FastForward, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { IconButton, Segmented } from '../hud/controls';
-import { SPEED_STEPS, stepSpeed } from '../hud/timeSteps';
+import { IconButton, Segmented } from './controls';
+import { SPEED_STEPS, stepSpeed } from './timeSteps';
 
 interface TimeControlsProps {
   timeScale: number;

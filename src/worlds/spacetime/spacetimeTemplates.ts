@@ -1,4 +1,4 @@
-import type { CelestialBody } from './SpaceScene';
+import type { CelestialBody } from './types';
 
 export interface TemplatePreviewBody {
   x: number;

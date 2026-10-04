@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { RocketParams, RocketState, LaunchOutcome } from './rocketTypes';
+import { RocketParams, RocketState, LaunchOutcome } from '@/worlds/rocket/rocketTypes';
 import {
   WeatherConditionId,
   WEATHER_PRESETS,
@@ -7,7 +7,7 @@ import {
   SEVERITY_BADGE,
   SEVERITY_DOT,
   buildWeatherDeltaSummary,
-} from './weatherPresets';
+} from '@/worlds/rocket/weatherPresets';
 import {
   AlertTriangle,
   Bot,
@@ -39,11 +39,11 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { AI_HINTS, type HintScenario, deriveHintScenario } from './rocketHints';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { AI_HINTS, type HintScenario, deriveHintScenario } from '@/worlds/rocket/rocketHints';
 import type { SavedRocketPreset } from '@/lib/scenarioStorage';
-import { HudSection, HudSlider, HudSwitch, IconButton } from '../hud/controls';
+import { HudSection, HudSlider, HudSwitch, IconButton } from './controls';
 
 export type RocketFlightSummary = Pick<RocketState, 'phase' | 'outcome' | 'maxAltitude' | 'elapsed'>;
 

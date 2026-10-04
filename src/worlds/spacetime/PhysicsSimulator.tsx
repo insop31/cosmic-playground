@@ -1,10 +1,10 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import type { RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import { Html } from '@/stage/World';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
-import { CelestialBody } from './SpaceScene';
+import { CelestialBody } from './types';
 import { BodyRenderer, MAX_TRAIL_POINTS, type MeshEntry } from './BodyVisuals';
 
 /** Shown as a floating message box at the impact midpoint (world space). */
@@ -257,7 +257,8 @@ const ImpactCameraDirector = ({
   activeImpact: ImpactPopupState | null;
   controlsRef: RefObject<OrbitControlsImpl | null>;
 }) => {
-  const { camera } = useThree();
+  // Worlds always use a perspective camera (see stage/World.tsx).
+  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
   const snapshotRef = useRef<CameraSnapshot | null>(null);
   const focusTargetRef = useRef(new THREE.Vector3());
   /** True once auto framing has converged; then OrbitControls (scroll/drag) can move the camera. */

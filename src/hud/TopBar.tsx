@@ -1,8 +1,8 @@
 import { memo } from 'react';
 import { EyeOff, Keyboard, Orbit, Rocket } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { AppMode } from '@/lib/challengePacks';
-import type { RocketState } from '../rocket/rocketTypes';
+import type { RocketState } from '@/worlds/rocket/rocketTypes';
 import { IconButton, Kbd, Readout, Segmented } from './controls';
 import { SHORTCUTS } from './shortcuts';
 
