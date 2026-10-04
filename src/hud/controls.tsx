@@ -70,6 +70,7 @@ export const HudSlider = ({ label, value, min, max, step, unit = '', format, inf
           <SliderPrimitive.Range className="absolute h-full rounded-full bg-primary" />
         </SliderPrimitive.Track>
         <SliderPrimitive.Thumb
+          aria-label={label}
           className="block h-3.5 w-3.5 rounded-full border-2 border-primary bg-background shadow-[0_0_0_4px_hsl(var(--primary)/0.12)] transition-[box-shadow,transform] duration-150 hover:shadow-[0_0_0_6px_hsl(var(--primary)/0.18)] focus-visible:outline-none focus-visible:shadow-[0_0_0_6px_hsl(var(--primary)/0.3)] active:scale-110 disabled:pointer-events-none"
         />
       </SliderPrimitive.Root>

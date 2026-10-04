@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { createBeamMaterial } from '@/stage/materials';
+import { gsap, motionDuration } from '@/motion/gsap';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rocket body textures
@@ -14,11 +15,11 @@ const makeStageTexture = (variant: 'lower' | 'upper') => {
   canvas.height = H;
   const ctx = canvas.getContext('2d')!;
 
-  ctx.fillStyle = '#eef1f5';
+  ctx.fillStyle = '#eceff3';
   ctx.fillRect(0, 0, W, H);
 
-  // Subtle panel seams
-  ctx.strokeStyle = 'rgba(40,50,64,0.16)';
+  // Panel seams and rivet rows
+  ctx.strokeStyle = 'rgba(40,50,64,0.14)';
   ctx.lineWidth = 2;
   for (let y = 64; y < H; y += 96) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
@@ -26,44 +27,30 @@ const makeStageTexture = (variant: 'lower' | 'upper') => {
   for (let x = 0; x < W; x += 128) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
   }
-  // Rivet rows
-  ctx.fillStyle = 'rgba(40,50,64,0.18)';
+  ctx.fillStyle = 'rgba(40,50,64,0.16)';
   for (let y = 70; y < H; y += 96) {
     for (let x = 6; x < W; x += 16) ctx.fillRect(x, y, 2, 2);
   }
 
-  if (variant === 'upper') {
-    // Roll pattern: alternating black / white quarters
-    for (let q = 0; q < 4; q++) {
-      ctx.fillStyle = q % 2 === 0 ? '#14181f' : '#eef1f5';
-      ctx.fillRect((q * W) / 4, 0, W / 4, H * 0.22);
-      ctx.fillStyle = q % 2 === 1 ? '#14181f' : '#eef1f5';
-      ctx.fillRect((q * W) / 4, H * 0.22, W / 4, H * 0.12);
-    }
-    // Window band
-    ctx.fillStyle = '#5ad8f0';
-    ctx.fillRect(0, H * 0.62, W, 6);
-  } else {
-    // Accent stripes near the base
-    ctx.fillStyle = '#e5484d';
-    ctx.fillRect(0, H * 0.86, W, 14);
-    ctx.fillStyle = '#14181f';
-    ctx.fillRect(0, H * 0.9, W, 6);
-    // Vertical callsign
+  if (variant === 'lower') {
+    // Graphite band at the top (under the interstage) and a thin signal-cyan pinstripe
+    ctx.fillStyle = '#1b2029';
+    ctx.fillRect(0, 0, W, H * 0.06);
+    ctx.fillStyle = '#3fd8f5';
+    ctx.fillRect(0, H * 0.075, W, 4);
+    // Vehicle designation, small and vertical like real launcher markings
     ctx.save();
-    ctx.translate(W * 0.25, H * 0.5);
+    ctx.translate(W * 0.25, H * 0.42);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = '#1a2230';
-    ctx.font = '600 54px "Chakra Petch", "Geist", sans-serif';
+    ctx.fillStyle = '#1b2029';
+    ctx.font = '500 34px "IBM Plex Mono", ui-monospace, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('COSMIC', 0, 0);
+    ctx.fillText('CP-1', 0, 0);
     ctx.restore();
-    // Flag block
-    ctx.fillStyle = '#1d4ed8';
-    ctx.fillRect(W * 0.72, H * 0.3, 40, 26);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(W * 0.72 + 4, H * 0.3 + 4, 14, 3);
+  } else {
+    ctx.fillStyle = '#1b2029';
+    ctx.fillRect(0, H * 0.94, W, H * 0.06);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -72,26 +59,26 @@ const makeStageTexture = (variant: 'lower' | 'upper') => {
   return texture;
 };
 
-const makeFinGeometry = () => {
+const makeStrakeGeometry = () => {
   const shape = new THREE.Shape();
   shape.moveTo(0, 0);
-  shape.lineTo(0.17, -0.05);
-  shape.lineTo(0.2, 0.06);
-  shape.lineTo(0.0, 0.32);
+  shape.lineTo(0.11, -0.03);
+  shape.lineTo(0.12, 0.05);
+  shape.lineTo(0.0, 0.26);
   shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.018, bevelEnabled: true, bevelSize: 0.006, bevelThickness: 0.006, bevelSegments: 2 });
-  geo.translate(0, 0, -0.009);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.014, bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004, bevelSegments: 2 });
+  geo.translate(0, 0, -0.007);
   return geo;
 };
 
 const makeNoseGeometry = () => {
-  // Tangent ogive from base radius 0.145 to the tip
+  // Tangent ogive fairing from base radius R to the tip
   const pts: THREE.Vector2[] = [];
-  const R = 0.145;
+  const R = 0.15;
   const L = 0.62;
   const rho = (R * R + L * L) / (2 * R);
-  for (let i = 0; i <= 24; i++) {
-    const x = (i / 24) * L;
+  for (let i = 0; i <= 28; i++) {
+    const x = (i / 28) * L;
     const y = Math.sqrt(rho * rho - (L - x) * (L - x)) + R - rho;
     pts.push(new THREE.Vector2(Math.max(y, 0.0005), x));
   }
@@ -107,14 +94,28 @@ const makeBellGeometry = () => {
   return new THREE.LatheGeometry(pts, 40);
 };
 
+const ENGINE_OFFSETS: [number, number][] = [[0.07, 0], [-0.035, 0.0606], [-0.035, -0.0606]];
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Rocket vehicle (visual only — parent group is driven by RocketModel)
+// Launch vehicle (visual only — parent group is driven by RocketModel)
+// Two stages: the first can detach and fall away at burnout.
 // ─────────────────────────────────────────────────────────────────────────────
-export const RocketVehicle = ({ thrusting, intensity, stageSeparation }: { thrusting: boolean; intensity: number; stageSeparation: boolean }) => {
+export const RocketVehicle = ({
+  thrusting,
+  intensity,
+  stageSeparation,
+  separated,
+}: {
+  thrusting: boolean;
+  intensity: number;
+  stageSeparation: boolean;
+  /** First stage has detached (burnout with separation enabled). */
+  separated: boolean;
+}) => {
   const resources = useMemo(() => ({
     lowerTex: makeStageTexture('lower'),
     upperTex: makeStageTexture('upper'),
-    fin: makeFinGeometry(),
+    strake: makeStrakeGeometry(),
     nose: makeNoseGeometry(),
     bell: makeBellGeometry(),
     plumeOuter: createBeamMaterial('#ff8a3a', 2.8, 1),
@@ -124,7 +125,7 @@ export const RocketVehicle = ({ thrusting, intensity, stageSeparation }: { thrus
   useEffect(() => () => {
     resources.lowerTex.dispose();
     resources.upperTex.dispose();
-    resources.fin.dispose();
+    resources.strake.dispose();
     resources.nose.dispose();
     resources.bell.dispose();
     resources.plumeOuter.dispose();
@@ -133,6 +134,31 @@ export const RocketVehicle = ({ thrusting, intensity, stageSeparation }: { thrus
 
   const plumeRef = useRef<THREE.Group>(null);
   const throatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const firstStageRef = useRef<THREE.Group>(null);
+  const flashRef = useRef<THREE.Mesh>(null);
+
+  // Separation: the spent stage drops away and tumbles in the vehicle's frame,
+  // with a brief ring flash at the joint. Reversible so rewind re-attaches it.
+  useEffect(() => {
+    const stage = firstStageRef.current;
+    if (!stage) return undefined;
+    const tweens: gsap.core.Tween[] = [];
+    if (separated) {
+      tweens.push(gsap.to(stage.position, { y: -2.6, x: 0.35, duration: motionDuration(2.4), ease: 'fall' }));
+      tweens.push(gsap.to(stage.rotation, { z: 0.9, x: 0.4, duration: motionDuration(2.4), ease: 'power1.in' }));
+      tweens.push(gsap.to(stage, { duration: motionDuration(2.4), onComplete: () => { stage.visible = false; } }));
+      if (flashRef.current) {
+        const mat = flashRef.current.material as THREE.MeshBasicMaterial;
+        tweens.push(gsap.fromTo(mat, { opacity: 0.9 }, { opacity: 0, duration: motionDuration(0.6), ease: 'power2.out' }));
+        tweens.push(gsap.fromTo(flashRef.current.scale, { x: 1, y: 1, z: 1 }, { x: 2.4, y: 2.4, z: 2.4, duration: motionDuration(0.6), ease: 'power2.out' }));
+      }
+    } else {
+      stage.visible = true;
+      stage.position.set(0, 0, 0);
+      stage.rotation.set(0, 0, 0);
+    }
+    return () => tweens.forEach((tween) => tween.kill());
+  }, [separated]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -148,73 +174,84 @@ export const RocketVehicle = ({ thrusting, intensity, stageSeparation }: { thrus
 
   return (
     <group>
-      {/* Engine skirt */}
-      <mesh position={[0, -0.03, 0]}>
-        <cylinderGeometry args={[0.158, 0.17, 0.08, 48]} />
-        <meshStandardMaterial color="#2a2f38" metalness={0.7} roughness={0.4} />
-      </mesh>
-      {/* Engine bell */}
-      <mesh geometry={resources.bell} position={[0, -0.07, 0]}>
-        <meshStandardMaterial color="#5a4436" metalness={0.92} roughness={0.32} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Hot throat glow */}
-      <mesh position={[0, -0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[0.1, 24]} />
-        <meshBasicMaterial ref={throatRef} color={new THREE.Color('#ffd28a').multiplyScalar(3)} transparent opacity={0} toneMapped={false} side={THREE.DoubleSide} />
-      </mesh>
+      {/* ── First stage ─────────────────────────────────────────────────── */}
+      <group ref={firstStageRef}>
+        {/* Engine section: skirt and a cluster of three bells */}
+        <mesh position={[0, -0.03, 0]}>
+          <cylinderGeometry args={[0.158, 0.17, 0.08, 48]} />
+          <meshStandardMaterial color="#232832" metalness={0.7} roughness={0.42} />
+        </mesh>
+        {ENGINE_OFFSETS.map(([x, z]) => (
+          <mesh key={`${x}-${z}`} geometry={resources.bell} position={[x, -0.07, z]} scale={0.62}>
+            <meshStandardMaterial color="#4a3a30" metalness={0.92} roughness={0.32} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+        <mesh position={[0, -0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.13, 24]} />
+          <meshBasicMaterial ref={throatRef} color={new THREE.Color('#ffd28a').multiplyScalar(3)} transparent opacity={0} toneMapped={false} side={THREE.DoubleSide} />
+        </mesh>
 
-      {/* First stage */}
-      <mesh position={[0, 0.425, 0]}>
-        <cylinderGeometry args={[0.16, 0.16, 0.85, 48]} />
-        <meshPhysicalMaterial map={resources.lowerTex} metalness={0.15} roughness={0.38} clearcoat={0.5} clearcoatRoughness={0.3} />
-      </mesh>
-      {/* Interstage */}
-      <mesh position={[0, 0.9, 0]}>
-        <cylinderGeometry args={[0.146, 0.16, 0.1, 48]} />
-        <meshStandardMaterial color="#1b2029" metalness={0.45} roughness={0.55} />
-      </mesh>
-      {/* Second stage */}
-      <mesh position={[0, 1.25, 0]}>
-        <cylinderGeometry args={[0.146, 0.146, 0.6, 48]} />
-        <meshPhysicalMaterial map={resources.upperTex} metalness={0.15} roughness={0.36} clearcoat={0.5} clearcoatRoughness={0.3} />
-      </mesh>
-      {/* Payload fairing (ogive nose) */}
-      <mesh geometry={resources.nose} position={[0, 1.55, 0]}>
-        <meshPhysicalMaterial color="#e5484d" metalness={0.2} roughness={0.3} clearcoat={0.8} clearcoatRoughness={0.2} />
-      </mesh>
+        {/* Tank section */}
+        <mesh position={[0, 0.475, 0]}>
+          <cylinderGeometry args={[0.16, 0.16, 0.95, 48]} />
+          <meshPhysicalMaterial map={resources.lowerTex} metalness={0.15} roughness={0.4} clearcoat={0.4} clearcoatRoughness={0.35} />
+        </mesh>
 
-      {/* Fins */}
-      {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((rot) => (
-        <group key={rot} rotation={[0, rot, 0]}>
-          <mesh geometry={resources.fin} position={[0.155, 0.02, 0]}>
-            <meshPhysicalMaterial color="#d93b40" metalness={0.25} roughness={0.35} clearcoat={0.6} />
+        {/* Graphite strakes for stability */}
+        {[Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4].map((rot) => (
+          <group key={rot} rotation={[0, rot, 0]}>
+            <mesh geometry={resources.strake} position={[0.155, 0.02, 0]}>
+              <meshStandardMaterial color="#2a303a" metalness={0.5} roughness={0.45} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* Interstage */}
+        <mesh position={[0, 1.01, 0]}>
+          <cylinderGeometry args={[0.15, 0.16, 0.12, 48]} />
+          <meshStandardMaterial color="#161a21" metalness={0.45} roughness={0.55} />
+        </mesh>
+
+        {/* Plume: apex at the nozzles, opening downward */}
+        <group ref={plumeRef} position={[0, -0.24, 0]} visible={thrusting}>
+          <mesh material={resources.plumeOuter} position={[0, -0.8, 0]}>
+            <coneGeometry args={[0.24, 1.6, 32, 1, true]} />
+          </mesh>
+          <mesh material={resources.plumeCore} position={[0, -0.35, 0]}>
+            <coneGeometry args={[0.1, 0.7, 24, 1, true]} />
           </mesh>
         </group>
-      ))}
+      </group>
 
-      {/* Cable raceway */}
-      <mesh position={[0, 0.75, 0.158]}>
-        <boxGeometry args={[0.025, 1.2, 0.012]} />
-        <meshStandardMaterial color="#c9ced6" metalness={0.5} roughness={0.5} />
+      {/* ── Upper stage ─────────────────────────────────────────────────── */}
+      {/* Vacuum engine bell, hidden inside the interstage until separation */}
+      <mesh geometry={resources.bell} position={[0, 1.07, 0]} scale={[0.95, 0.6, 0.95]}>
+        <meshStandardMaterial color="#5a4a3e" metalness={0.92} roughness={0.3} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 1.345, 0]}>
+        <cylinderGeometry args={[0.15, 0.15, 0.55, 48]} />
+        <meshPhysicalMaterial map={resources.upperTex} metalness={0.15} roughness={0.38} clearcoat={0.45} clearcoatRoughness={0.3} />
+      </mesh>
+      {/* Fairing base ring: the one accent colour on the vehicle */}
+      <mesh position={[0, 1.622, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.151, 0.006, 8, 48]} />
+        <meshStandardMaterial color="#3fd8f5" emissive="#3fd8f5" emissiveIntensity={0.6} metalness={0.3} roughness={0.4} />
+      </mesh>
+      <mesh geometry={resources.nose} position={[0, 1.625, 0]}>
+        <meshPhysicalMaterial color="#f1f3f6" metalness={0.15} roughness={0.32} clearcoat={0.8} clearcoatRoughness={0.2} />
       </mesh>
 
-      {/* Stage separation indicator */}
-      {stageSeparation && (
-        <mesh position={[0, 0.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.165, 0.008, 8, 48]} />
-          <meshBasicMaterial color={new THREE.Color('#ffd166').multiplyScalar(2.2)} toneMapped={false} />
+      {/* Separation joint: armed marker before launch, flash at separation */}
+      {stageSeparation && !separated && (
+        <mesh position={[0, 1.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.162, 0.005, 8, 48]} />
+          <meshBasicMaterial color="#f5b83d" toneMapped={false} />
         </mesh>
       )}
-
-      {/* Exhaust plume: apex at the nozzle, opening downward */}
-      <group ref={plumeRef} position={[0, -0.24, 0]} visible={thrusting}>
-        <mesh material={resources.plumeOuter} position={[0, -0.8, 0]}>
-          <coneGeometry args={[0.22, 1.6, 32, 1, true]} />
-        </mesh>
-        <mesh material={resources.plumeCore} position={[0, -0.35, 0]}>
-          <coneGeometry args={[0.085, 0.7, 24, 1, true]} />
-        </mesh>
-      </group>
+      <mesh ref={flashRef} position={[0, 1.07, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.16, 0.2, 48]} />
+        <meshBasicMaterial color={new THREE.Color('#ffe2b0').multiplyScalar(2)} transparent opacity={0} depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
+      </mesh>
     </group>
   );
 };

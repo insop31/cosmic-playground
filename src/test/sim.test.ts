@@ -158,3 +158,22 @@ describe('orbital elements', () => {
     expect(el.escapeSpeed / el.circularSpeed).toBeCloseTo(Math.SQRT2, 5);
   });
 });
+
+describe('rocket display units', () => {
+  it('maps altitude onto the atmosphere layers drawn in the scene', async () => {
+    const { altitudeKm, escapeFraction } = await import('@/sim/units');
+    expect(altitudeKm(0)).toBe(0);
+    expect(altitudeKm(8)).toBeCloseTo(12);
+    expect(altitudeKm(20)).toBeCloseTo(50);
+    expect(altitudeKm(33)).toBeCloseTo(80);
+    expect(altitudeKm(45)).toBeCloseTo(600);
+    expect(altitudeKm(4)).toBeCloseTo(6); // linear inside a layer
+    expect(escapeFraction(1.1)).toBeCloseTo(1);
+  });
+
+  it('reports a thrust-to-weight ratio below 1 when the vehicle cannot lift off', async () => {
+    const { liftoffTwr } = await import('@/sim/rocket');
+    expect(liftoffTwr(DEFAULT_PARAMS)).toBeGreaterThan(1);
+    expect(liftoffTwr({ ...DEFAULT_PARAMS, thrustForce: 5 })).toBeLessThan(1);
+  });
+});

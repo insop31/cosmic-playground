@@ -9,6 +9,7 @@ import { useRocketStore } from '@/stores/rocketStore';
 import { useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
 import type { RocketState } from '@/worlds/rocket/rocketTypes';
+import { altitudeKm } from '@/sim/units';
 import { IconButton, Kbd, Readout } from './controls';
 import { LAB_META } from './labs';
 import { SHORTCUTS } from './shortcuts';
@@ -97,8 +98,8 @@ const RocketTelemetry = () => {
 
   return (
     <>
-      <Readout label="Altitude" value={altitude.toFixed(1)} className="w-14" />
-      <Readout label="Speed" value={speed.toFixed(2)} className="hidden w-14 xl:grid" />
+      <Readout label="Altitude" value={altitudeKm(altitude).toFixed(altitudeKm(altitude) < 100 ? 1 : 0)} unit="km" className="w-[72px]" />
+      <Readout label="Speed" value={speed.toFixed(2)} unit="u/s" className="hidden w-[68px] xl:grid" />
       <div className="hidden w-16 gap-1 leading-tight xl:grid">
         <span className="hud-label text-[9.5px]">Fuel</span>
         <div className="flex items-center gap-1.5">

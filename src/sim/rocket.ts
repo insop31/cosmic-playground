@@ -93,6 +93,10 @@ export const thrustEnvironmentFactor = (params: RocketParams) => {
   return pressureFactor * temperatureFactor;
 };
 
+/** Thrust-to-weight ratio on the pad: above 1 the vehicle can lift off. */
+export const liftoffTwr = (params: RocketParams) =>
+  (params.thrustForce * thrustEnvironmentFactor(params)) / ((params.dryMass + params.fuelMass) * params.gravity * 0.01);
+
 /** Air density factor at altitude py: falls off linearly to zero at py ≈ 67. */
 export const atmosphereFactorAt = (py: number, params: RocketParams) =>
   Math.max(0, 1 - py * 0.015) * params.atmosphericDensity;

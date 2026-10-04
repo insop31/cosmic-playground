@@ -57,5 +57,5 @@ export const LabTransition = () => {
     gsap.fromTo(veilRef.current, { autoAlpha: 0.9 }, { autoAlpha: 0, duration: 0.6, ease: 'power2.out' });
   }, { dependencies: [mode] });
 
-  return <div ref={veilRef} aria-hidden className="pointer-events-none invisible absolute inset-0 z-[6] bg-background opacity-0" />;
+  return <div ref={veilRef} aria-hidden className="pointer-events-none invisible absolute inset-0 z-[9] bg-background opacity-0" />;
 };

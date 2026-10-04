@@ -54,13 +54,18 @@ export const World = ({ active, camera: cameraOptions, children }: WorldProps) =
   );
 };
 
+/** Scene labels sit above the stasis field (z-5) but below the HUD (z-10). */
+const SCENE_LABEL_Z: [number, number] = [8, 0];
+
 /**
  * drei <Html> ignores parent visibility, so DOM labels from a hidden world
- * would stay on screen. This wrapper only mounts them while the world is active.
+ * would stay on screen. This wrapper only mounts them while the world is
+ * active, and keeps them under the HUD.
  */
 export const Html = (props: ComponentProps<typeof DreiHtml>) => {
   const active = useWorldActive();
-  return active ? <DreiHtml {...props} /> : null;
+  // Scene labels always sit below the HUD (z-10), whatever range a caller asks for.
+  return active ? <DreiHtml {...props} zIndexRange={SCENE_LABEL_Z} /> : null;
 };
 
 interface WorldEffectsProps {

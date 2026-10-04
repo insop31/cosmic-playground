@@ -4,6 +4,8 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import { Html, WorldEffects, useWorldActive } from '@/stage/World';
 import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
+import { useFlightStore } from '@/stores/flightStore';
+import ForceVectors from './ForceVectors';
 import { useEffectiveTimeScale } from '@/stores/timeStore';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
@@ -395,8 +397,14 @@ const CinematicCamera = ({
     if (phase === 'idle') {
       exosphereLockRef.current = null;
       orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 0, 6, delta);
-      targetPos.current.set(0, 3, 0);
-      targetCam.current.set(5.5, 4.8, 13.5);
+      if (useFlightStore.getState().countdown !== null) {
+        // Countdown: close on the engines, low and to the side.
+        targetPos.current.set(0, 1.9, 0);
+        targetCam.current.set(2.4, 1.3, 6.4);
+      } else {
+        targetPos.current.set(0, 3, 0);
+        targetCam.current.set(5.5, 4.8, 13.5);
+      }
     } else if (phase === 'launching' || phase === 'coasting' || (phase === 'outcome' && state.outcome === 'escape')) {
       orbitBlendRef.current = THREE.MathUtils.damp(orbitBlendRef.current, 0, 6, delta);
 
@@ -553,6 +561,8 @@ const RocketWorld = () => {
       >
         <RocketModel params={params} state={state} onUpdateState={onUpdateState} timeScale={timeScale} />
       </WeatherShakeGroup>
+
+      <ForceVectors />
 
       <CinematicCamera state={state} params={params} controlsRef={controlsRef} userControlled={userControlled} />
 

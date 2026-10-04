@@ -1,13 +1,15 @@
-import { memo, useMemo, useRef } from 'react';
+import { memo, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { FolderOpen, LayoutTemplate, Shapes, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { CloudSun, FolderOpen, LayoutTemplate, Rocket, Shapes, Target, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore, type LibraryTab } from '@/stores/appStore';
-import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
+import { useRocketStore } from '@/stores/rocketStore';
+import { useFlightStore, type RocketStep } from '@/stores/flightStore';
 import { useSpacetimeStore } from '@/stores/spacetimeStore';
 import ObjectLibrary from './ObjectLibrary';
-import RocketControls, { type RocketFlightSummary } from './RocketControls';
+import LaunchSetup from './LaunchSetup';
+import FlightTapes from './FlightTapes';
 
 /* ─── Drawer contents ──────────────────────────────────────────────────────── */
 
@@ -59,48 +61,6 @@ const SpacetimeDrawer = () => {
   );
 };
 
-const RocketDrawer = () => {
-  const params = useEffectiveRocketParams();
-  const store = useRocketStore(useShallow((state) => ({
-    phase: state.flight.phase,
-    outcome: state.flight.outcome,
-    activeWeather: state.activeWeather,
-    savedPresets: state.savedPresets,
-    setParam: state.setParam,
-    launch: state.launch,
-    resetFlight: state.resetFlight,
-    toggleWeather: state.toggleWeather,
-    savePreset: state.savePreset,
-    loadPreset: state.loadPreset,
-    deletePreset: state.deletePreset,
-  })));
-  const setDockCollapsed = useAppStore((state) => state.setDockCollapsed);
-
-  // Recomputed only when phase or outcome changes, so per-frame telemetry
-  // doesn't re-render the controls.
-  const summary = useMemo<RocketFlightSummary>(() => {
-    const { maxAltitude, elapsed } = useRocketStore.getState().flight;
-    return { phase: store.phase, outcome: store.outcome, maxAltitude, elapsed };
-  }, [store.phase, store.outcome]);
-
-  return (
-    <RocketControls
-      params={params}
-      state={summary}
-      onParamChange={store.setParam}
-      onLaunch={store.launch}
-      onReset={store.resetFlight}
-      savedPresets={store.savedPresets}
-      onSavePreset={store.savePreset}
-      onLoadPreset={store.loadPreset}
-      onDeletePreset={store.deletePreset}
-      activeWeather={store.activeWeather}
-      onWeatherChange={store.toggleWeather}
-      onCollapse={() => setDockCollapsed(true)}
-    />
-  );
-};
-
 /* ─── Rail ─────────────────────────────────────────────────────────────────── */
 
 interface RailItem {
@@ -108,6 +68,7 @@ interface RailItem {
   label: string;
   icon: LucideIcon;
   tab?: LibraryTab;
+  step?: RocketStep;
 }
 
 const SPACETIME_ITEMS: RailItem[] = [
@@ -117,7 +78,9 @@ const SPACETIME_ITEMS: RailItem[] = [
 ];
 
 const ROCKET_ITEMS: RailItem[] = [
-  { id: 'setup', label: 'Launch setup', icon: SlidersHorizontal },
+  { id: 'vehicle', label: 'Vehicle', icon: Rocket, step: 'vehicle' },
+  { id: 'weather', label: 'Weather', icon: CloudSun, step: 'weather' },
+  { id: 'launch', label: 'Launch', icon: Target, step: 'launch' },
 ];
 
 const RailButton = ({ item, active, onClick }: { item: RailItem; active: boolean; onClick: () => void }) => {
@@ -154,6 +117,10 @@ const InstrumentRail = () => {
   const setCollapsed = useAppStore((state) => state.setDockCollapsed);
   const tab = useAppStore((state) => state.spacetimeTab);
   const setTab = useAppStore((state) => state.setSpacetimeTab);
+  const step = useFlightStore((state) => state.setupStep);
+  const setStep = useFlightStore((state) => state.setSetupStep);
+  const flying = useRocketStore((state) => state.flight.phase !== 'idle');
+  const section = mode === 'spacetime' ? tab : step;
   const drawerRef = useRef<HTMLDivElement>(null);
   const items = mode === 'spacetime' ? SPACETIME_ITEMS : ROCKET_ITEMS;
 
@@ -163,12 +130,13 @@ const InstrumentRail = () => {
   }, { dependencies: [collapsed, mode] });
 
   const handleSelect = (item: RailItem) => {
-    const isCurrent = !collapsed && (!item.tab || item.tab === tab);
+    const isCurrent = !collapsed && (item.tab ?? item.step) === section;
     if (isCurrent) {
       setCollapsed(true);
       return;
     }
     if (item.tab) setTab(item.tab);
+    if (item.step) setStep(item.step);
     setCollapsed(false);
   };
 
@@ -179,16 +147,17 @@ const InstrumentRail = () => {
           <RailButton
             key={item.id}
             item={item}
-            active={!collapsed && (!item.tab || item.tab === tab)}
+            active={!collapsed && (item.tab ?? item.step) === section}
             onClick={() => handleSelect(item)}
           />
         ))}
       </nav>
       {!collapsed && (
         <div ref={drawerRef} className={cn('pointer-events-auto flex max-h-full min-h-0', mode === 'rocket' && 'h-full')}>
-          {mode === 'spacetime' ? <SpacetimeDrawer /> : <RocketDrawer />}
+          {mode === 'spacetime' ? <SpacetimeDrawer /> : <LaunchSetup />}
         </div>
       )}
+      {collapsed && mode === 'rocket' && flying && <FlightTapes />}
     </div>
   );
 };

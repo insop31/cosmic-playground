@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
 import { findMission, useProgressStore } from '@/stores/progressStore';
+import { useFlightStore } from '@/stores/flightStore';
 import { useRocketStore } from '@/stores/rocketStore';
 import { bodyLabel, useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
@@ -62,7 +63,9 @@ const ContextBanner = () => {
   const isPlaying = useTimeStore((state) => state.isPlaying);
   const play = useTimeStore((state) => state.play);
   const outcome = useRocketStore((state) => (state.flight.phase === 'outcome' ? state.flight.outcome : 'none'));
-  const outcomeInfo = mode === 'rocket' ? OUTCOME[outcome] : undefined;
+  const reportOpen = useFlightStore((state) => state.reportOpen);
+  const setReportOpen = useFlightStore((state) => state.setReportOpen);
+  const outcomeInfo = mode === 'rocket' && !reportOpen ? OUTCOME[outcome] : undefined;
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -85,6 +88,13 @@ const ContextBanner = () => {
           {outcomeInfo.icon}
           <span className="font-display text-[11.5px] uppercase tracking-[0.08em]">{outcomeInfo.text}</span>
           <span className="hidden text-[12px] text-hud-dim md:inline">{outcomeInfo.detail}</span>
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            className="hud-focus pointer-events-auto rounded-[4px] px-2 py-0.5 text-[12px] text-hud-dim transition-colors hover:bg-white/[0.05] hover:text-foreground"
+          >
+            Show report
+          </button>
         </Enter>
       )}
 

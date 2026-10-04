@@ -221,6 +221,7 @@ const RocketModel = ({ params, state, onUpdateState, timeScale }: RocketModelPro
         thrusting={isThrusting}
         intensity={params.thrustForce / 30}
         stageSeparation={params.stageSeparation}
+        separated={params.stageSeparation && (state.phase === 'coasting' || (state.phase === 'outcome' && state.fuel <= 0))}
       />
 
       {/* Flame */}

@@ -2,6 +2,11 @@ import { useRef } from 'react';
 import { Eye } from 'lucide-react';
 import StageCanvas from '@/stage/StageCanvas';
 import MissionWatchers from '@/app/MissionWatchers';
+import { ErrorBoundary, HudFallback, StageFallback } from '@/app/ErrorBoundary';
+import FlightRecorder from '@/app/FlightRecorder';
+import Countdown from '@/hud/Countdown';
+import FlightDirector from '@/hud/FlightDirector';
+import MissionReport from '@/hud/MissionReport';
 import FlightBar from '@/hud/FlightBar';
 import InstrumentRail from '@/hud/InstrumentRail';
 import ContextBanner from '@/hud/ContextBanner';
@@ -31,32 +36,39 @@ const Index = () => {
   return (
     <div data-hud-mode={mode} className="relative h-screen w-full overflow-hidden bg-background">
       <div className="absolute inset-0">
-        <StageCanvas />
+        <ErrorBoundary fallback={(reset) => <StageFallback reset={reset} />}>
+          <StageCanvas />
+        </ErrorBoundary>
       </div>
       <StasisField />
       <LabTransition />
       <MissionWatchers />
+      <FlightRecorder />
+      <Countdown />
 
-      <div ref={hudRef} className="hud-shell z-10">
-        <div className="[grid-area:bar]">
-          <FlightBar />
-        </div>
-        <div className="min-h-0 [grid-area:left]">
-          <InstrumentRail />
-        </div>
-        <div className="flex min-w-0 justify-center [grid-area:center]">
-          <ContextBanner />
-        </div>
-        <div className="flex min-h-0 flex-col items-end gap-3 [grid-area:right]">
-          {mode === 'spacetime' && <BodyInspector />}
-          <ObjectivesPanel />
-        </div>
-        <div className="flex min-w-0 items-end justify-center [grid-area:temporal]">
-          <div className="w-full max-w-[640px]">
-            <TemporalHud />
+      <ErrorBoundary fallback={(reset) => <HudFallback reset={reset} />}>
+        <div ref={hudRef} className="hud-shell z-10">
+          <div className="[grid-area:bar]">
+            <FlightBar />
+          </div>
+          <div className="min-h-0 [grid-area:left]">
+            <InstrumentRail />
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-col items-center gap-3 [grid-area:center]">
+            <ContextBanner />
+            {mode === 'rocket' && <MissionReport />}
+          </div>
+          <div className="flex min-h-0 flex-col items-end gap-3 [grid-area:right]">
+            {mode === 'spacetime' ? <BodyInspector /> : <FlightDirector />}
+            <ObjectivesPanel />
+          </div>
+          <div className="flex min-w-0 items-end justify-center [grid-area:temporal]">
+            <div className="w-full max-w-[640px]">
+              <TemporalHud />
+            </div>
           </div>
         </div>
-      </div>
+      </ErrorBoundary>
 
       {hudHidden && (
         <button
