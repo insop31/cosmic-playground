@@ -10,9 +10,21 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
+    <TooltipProvider delayDuration={150}>
       <Toaster />
-      <Sonner />
+      <Sonner
+        theme="dark"
+        position="bottom-right"
+        offset={72}
+        toastOptions={{
+          classNames: {
+            toast: 'hud-panel !bg-[hsl(var(--hud-surface)/0.92)] !border-white/10 !text-foreground font-sans',
+            title: '!text-[13px] !font-medium',
+            description: '!text-[12px] !text-hud-dim',
+            icon: '!text-ok',
+          },
+        }}
+      />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />

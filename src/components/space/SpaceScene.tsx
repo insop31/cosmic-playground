@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
+import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
@@ -52,15 +53,17 @@ const SpaceScene = ({
   return (
     <Canvas
       camera={{ position: [0, 45, 45], fov: 55, near: 0.1, far: 800 }}
-      gl={{ antialias: true, alpha: false }}
+      dpr={[1, 2]}
+      gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
       style={{ background: 'black' }}
     >
       <color attach="background" args={['#050a14']} />
       <fog attach="fog" args={['#050a14', 120, 350]} />
 
-      <ambientLight intensity={0.15} />
-      <pointLight position={[20, 30, 20]} intensity={0.5} color="#00e5ff" />
-      <pointLight position={[-15, 20, -10]} intensity={0.3} color="#7c3aed" />
+      {/* Stars carry their own point lights; these only keep night sides readable */}
+      <ambientLight intensity={0.14} />
+      <hemisphereLight args={['#8fb8ff', '#1a0f2e', 0.35]} />
+      <directionalLight position={[30, 40, 20]} intensity={0.75} color="#e8f0ff" />
 
       <Starfield />
 
@@ -93,6 +96,14 @@ const SpaceScene = ({
         maxDistance={200}
         maxPolarAngle={Math.PI / 2.1}
       />
+
+      {/* MSAA targets and the ToneMapping effect both render black on some GPUs
+          (seen on ANGLE/D3D11), so anti-aliasing uses SMAA instead. */}
+      <EffectComposer multisampling={0}>
+        <Bloom mipmapBlur luminanceThreshold={0.85} luminanceSmoothing={0.25} intensity={0.7} radius={0.7} />
+        <SMAA />
+        <Vignette offset={0.32} darkness={0.55} />
+      </EffectComposer>
     </Canvas>
   );
 };

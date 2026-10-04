@@ -1064,39 +1064,19 @@ const WeatherImpactHUD = ({
           distanceFactor={15}
           zIndexRange={[400, 0]}
         >
-          <div style={{
-            fontFamily: "'Inter','Segoe UI',monospace",
-            background: 'rgba(4,8,18,0.90)',
-            border: `1px solid ${msg.color}55`,
-            borderLeft: `3px solid ${msg.color}`,
-            borderRadius: '7px',
-            padding: '5px 10px 5px 8px',
-            minWidth: '210px',
-            backdropFilter: 'blur(12px)',
-            boxShadow: `0 0 20px ${msg.color}40`,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '13px' }}>{msg.icon}</span>
-              <span style={{
-                color: msg.color, fontWeight: 700, fontSize: '10px',
-                letterSpacing: '0.1em', textTransform: 'uppercase',
-              }}>
+          <div className="scene-label scene-label-accent w-[230px] px-2.5 py-2" style={{ borderLeftColor: msg.color }}>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[12px] leading-none">{msg.icon}</span>
+              <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em]" style={{ color: msg.color }}>
                 {msg.title}
               </span>
               {msg.critical && (
-                <span style={{
-                  marginLeft: 'auto', background: `${msg.color}30`,
-                  color: msg.color, fontSize: '7.5px', fontWeight: 800,
-                  letterSpacing: '0.12em', padding: '1px 5px',
-                  borderRadius: '4px', border: `1px solid ${msg.color}50`,
-                  textTransform: 'uppercase',
-                }}>⚠ CRITICAL</span>
+                <span className="scene-tag ml-auto" style={{ background: `${msg.color}26`, color: msg.color }}>
+                  Critical
+                </span>
               )}
             </div>
-            <div style={{
-              color: 'rgba(190,205,225,0.76)', fontSize: '9.5px',
-              marginTop: '3px', lineHeight: '1.45',
-            }}>
+            <div className="mt-1 text-[10.5px] leading-snug text-foreground/75">
               {msg.detail}
             </div>
           </div>

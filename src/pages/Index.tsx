@@ -1,14 +1,19 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import SpaceScene, { CelestialBody } from '../components/space/SpaceScene';
 import RocketScene from '../components/rocket/RocketScene';
-import RocketControls from '../components/rocket/RocketControls';
+import RocketControls, { type RocketFlightSummary } from '../components/rocket/RocketControls';
 import { RocketParams, RocketState, DEFAULT_PARAMS, INITIAL_STATE } from '../components/rocket/rocketTypes';
 import { WeatherConditionId, applyWeatherToParams } from '../components/rocket/weatherPresets';
 import TimeControls from '../components/ui/TimeControls';
+import { stepSpeed } from '../components/hud/timeSteps';
 import ObjectLibrary from '../components/ui/ObjectLibrary';
 import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
-import { Rocket, Orbit, Trophy, Sparkles, Target } from 'lucide-react';
+import TopBar from '../components/hud/TopBar';
+import MissionTracker, { type MissionView } from '../components/hud/MissionTracker';
+import { IconButton, Kbd } from '../components/hud/controls';
+import { AlertTriangle, ArrowUpRight, Crosshair, Eye, Orbit, PanelLeftOpen, Rocket, TrendingUp, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { toast } from 'sonner';
 import {
   deleteRocketPreset,
   deleteSpacetimeScenario,
@@ -73,6 +78,32 @@ const buildMissionCards = (
     visibleIds.add(mission.id);
   }
   return cards;
+};
+
+// The spacetime canvas only needs to re-render when its own inputs change,
+// not on every rocket-telemetry update of this page.
+const MemoSpaceScene = memo(SpaceScene);
+
+const TYPE_LABEL: Record<string, string> = {
+  star: 'star',
+  planet: 'planet',
+  blackhole: 'black hole',
+  neutron: 'neutron star',
+  asteroid: 'asteroid',
+  comet: 'comet',
+};
+
+const OUTCOME_BANNER: Partial<Record<RocketState['outcome'], { text: string; tone: string; icon: JSX.Element }>> = {
+  orbiting: { text: 'Stable orbit achieved', tone: 'border-ok/40 text-ok', icon: <Orbit size={14} /> },
+  escape: { text: 'Escape velocity reached', tone: 'border-primary/40 text-primary', icon: <ArrowUpRight size={14} /> },
+  suborbital: { text: 'Suborbital trajectory', tone: 'border-warn/40 text-warn', icon: <TrendingUp size={14} /> },
+  crashed: { text: 'Impact', tone: 'border-danger/40 text-danger', icon: <AlertTriangle size={14} /> },
+  burnup: { text: 'Burn-up on ascent', tone: 'border-danger/40 text-danger', icon: <AlertTriangle size={14} /> },
+};
+
+const isTypingTarget = (target: EventTarget | null) => {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="listbox"], [role="menu"]'));
 };
 
 const cloneBodiesForScene = (savedBodies: CelestialBody[]) => savedBodies.map((body, index) => ({
@@ -617,16 +648,118 @@ const Index = () => {
     registerExperiment(`physics-mode:${value ? 'realistic' : 'arcade'}`);
   }, [registerExperiment]);
 
+  // ─── HUD state ───
+  const [hudHidden, setHudHidden] = useState(false);
+  const [dockCollapsed, setDockCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
+  const [missionsCollapsed, setMissionsCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1280);
+
+  // Collapse panels when the window shrinks past a breakpoint (expanding is left to the user)
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 1279px)');
+    const compact = window.matchMedia('(max-width: 1023px)');
+    const onNarrow = (event: MediaQueryListEvent) => { if (event.matches) setMissionsCollapsed(true); };
+    const onCompact = (event: MediaQueryListEvent) => { if (event.matches) setDockCollapsed(true); };
+    narrow.addEventListener('change', onNarrow);
+    compact.addEventListener('change', onCompact);
+    return () => {
+      narrow.removeEventListener('change', onNarrow);
+      compact.removeEventListener('change', onCompact);
+    };
+  }, []);
+
+  const handleCancelPlacement = useCallback(() => setPendingPlacement(null), []);
+  const handlePlay = useCallback(() => setIsPlaying(true), []);
+  const handlePause = useCallback(() => setIsPlaying(false), []);
+  const handleCollapseDock = useCallback(() => setDockCollapsed(true), []);
+  const handleToggleMissions = useCallback(() => setMissionsCollapsed((value) => !value), []);
+  const handleHideHud = useCallback(() => setHudHidden(true), []);
+  const handleModeChange = useCallback((nextMode: AppMode) => setMode(nextMode), []);
+  const handleActivePackChange = useCallback(
+    (packId: string) => handleChallengePackChange(mode, packId),
+    [handleChallengePackChange, mode],
+  );
+  const handleReset = mode === 'spacetime' ? handleResetSpacetime : handleRocketReset;
+
+  // ─── Mission-complete toasts ───
+  const toastedAchievementsRef = useRef(achievements);
+  useEffect(() => {
+    const previous = toastedAchievementsRef.current;
+    (Object.keys(achievements) as MissionId[]).forEach((id) => {
+      if (achievements[id] && !previous[id]) {
+        const mission = findMission(id);
+        if (mission) {
+          toast.success(`Mission complete · ${mission.name}`, { description: `+${mission.score} points` });
+        }
+      }
+    });
+    toastedAchievementsRef.current = achievements;
+  }, [achievements]);
+
+  // ─── Keyboard shortcuts ───
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+      const target = event.target instanceof Element ? event.target : null;
+
+      switch (event.key) {
+        case ' ': {
+          // A focused button already activates on Space.
+          if (target?.closest('button, [role="slider"], [role="switch"], [role="radio"]')) return;
+          event.preventDefault();
+          setIsPlaying((value) => !value);
+          break;
+        }
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          if (target?.closest('[role="slider"], [role="radio"], [role="radiogroup"]')) return;
+          event.preventDefault();
+          setTimeScale((value) => stepSpeed(value, event.key === 'ArrowLeft' ? -1 : 1));
+          setIsPlaying(true);
+          break;
+        }
+        case 'r':
+        case 'R':
+          handleReset();
+          break;
+        case '1':
+          setMode('spacetime');
+          break;
+        case '2':
+          setMode('rocket');
+          break;
+        case 'h':
+        case 'H':
+          setHudHidden((value) => !value);
+          break;
+        case 'Escape':
+          if (pendingPlacement) setPendingPlacement(null);
+          else if (hudHidden) setHudHidden(false);
+          break;
+        case '[':
+          setDockCollapsed((value) => !value);
+          break;
+        case ']':
+          setMissionsCollapsed((value) => !value);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleReset, hudHidden, pendingPlacement]);
+
   // effectiveTimeScale carries sign (negative = rewind, 0 = paused)
   const effectiveTimeScale = isPlaying ? timeScale : 0;
   const activePack = getActivePack(mode, activePacks[mode]);
   const modePacks = PACKS_BY_MODE[mode];
   const modeMissions = activePack.missions;
   const unlockedCount = modeMissions.filter((mission) => achievements[mission.id]).length;
-  const visibleMissions = missionQueues[mode].map((card) => ({
+  const visibleMissions = useMemo<MissionView[]>(() => missionQueues[mode].map((card) => ({
     ...findMission(card.id)!,
     phase: card.phase,
-  }));
+  })), [missionQueues, mode]);
   const experimentCount = Array.from(experimentKeysRef.current).filter((key) => (
     mode === 'rocket'
       ? key.startsWith('rocket:')
@@ -635,11 +768,40 @@ const Index = () => {
         && !key.startsWith('rocket-profile:')
   )).length;
 
+  const spacetimeStats = useMemo(() => ({
+    bodies: bodies.length,
+    timeScale,
+    isPlaying,
+    universeScale,
+  }), [bodies.length, isPlaying, timeScale, universeScale]);
+
+  const rocketTelemetry = useMemo(() => ({
+    altitude: rocketState.altitude,
+    fuel: rocketState.fuel,
+    phase: rocketState.phase,
+    velocity: rocketState.velocity,
+  }), [rocketState.altitude, rocketState.fuel, rocketState.phase, rocketState.velocity]);
+
+  // Flight summary for the dock; recomputed only when phase or outcome changes,
+  // so per-frame telemetry doesn't re-render the controls.
+  const rocketSummary = useMemo<RocketFlightSummary>(() => ({
+    phase: rocketState.phase,
+    outcome: rocketState.outcome,
+    maxAltitude: rocketState.maxAltitude,
+    elapsed: rocketState.elapsed,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [rocketState.phase, rocketState.outcome]);
+
+  const placementLabel = pendingPlacement
+    ? pendingPlacement.name ?? TYPE_LABEL[pendingPlacement.type] ?? pendingPlacement.type
+    : null;
+  const outcomeBanner = mode === 'rocket' && rocketState.phase === 'outcome' ? OUTCOME_BANNER[rocketState.outcome] : undefined;
+
   return (
-    <div className="w-full h-screen relative overflow-hidden bg-background">
+    <div data-hud-mode={mode} className="relative h-screen w-full overflow-hidden bg-background">
       {/* 3D Canvases - use visibility instead of conditional render to avoid WebGL context loss */}
       <div className="absolute inset-0" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
-        <SpaceScene
+        <MemoSpaceScene
           bodies={bodies}
           timeScale={effectiveTimeScale}
           onBodyRemoved={handleBodyRemoved}
@@ -653,229 +815,193 @@ const Index = () => {
         <RocketScene params={effectiveRocketParams} state={rocketState} onUpdateState={setRocketState} timeScale={effectiveTimeScale} activeWeather={activeWeather} />
       </div>
 
-      {/* Top Bar */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 flex items-center justify-between pointer-events-none">
-        <div className="glass-panel px-4 py-2.5 flex items-center gap-3 pointer-events-auto min-w-[280px]">
-          <img
-            src="/cosmic-playground-logo.png"
-            alt="Cosmic Playground logo"
-            className="h-12 w-auto object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.2)]"
-          />
-          <div>
-            <h1 className="text-sm font-bold tracking-wide text-foreground">COSMIC PLAYGROUND</h1>
-            <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">
-              {mode === 'spacetime' ? 'Gravity Sandbox' : 'Rocket Simulator'}
-            </p>
-          </div>
-        </div>
-
-        {/* Mode Switcher */}
-        <div className="glass-panel p-1 flex gap-1 pointer-events-auto">
-          <button
-            onClick={() => setMode('spacetime')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              mode === 'spacetime'
-                ? 'bg-primary/20 text-primary glow-border'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
-            }`}
+      <AnimatePresence>
+        {!hudHidden && (
+          <motion.div
+            key="hud"
+            className="pointer-events-none absolute inset-0 z-10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
           >
-            <Orbit size={14} /> Spacetime
-          </button>
-          <button
-            onClick={() => setMode('rocket')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              mode === 'rocket'
-                ? 'bg-primary/20 text-primary glow-border'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
-            }`}
-          >
-            <Rocket size={14} /> Rocket
-          </button>
-        </div>
+            {/* Zone 1: top bar */}
+            <div className="absolute inset-x-3 top-3">
+              <TopBar
+                mode={mode}
+                onModeChange={handleModeChange}
+                onHideHud={handleHideHud}
+                score={explorationScore}
+                spacetime={spacetimeStats}
+                rocket={rocketTelemetry}
+              />
+            </div>
 
-        {/* Stats */}
-        <div className="glass-panel px-3 py-2 pointer-events-auto">
-          <div className="flex items-center gap-4 text-xs font-mono">
-            {mode === 'spacetime' ? (
-              <>
-                <div className="text-muted-foreground">Bodies: <span className="text-primary">{bodies.length}</span></div>
-                <div className="text-muted-foreground">
-                  Speed: <span className={timeScale < 0 ? 'text-amber-400' : 'text-primary'}>
-                    {timeScale < 0 ? `◀ ${Math.abs(timeScale)}x` : `${timeScale}x`}
-                  </span>
-                </div>
-                {universeScale > 1.001 && (
-                  <div className="text-muted-foreground">
-                    ∿ Scale: <span className="text-violet-400">{universeScale.toFixed(3)}x</span>
-                  </div>
+            {/* Zone 2: tool dock */}
+            <div className="absolute bottom-[76px] left-3 top-[72px] flex items-start">
+              <AnimatePresence mode="wait" initial={false}>
+                {dockCollapsed ? (
+                  <motion.div
+                    key="rail"
+                    initial={{ opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -12 }}
+                    transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+                    className="hud-panel pointer-events-auto flex h-fit flex-col items-center gap-1 p-1.5"
+                  >
+                    <IconButton label="Open dock ([)" onClick={() => setDockCollapsed(false)}>
+                      <PanelLeftOpen size={16} />
+                    </IconButton>
+                    <div className="my-1 h-px w-5 bg-white/10" />
+                    <IconButton label={mode === 'spacetime' ? 'Spacetime lab' : 'Launch control'} onClick={() => setDockCollapsed(false)} active>
+                      {mode === 'spacetime' ? <Orbit size={15} /> : <Rocket size={15} />}
+                    </IconButton>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key={`dock-${mode}`}
+                    initial={{ opacity: 0, x: -16 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -16 }}
+                    transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+                    className={`pointer-events-auto flex max-h-full ${mode === 'rocket' ? 'h-full' : ''}`}
+                  >
+                    {mode === 'spacetime' ? (
+                      <ObjectLibrary
+                        onBeginPlacement={handleBeginPlacement}
+                        onApplyTemplate={handleApplyTemplate}
+                        bodies={bodies}
+                        onRemoveBody={handleRemoveBody}
+                        onRemoveAll={handleRemoveAll}
+                        placementActive={Boolean(pendingPlacement)}
+                        velocityScale={placementVelocityScale}
+                        onVelocityScaleChange={handleVelocityScaleChange}
+                        realisticMode={realisticMode}
+                        onRealisticModeChange={handleRealisticModeChange}
+                        savedScenarios={savedScenarios}
+                        onSaveScenario={handleSaveCurrentScenario}
+                        onLoadScenario={handleLoadScenario}
+                        onDeleteScenario={handleDeleteScenario}
+                        onCollapse={handleCollapseDock}
+                      />
+                    ) : (
+                      <RocketControls
+                        params={effectiveRocketParams}
+                        state={rocketSummary}
+                        onParamChange={handleRocketParamChange}
+                        onLaunch={handleLaunch}
+                        onReset={handleRocketReset}
+                        savedPresets={savedRocketPresets}
+                        onSavePreset={handleSaveRocketPreset}
+                        onLoadPreset={handleLoadRocketPreset}
+                        onDeletePreset={handleDeleteRocketPreset}
+                        activeWeather={activeWeather}
+                        onWeatherChange={handleWeatherChange}
+                        onCollapse={handleCollapseDock}
+                      />
+                    )}
+                  </motion.div>
                 )}
-              </>
-            ) : (
-              <>
-                <div className="text-muted-foreground">Alt: <span className="text-primary">{rocketState.altitude.toFixed(1)}</span></div>
-                <div className="text-muted-foreground">Fuel: <span className="text-primary">{(rocketState.fuel * 100).toFixed(0)}%</span></div>
-                <div className="text-muted-foreground">Phase: <span className="text-primary capitalize">{rocketState.phase}</span></div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+              </AnimatePresence>
+            </div>
 
-      {/* Left Panel */}
-      <div className="absolute left-4 top-20 bottom-20 z-10 pointer-events-auto">
-        {mode === 'spacetime' ? (
-          <ObjectLibrary
-            onBeginPlacement={handleBeginPlacement}
-            onApplyTemplate={handleApplyTemplate}
-            bodies={bodies}
-            onRemoveBody={handleRemoveBody}
-            onRemoveAll={handleRemoveAll}
-            placementActive={Boolean(pendingPlacement)}
-            velocityScale={placementVelocityScale}
-            onVelocityScaleChange={handleVelocityScaleChange}
-            realisticMode={realisticMode}
-            onRealisticModeChange={handleRealisticModeChange}
-            savedScenarios={savedScenarios}
-            onSaveScenario={handleSaveCurrentScenario}
-            onLoadScenario={handleLoadScenario}
-            onDeleteScenario={handleDeleteScenario}
-          />
-        ) : (
-          <RocketControls
-            params={effectiveRocketParams}
-            state={rocketState}
-            onParamChange={handleRocketParamChange}
-            onLaunch={handleLaunch}
-            onReset={handleRocketReset}
-            savedPresets={savedRocketPresets}
-            onSavePreset={handleSaveRocketPreset}
-            onLoadPreset={handleLoadRocketPreset}
-            onDeletePreset={handleDeleteRocketPreset}
-            activeWeather={activeWeather}
-            onWeatherChange={handleWeatherChange}
-          />
+            {/* Zone 3: mission tracker */}
+            <div className="pointer-events-auto absolute right-3 top-[72px] flex max-h-[calc(100%-148px)] w-[300px] flex-col">
+              <MissionTracker
+                modeLabel={mode === 'spacetime' ? 'Spacetime' : 'Rocket'}
+                activePack={activePack}
+                packs={modePacks}
+                onPackChange={handleActivePackChange}
+                missions={visibleMissions}
+                unlockedCount={unlockedCount}
+                experimentLabel={mode === 'spacetime' ? 'Lab runs' : 'Flight tests'}
+                experimentCount={experimentCount}
+                collapsed={missionsCollapsed}
+                onToggleCollapsed={handleToggleMissions}
+              />
+            </div>
+
+            {/* Zone 5: context banner */}
+            <div className="absolute left-1/2 top-[72px] flex -translate-x-1/2 flex-col items-center gap-2">
+              <AnimatePresence>
+                {mode === 'spacetime' && placementLabel && (
+                  <motion.div
+                    key="placement"
+                    initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                    transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                    className="hud-panel pointer-events-auto flex items-center gap-2.5 border-primary/40 py-1.5 pl-3 pr-1.5"
+                    role="status"
+                  >
+                    <Crosshair size={14} className="text-primary" />
+                    <span className="whitespace-nowrap text-[12.5px] text-foreground">
+                      Click the grid to place <span className="font-semibold capitalize text-primary">{placementLabel}</span>
+                    </span>
+                    <Kbd>Esc</Kbd>
+                    <IconButton label="Cancel placement" size="sm" onClick={handleCancelPlacement}>
+                      <X size={14} />
+                    </IconButton>
+                  </motion.div>
+                )}
+                {outcomeBanner && (
+                  <motion.div
+                    key={`outcome-${rocketState.outcome}`}
+                    initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                    transition={{ duration: 0.24, ease: [0.2, 0.8, 0.2, 1] }}
+                    className={`hud-panel flex items-center gap-2 whitespace-nowrap px-3.5 py-2 font-display text-[13px] font-semibold uppercase tracking-[0.12em] ${outcomeBanner.tone}`}
+                    role="status"
+                  >
+                    {outcomeBanner.icon}
+                    {outcomeBanner.text}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Zone 4: time dock */}
+            <div className="pointer-events-auto absolute bottom-3 left-1/2 -translate-x-1/2">
+              <TimeControls
+                timeScale={timeScale}
+                isPlaying={isPlaying}
+                onPlay={handlePlay}
+                onPause={handlePause}
+                onSpeedChange={setTimeScale}
+                onReset={handleReset}
+              />
+            </div>
+
+            {/* Hints */}
+            <div className="absolute bottom-5 right-4 hidden items-center gap-2 font-mono text-[10.5px] text-hud-faint 2xl:flex">
+              {mode === 'spacetime' ? (
+                <span>Drag to orbit · Scroll to zoom · Add bodies to warp spacetime</span>
+              ) : (
+                <span>Tune · Ignite · Watch the trajectory</span>
+              )}
+              <span className="text-white/15">|</span>
+              <Kbd>H</Kbd><span>hide HUD</span>
+            </div>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
 
-      <div className="absolute right-4 top-20 z-10 w-[460px] pointer-events-auto">
-        <div className="glass-panel p-4 animate-fade-in">
-          <div className="flex items-start justify-between gap-3 mb-4">
-            <div>
-              <div className="flex items-center gap-2 text-primary mb-1">
-                <Trophy size={16} />
-                <span className="text-base font-semibold tracking-[0.18em] uppercase">Mission Progress</span>
-              </div>
-              <p className="text-base text-muted-foreground">{activePack.description}</p>
-            </div>
-            <div className="text-right">
-              <div className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Score</div>
-              <div className="text-2xl font-semibold text-foreground">{explorationScore}</div>
-            </div>
-          </div>
-
-          <div className="mb-4 rounded-xl border border-border/30 bg-muted/15 p-3">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Challenge Pack</div>
-                <div className="text-base font-semibold text-foreground">{activePack.name}</div>
-              </div>
-              <select
-                value={activePack.id}
-                onChange={(e) => handleChallengePackChange(mode, e.target.value)}
-                className="rounded-lg border border-border/40 bg-background/80 px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none"
-              >
-                {modePacks.map((pack) => (
-                  <option key={pack.id} value={pack.id}>
-                    {pack.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="text-sm text-muted-foreground">{activePack.missions.length} themed missions in this pack.</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mb-4">
-            <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground mb-1">
-                <Sparkles size={12} />
-                Unlocks
-              </div>
-              <div className="text-2xl font-semibold text-foreground">{unlockedCount}/{modeMissions.length}</div>
-            </div>
-            <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground mb-1">
-                <Target size={12} />
-                {mode === 'spacetime' ? 'Lab Runs' : 'Flight Tests'}
-              </div>
-              <div className="text-2xl font-semibold text-foreground">{experimentCount}</div>
-            </div>
-          </div>
-
-          <div className="space-y-2 min-h-[248px]">
-            <AnimatePresence mode="popLayout">
-              {visibleMissions.map((achievement) => (
-                <motion.div
-                  key={achievement.id}
-                  layout
-                  initial={{ opacity: 0, y: 18, scale: 0.97 }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                    scale: achievement.phase === 'complete' ? 0.985 : 1,
-                    borderColor: achievement.phase === 'complete' ? 'rgba(0, 229, 255, 0.35)' : 'rgba(148, 163, 184, 0.18)',
-                    backgroundColor: achievement.phase === 'complete' ? 'rgba(0, 229, 255, 0.08)' : 'rgba(148, 163, 184, 0.08)',
-                  }}
-                  exit={{ opacity: 0, x: 36, scale: 0.94, height: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0 }}
-                  transition={{ duration: 0.32, ease: 'easeOut' }}
-                  className="rounded-xl border px-3 py-2.5"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className={`text-base font-medium ${achievement.phase === 'complete' ? 'text-primary' : 'text-foreground'}`}>{achievement.name}</div>
-                      <div className="text-base text-muted-foreground">{achievement.description}</div>
-                    </div>
-                    <div className={`text-sm font-mono uppercase tracking-[0.2em] ${achievement.phase === 'complete' ? 'text-primary' : 'text-muted-foreground/70'}`}>
-                      {achievement.phase === 'complete' ? 'Complete' : 'Incomplete'}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-
-            {visibleMissions.length === 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-xl border border-primary/35 bg-primary/10 px-3 py-4 text-center"
-              >
-                <div className="text-base font-medium text-primary">All {mode === 'spacetime' ? 'spacetime' : 'rocket'} missions complete</div>
-                <div className="text-base text-muted-foreground mt-1">Every mission in this queue has been cleared.</div>
-              </motion.div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Center - Time Controls */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-        <TimeControls
-          timeScale={timeScale}
-          isPlaying={isPlaying}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onSpeedChange={setTimeScale}
-          onReset={mode === 'spacetime' ? handleResetSpacetime : handleRocketReset}
-        />
-      </div>
-
-      {/* Bottom Right - Hint */}
-      <div className="absolute bottom-6 right-4 z-10">
-        <p className="text-[10px] font-mono text-muted-foreground/50">
-          {mode === 'spacetime'
-            ? 'Drag to orbit · Scroll to zoom · Add objects to warp spacetime'
-            : 'Adjust parameters · Launch · Observe trajectory'}
-        </p>
-      </div>
+      <AnimatePresence>
+        {hudHidden && (
+          <motion.button
+            key="show-hud"
+            type="button"
+            onClick={() => setHudHidden(false)}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="hud-panel hud-focus absolute bottom-4 right-4 z-10 flex items-center gap-2 px-3 py-2 text-[12px] text-hud-dim transition-colors hover:text-foreground"
+          >
+            <Eye size={14} /> Show HUD <Kbd>H</Kbd>
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

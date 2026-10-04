@@ -1,10 +1,13 @@
-import { useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import type { RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
 import RocketModel from './RocketModel';
+import { LaunchComplex } from './RocketVisuals';
+import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
+import { createAtmosphereMaterial, createSurfaceMaterial } from '../three/materials';
 import { OrbitPathState, RocketParams, RocketState, computeTrajectoryPreview } from './rocketTypes';
 import type { WeatherConditionId } from './weatherPresets';
 import { WeatherEnvironment, WeatherShakeGroup, createLightningStrikeState } from './WeatherEffects';
@@ -86,56 +89,7 @@ const EXOSPHERE_LIMIT = 62;
 
 // ─── Scene components ─────────────────────────────────────────────────────────
 
-const PlanetSurface = () => (
-  <group>
-    {/* Base terrain */}
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <planeGeometry args={[200, 200, 64, 64]} />
-      <meshStandardMaterial color="#2d3748" roughness={0.8} metalness={0.1} />
-    </mesh>
-    {/* Grid */}
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-      <planeGeometry args={[200, 200, 32, 32]} />
-      <meshStandardMaterial color="#4a5568" roughness={1} metalness={0} transparent opacity={0.6} wireframe />
-    </mesh>
-    {/* Launch pad base */}
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-      <circleGeometry args={[4, 32]} />
-      <meshStandardMaterial color="#cbd5e1" roughness={0.9} metalness={0.1} />
-    </mesh>
-    {/* Outer warning ring */}
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
-      <ringGeometry args={[2.8, 3.2, 32]} />
-      <meshStandardMaterial color="#f59e0b" emissive="#f59e0b" emissiveIntensity={0.5} roughness={0.5} />
-    </mesh>
-    {/* Inner glow ring */}
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
-      <ringGeometry args={[0.8, 1.2, 32]} />
-      <meshStandardMaterial color="#38bdf8" emissive="#38bdf8" emissiveIntensity={0.8} />
-    </mesh>
-
-    {/* Launch tower */}
-    <mesh position={[-2.5, 4, 0]}>
-      <boxGeometry args={[0.4, 8, 0.4]} />
-      <meshStandardMaterial color="#cbd5e1" metalness={0.5} roughness={0.5} />
-    </mesh>
-    <mesh position={[-1.25, 6.5, 0]}>
-      <boxGeometry args={[2.5, 0.15, 0.15]} />
-      <meshStandardMaterial color="#cbd5e1" metalness={0.5} roughness={0.5} />
-    </mesh>
-
-    {/* Tower lights */}
-    <pointLight position={[-2.5, 8, 0]} color="#ef4444" intensity={2} distance={10} />
-    <mesh position={[-2.5, 8.1, 0]}>
-      <sphereGeometry args={[0.15, 8, 8]} />
-      <meshBasicMaterial color="#ef4444" />
-    </mesh>
-
-    {/* Pad fill lights */}
-    <pointLight position={[3, 2, 3]} color="#ffffff" intensity={4} distance={15} />
-    <pointLight position={[-3, 2, -3]} color="#ffffff" intensity={4} distance={15} />
-  </group>
-);
+const PlanetSurface = () => <LaunchComplex />;
 
 const TrajectoryArc = ({ params }: { params: RocketParams }) => {
   const line = useMemo(() => {
@@ -237,20 +191,8 @@ const OrbitRocketMarker = ({ position }: { position: [number, number, number] })
       </mesh>
       <pointLight color="#fde047" intensity={1.8} distance={18} />
       <Html position={[0, 1.4, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
-        <div
-          style={{
-            fontSize: '10px',
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: '#fde047',
-            background: 'rgba(0,0,0,0.55)',
-            border: '1px solid rgba(250,204,21,0.45)',
-            borderRadius: '6px',
-            padding: '2px 6px',
-            backdropFilter: 'blur(4px)',
-          }}
-        >
+        <div className="scene-label flex items-center gap-1.5 whitespace-nowrap border-warn/40 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-warn">
+          <span className="h-1.5 w-1.5 rounded-full bg-warn animate-pulse-dot" />
           Rocket
         </div>
       </Html>
@@ -269,21 +211,30 @@ const Atmosphere = ({ density }: { density: number }) => (
 const PlanetGlobe = ({ planetRadius, atmosphericDensity }: { planetRadius: number; atmosphericDensity: number }) => {
   const worldRadius = planetRadius * 2;
   const centerY = pyToWorldY(-planetRadius);
+  const surface = useMemo(() => createSurfaceMaterial({ kind: 'earth', colors: ['#000', '#000', '#000'], caps: 0.82, seed: 4.2, nightGlow: 0.05 }), []);
+  const clouds = useMemo(() => createSurfaceMaterial({ kind: 'clouds', colors: ['#fff', '#fff', '#fff'], seed: 1.9, roughness: 1, nightGlow: 0.03 }), []);
+  const atmosphere = useMemo(
+    () => createAtmosphereMaterial('#5fb0ff', THREE.MathUtils.clamp(0.8 + atmosphericDensity * 1.4, 0.8, 2.2), 2.6),
+    [atmosphericDensity],
+  );
+  useEffect(() => () => atmosphere.dispose(), [atmosphere]);
+  const globeRef = useRef<THREE.Group>(null);
+  useFrame((_, delta) => {
+    if (globeRef.current) globeRef.current.rotation.y += delta * 0.02;
+    clouds.userData.uniforms.uTime.value += delta;
+  });
   return (
-    <group>
-      <mesh position={[0, centerY, 0]}>
-        <sphereGeometry args={[worldRadius, 72, 72]} />
-        <meshStandardMaterial color="#173c68" roughness={0.9} metalness={0.06} />
-      </mesh>
-      <mesh position={[0, centerY, 0]}>
-        <sphereGeometry args={[worldRadius * 1.04, 64, 64]} />
-        <meshBasicMaterial
-          color="#4fb5ff"
-          transparent
-          opacity={THREE.MathUtils.clamp(atmosphericDensity * 0.18, 0.05, 0.24)}
-          side={THREE.BackSide}
-          depthWrite={false}
-        />
+    <group position={[0, centerY, 0]}>
+      <group ref={globeRef} rotation={[0.2, 0, 0.1]}>
+        <mesh scale={worldRadius} material={surface}>
+          <sphereGeometry args={[1, 96, 96]} />
+        </mesh>
+        <mesh scale={worldRadius * 1.012} material={clouds}>
+          <sphereGeometry args={[1, 72, 72]} />
+        </mesh>
+      </group>
+      <mesh scale={worldRadius * 1.06} material={atmosphere}>
+        <sphereGeometry args={[1, 72, 72]} />
       </mesh>
     </group>
   );
@@ -394,64 +345,17 @@ const AtmosphericLayers = ({
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
               <div
+                className="scene-label scene-label-accent min-w-[150px] px-2.5 py-1.5"
                 style={{
-                  position: 'relative',
-                  background: 'rgba(4, 8, 18, 0.82)',
-                  border: `1px solid ${layer.color}55`,
-                  borderLeft: `3px solid ${layer.color}`,
-                  borderRadius: '7px',
-                  padding: '5px 10px 5px 8px',
-                  minWidth: '152px',
-                  fontFamily: "'Inter', 'Segoe UI', monospace",
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  boxShadow: `0 0 14px ${layer.color}25, 0 2px 8px rgba(0,0,0,0.6)`,
+                  borderLeftColor: layer.color,
                   transform: `translateY(-50%) translateX(${trajectoryDir > 0 ? '0' : '-100%'})`,
                 }}
               >
-                {/* Row 1: icon + name */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span style={{ fontSize: '12px' }}>{layer.icon}</span>
-                  <span
-                    style={{
-                      color: layer.color,
-                      fontWeight: 700,
-                      fontSize: '11px',
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {layer.name}
-                  </span>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: layer.borderColor }}>
+                  {layer.name}
                 </div>
-                {/* Row 2: sublabel */}
-                <div
-                  style={{
-                    color: 'rgba(200,210,230,0.75)',
-                    fontSize: '9.5px',
-                    marginTop: '2px',
-                    letterSpacing: '0.03em',
-                  }}
-                >
-                  {layer.sublabel}
-                </div>
-                {/* Row 3: altitude range badge */}
-                <div
-                  style={{
-                    display: 'inline-block',
-                    marginTop: '4px',
-                    background: `${layer.color}22`,
-                    border: `1px solid ${layer.color}44`,
-                    borderRadius: '4px',
-                    padding: '1px 5px',
-                    color: `${layer.color}cc`,
-                    fontSize: '8.5px',
-                    fontFamily: 'monospace',
-                    letterSpacing: '0.04em',
-                  }}
-                >
-                  {layer.altRange}
-                </div>
+                <div className="text-[10.5px] text-hud-dim">{layer.sublabel}</div>
+                <div className="mt-1 font-mono text-[9.5px] tracking-wide text-foreground/70">{layer.altRange}</div>
               </div>
             </Html>
           </group>
@@ -599,6 +503,7 @@ const RocketScene = ({
   return (
     <Canvas
       camera={{ position: [5.5, 4.8, 13.5], fov: 42, near: 0.1, far: 20000 }}
+      dpr={[1, 2]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       style={{ background: '#050a14' }}
     >
@@ -662,6 +567,13 @@ const RocketScene = ({
         minDistance={3}
         maxDistance={5000}
       />
+
+      {/* MSAA targets and the ToneMapping effect render black on some GPUs, so SMAA handles AA. */}
+      <EffectComposer multisampling={0}>
+        <Bloom mipmapBlur luminanceThreshold={0.9} luminanceSmoothing={0.25} intensity={0.65} radius={0.65} />
+        <SMAA />
+        <Vignette offset={0.32} darkness={0.5} />
+      </EffectComposer>
     </Canvas>
   );
 };

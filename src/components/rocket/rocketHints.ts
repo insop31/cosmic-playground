@@ -214,7 +214,7 @@ export const AI_HINTS: Record<HintScenario, string[]> = {
   ],
 };
 
-export const deriveHintScenario = (params: RocketParams, state: RocketState): HintScenario => {
+export const deriveHintScenario = (params: RocketParams, state: Pick<RocketState, 'phase' | 'outcome'>): HintScenario => {
   if (state.phase === 'outcome') {
     if (state.outcome === 'crashed') return 'crashed';
     if (state.outcome === 'suborbital') return 'suborbital';

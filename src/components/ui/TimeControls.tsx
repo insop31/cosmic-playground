@@ -1,5 +1,7 @@
 import { Play, Pause, Rewind, FastForward, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { IconButton, Segmented } from '../hud/controls';
+import { SPEED_STEPS, stepSpeed } from '../hud/timeSteps';
 
 interface TimeControlsProps {
   timeScale: number;
@@ -10,106 +12,70 @@ interface TimeControlsProps {
   onReset: () => void;
 }
 
-// Ordered steps covering rewind → forward
-const SPEED_STEPS = [-4, -2, -1, -0.5, 0.5, 1, 2, 4];
+const formatStep = (s: number) => {
+  const abs = Math.abs(s) === 0.5 ? '½' : `${Math.abs(s)}`;
+  return s < 0 ? `−${abs}` : `${abs}×`;
+};
 
 const TimeControls = ({ timeScale, isPlaying, onPlay, onPause, onSpeedChange, onReset }: TimeControlsProps) => {
-  const currentIdx = SPEED_STEPS.indexOf(timeScale);
-
-  const handleRewind = () => {
-    // Step one index lower (more negative)
-    const nextIdx = Math.max(0, currentIdx === -1 ? SPEED_STEPS.indexOf(-1) : currentIdx - 1);
-    onSpeedChange(SPEED_STEPS[nextIdx]);
-    // If paused, start playing when changing direction
-    if (!isPlaying) onPlay();
-  };
-
-  const handleFastForward = () => {
-    // Step one index higher (more positive)
-    const nextIdx = Math.min(SPEED_STEPS.length - 1, currentIdx === -1 ? SPEED_STEPS.indexOf(1) : currentIdx + 1);
-    onSpeedChange(SPEED_STEPS[nextIdx]);
-    if (!isPlaying) onPlay();
-  };
-
-  const speedLabel = timeScale < 0
-    ? `◀ ${Math.abs(timeScale)}x`
-    : `${timeScale}x`;
-
   const isReversing = timeScale < 0;
 
+  const handleStep = (direction: -1 | 1) => {
+    onSpeedChange(stepSpeed(timeScale, direction));
+    if (!isPlaying) onPlay();
+  };
+
   return (
-    <div className="glass-panel-strong px-5 py-3.5 flex items-center gap-4 border border-white/10 shadow-[0_0_40px_rgba(139,92,246,0.15)] rounded-2xl">
-      <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
-        onClick={onReset}
-        title="Reset"
-        className="p-2 rounded-xl hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground border border-transparent hover:border-white/10"
-      >
-        <RotateCcw size={16} strokeWidth={2} />
-      </motion.button>
+    <div className="hud-panel flex h-12 items-center gap-1 px-2">
+      <IconButton label="Reset (R)" onClick={onReset}>
+        <RotateCcw size={15} />
+      </IconButton>
+      <IconButton label="Slower / rewind (←)" onClick={() => handleStep(-1)} active={isReversing} tone="warn">
+        <Rewind size={15} fill={isReversing ? 'currentColor' : 'none'} />
+      </IconButton>
 
       <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
-        onClick={handleRewind}
-        title="Rewind"
-        className={`p-2 rounded-xl border transition-colors ${
-          isReversing 
-            ? 'text-primary glow-border bg-primary/20 border-primary/30' 
-            : 'text-muted-foreground hover:text-foreground border-transparent hover:bg-white/10 hover:border-white/10'
-        }`}
-      >
-        <Rewind size={18} fill={isReversing ? 'currentColor' : 'none'} strokeWidth={2} />
-      </motion.button>
-
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        type="button"
+        whileTap={{ scale: 0.92 }}
         onClick={isPlaying ? onPause : onPlay}
-        className="p-3.5 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 text-primary hover:from-primary/40 hover:to-primary/20 transition-all border border-primary/30 shadow-[0_0_20px_rgba(34,211,238,0.3)]"
-      >
-        {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
-      </motion.button>
-
-      <motion.button
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
-        onClick={handleFastForward}
-        title="Fast Forward"
-        className={`p-2 rounded-xl border transition-colors ${
-          !isReversing && timeScale > 1
-            ? 'text-primary glow-border bg-primary/20 border-primary/30'
-            : 'text-muted-foreground hover:text-foreground border-transparent hover:bg-white/10 hover:border-white/10'
+        aria-label={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+        title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+        className={`hud-focus mx-0.5 flex h-9 w-9 items-center justify-center rounded-lg border transition-colors duration-150 ${
+          isReversing
+            ? 'border-warn/40 bg-warn/15 text-warn hover:bg-warn/25'
+            : 'border-primary/40 bg-primary/15 text-primary hover:bg-primary/25'
         }`}
       >
-        <FastForward size={18} fill={(!isReversing && timeScale > 1) ? 'currentColor' : 'none'} strokeWidth={2} />
+        {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="translate-x-px" />}
       </motion.button>
 
-      {/* Speed preset chips */}
-      <div className="flex items-center gap-1.5 ml-3 pl-3 border-l border-white/10">
-        {SPEED_STEPS.map((s) => (
-          <motion.button
-            key={s}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => { onSpeedChange(s); if (!isPlaying) onPlay(); }}
-            className={`px-2.5 py-1.5 text-xs font-mono rounded-lg transition-all border ${
-              timeScale === s
-                ? 'bg-primary/20 text-primary border-primary/30 shadow-[inset_0_0_10px_rgba(34,211,238,0.2)]'
-                : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-white/5 hover:border-white/10'
-            }`}
-          >
-            {s < 0 ? `◀${Math.abs(s)}` : `${s}x`}
-          </motion.button>
-        ))}
-      </div>
+      <IconButton label="Faster (→)" onClick={() => handleStep(1)} active={!isReversing && timeScale > 1}>
+        <FastForward size={15} fill={!isReversing && timeScale > 1 ? 'currentColor' : 'none'} />
+      </IconButton>
 
-      {/* Current speed indicator */}
-      <div className={`text-[13px] font-mono font-bold tracking-widest min-w-[4rem] text-center px-3 py-1.5 rounded-lg bg-black/40 border border-white/5 ml-2 ${
-        isReversing ? 'text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'text-primary drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]'
-      }`}>
-        {speedLabel}
+      <div className="mx-1.5 h-6 w-px bg-white/[0.08]" />
+
+      <Segmented
+        ariaLabel="Simulation speed"
+        layoutId="time-speed"
+        size="sm"
+        value={timeScale}
+        onChange={(s) => { onSpeedChange(s); if (!isPlaying) onPlay(); }}
+        options={SPEED_STEPS.map((s) => ({
+          value: s,
+          label: <span className="hud-num">{formatStep(s)}</span>,
+          title: s < 0 ? `Rewind ${Math.abs(s)}×` : `${s}× speed`,
+          tone: s < 0 ? 'warn' : 'default',
+        }))}
+      />
+
+      <div
+        className={`hud-num ml-1.5 flex h-8 min-w-[58px] items-center justify-center rounded-md px-2 text-[12px] font-semibold ${
+          !isPlaying ? 'text-hud-dim' : isReversing ? 'text-warn' : 'text-primary'
+        }`}
+        aria-live="polite"
+      >
+        {!isPlaying ? 'PAUSED' : isReversing ? `◀ ${Math.abs(timeScale)}×` : `${timeScale}×`}
       </div>
     </div>
   );
