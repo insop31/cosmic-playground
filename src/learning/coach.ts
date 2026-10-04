@@ -2,6 +2,7 @@
 // is worth pointing out, so the coach can fall back to its general tips.
 import type { RocketParams, RocketState } from '@/worlds/rocket/rocketTypes';
 import { orbitalElements, orbitalSpeedAt } from '../physics/rocket';
+import { formatAltitude } from '@/physics/altitude';
 
 export interface CoachMessage {
   text: string;
@@ -27,7 +28,7 @@ export function liveCoachMessage(params: RocketParams, state: RocketState): Coac
     const apogee = elements.energy < 0 ? elements.semiMajorAxis * (1 + elements.eccentricity) - params.planetRadius : Infinity;
     return {
       text: Number.isFinite(apogee)
-        ? `Stage 1 is gone. Coasting up to altitude ${apogee.toFixed(1)}, where stage 2 will burn sideways.`
+        ? `Stage 1 is gone. Coasting up to ${formatAltitude(apogee)}, where stage 2 will burn sideways.`
         : 'Stage 1 is gone and the rocket is already fast enough to leave.',
       tone: 'info',
     };

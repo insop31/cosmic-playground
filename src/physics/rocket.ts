@@ -6,6 +6,7 @@
 // local vertical (away from the centre) and "downrange" is the direction of travel along
 // the surface. Units are scene units; thrust in kN divided by mass in kg gives scene
 // accelerations after THRUST_SCALE.
+import { formatAltitude } from './altitude';
 import type {
   FlightEventKind,
   FlightEventRecord,
@@ -352,13 +353,13 @@ export const evaluateOutcome = (params: RocketParams, state: FlightState): Fligh
     if (state.maxAltitude > SUBORBITAL_ALTITUDE) {
       return {
         outcome: 'suborbital',
-        reason: `Reached altitude ${state.maxAltitude.toFixed(1)} but fell back: not enough sideways speed to keep missing the ground. A larger pitch-over angle builds more.${hazardNote(state)}`,
+        reason: `Reached ${formatAltitude(state.maxAltitude)} but fell back: not enough sideways speed to keep missing the ground. A larger pitch-over angle builds more.${hazardNote(state)}`,
         orbit: null,
       };
     }
     return {
       outcome: 'crashed',
-      reason: `Peaked at altitude ${state.maxAltitude.toFixed(1)} and fell back before reaching space. It needs more thrust, more fuel or less mass.${hazardNote(state)}`,
+      reason: `Peaked at ${formatAltitude(state.maxAltitude)} and fell back before reaching space. It needs more thrust, more fuel or less mass.${hazardNote(state)}`,
       orbit: null,
     };
   }
@@ -379,7 +380,7 @@ export const evaluateOutcome = (params: RocketParams, state: FlightState): Fligh
       : ' A single burn from the ground can never reach orbit: the lowest point of the path is no higher than where the engines stopped. Turn on stage separation so stage 2 burns at the top of the climb.';
     return {
       outcome: 'suborbital',
-      reason: `${descending ? 'Reached' : 'Will reach'} altitude ${peak.toFixed(1)} and then fall back: the path dips into the thick air.${singleBurnHint}${hazardNote(state)}`,
+      reason: `${descending ? 'Reached' : 'Will reach'} ${formatAltitude(peak)} and then fall back: the path dips into the thick air.${singleBurnHint}${hazardNote(state)}`,
       orbit: null,
     };
   }
@@ -399,7 +400,7 @@ export const evaluateOutcome = (params: RocketParams, state: FlightState): Fligh
     if (orbit) {
       return {
         outcome: 'orbiting',
-        reason: `Sideways speed is enough to keep falling around the planet: the lowest point of the orbit is at altitude ${periapsisAltitude.toFixed(1)}, above the thick air.`,
+        reason: `Sideways speed is enough to keep falling around the planet: the lowest point of the orbit is at ${formatAltitude(periapsisAltitude)}, above the thick air.`,
         orbit,
       };
     }
@@ -563,7 +564,7 @@ export const stepFlight = (
       [roll, s.rng] = nextRandom(s.rng);
       if (roll < 1 - Math.exp(-LIGHTNING_RATE * dt)) {
         s.engineOut = true;
-        logEvent(s, events, 'lightning', `Lightning struck at altitude ${altitude0.toFixed(1)} and shut down the engines.`, altitude0);
+        logEvent(s, events, 'lightning', `Lightning struck at ${formatAltitude(altitude0)} and shut down the engines.`, altitude0);
       }
     }
   }
@@ -580,10 +581,10 @@ export const stepFlight = (
           s.stageSeparated = true;
           s.stageGap = STAGE_GAP;
           s.stage = 2;
-          logEvent(s, events, 'stage-separation', `Stage 1 dropped at altitude ${altitude0.toFixed(1)}: ${(params.dryMass * STAGE_ONE_DRY_FRACTION).toFixed(0)} kg less to push.`, altitude0);
+          logEvent(s, events, 'stage-separation', `Stage 1 dropped at ${formatAltitude(altitude0)}: ${(params.dryMass * STAGE_ONE_DRY_FRACTION).toFixed(0)} kg less to push.`, altitude0);
         } else {
           s.stage = 0;
-          logEvent(s, events, 'burnout', `Engines cut off at altitude ${altitude0.toFixed(1)}, speed ${Math.hypot(s.vx, s.vy).toFixed(2)}.`, altitude0);
+          logEvent(s, events, 'burnout', `Engines cut off at ${formatAltitude(altitude0)}, speed ${Math.hypot(s.vx, s.vy).toFixed(2)}.`, altitude0);
         }
       }
     } else if (s.stage === 2) {
@@ -596,7 +597,7 @@ export const stepFlight = (
         const climbing = s.vx * s.px + s.vy * (s.py + params.planetRadius) > 0;
         if (!climbing || s.coastTime >= MAX_COAST_TO_APOAPSIS) {
           s.stage2Lit = true;
-          logEvent(s, events, 'stage-ignition', `Stage 2 lit at the top of the climb, altitude ${altitude0.toFixed(1)}.`, altitude0);
+          logEvent(s, events, 'stage-ignition', `Stage 2 lit at the top of the climb, ${formatAltitude(altitude0)}.`, altitude0);
         }
       }
       if (s.stage2Lit && s.fuel2 > 0) {
@@ -604,7 +605,7 @@ export const stepFlight = (
         s.fuel2 = Math.max(0, s.fuel2 - stageTwoFlow(params) * dt);
         if (s.fuel2 === 0) {
           s.stage = 0;
-          logEvent(s, events, 'burnout', `Stage 2 cut off at altitude ${altitude0.toFixed(1)}, speed ${Math.hypot(s.vx, s.vy).toFixed(2)}.`, altitude0);
+          logEvent(s, events, 'burnout', `Stage 2 cut off at ${formatAltitude(altitude0)}, speed ${Math.hypot(s.vx, s.vy).toFixed(2)}.`, altitude0);
         }
       }
     }
@@ -623,7 +624,7 @@ export const stepFlight = (
     if (s.pitchStart < 0) {
       if (s.liftedOff && altitude0 >= TURN_START_ALTITUDE) {
         s.pitchStart = s.elapsed;
-        if (params.launchAngle > 0) logEvent(s, events, 'pitch-over', `Pitched over by ${params.launchAngle}° at altitude ${altitude0.toFixed(1)}.`, altitude0);
+        if (params.launchAngle > 0) logEvent(s, events, 'pitch-over', `Pitched over by ${params.launchAngle}° at ${formatAltitude(altitude0)}.`, altitude0);
       }
     } else if (!s.gravityTurn) {
       const progress = clamp((s.elapsed - s.pitchStart) / PITCH_KICK_DURATION, 0, 1);
@@ -677,7 +678,7 @@ export const stepFlight = (
     s.maxQ = s.q;
   } else if (!s.maxQLogged && s.maxQ > 0 && s.q < s.maxQ * 0.9) {
     s.maxQLogged = true;
-    logEvent(s, events, 'max-q', `Max-Q passed: peak dynamic pressure ${s.maxQ.toFixed(2)} before altitude ${altitude.toFixed(1)}.`, altitude);
+    logEvent(s, events, 'max-q', `Max-Q passed: peak dynamic pressure ${s.maxQ.toFixed(2)} below ${formatAltitude(altitude)}.`, altitude);
   }
 
   return { state: s, events, verdict: coastOnly ? null : evaluateOutcome(params, s) };

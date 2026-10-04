@@ -59,7 +59,10 @@ const ObjectiveItem = ({ card }: { card: MissionCard }) => {
   // replaced by the next objective (timed by the progress store).
   useGSAP(() => {
     if (!done) return;
-    gsap.fromTo(ref.current, { boxShadow: '0 0 0 1px hsl(var(--ok) / 0.6)' }, { boxShadow: '0 0 0 1px hsl(var(--ok) / 0)', duration: 0.9, ease: 'power2.out' });
+    // GSAP can't read CSS variables inside a colour, so resolve the token first.
+    const [h, s, l] = getComputedStyle(document.documentElement).getPropertyValue('--ok').trim().split(/\s+/);
+    const ok = (alpha: number) => `0 0 0 1px hsla(${h}, ${s}, ${l}, ${alpha})`;
+    gsap.fromTo(ref.current, { boxShadow: ok(0.6) }, { boxShadow: ok(0), duration: 0.9, ease: 'power2.out' });
   }, { dependencies: [done], scope: ref });
 
   if (!mission) return null;

@@ -1,6 +1,7 @@
 // Post-flight debrief: turns a finished flight into its likely cause and one concrete
 // change to try next, with the numbers that back it up. Pure rules, no randomness.
 import type { RocketParams, RocketState } from '@/worlds/rocket/rocketTypes';
+import { formatAltitude } from '@/physics/altitude';
 import {
   MIN_PERIAPSIS_ALTITUDE,
   THRUST_SCALE,
@@ -40,7 +41,7 @@ export function buildDebrief(params: RocketParams, state: RocketState): Debrief 
   const numbers: DebriefNumber[] = [
     { label: 'Δv budget', value: summary.deltaV.toFixed(2) },
     { label: 'Thrust ÷ weight', value: summary.liftoffThrustToWeight.toFixed(2) },
-    { label: 'Peak altitude', value: state.maxAltitude.toFixed(1) },
+    { label: 'Peak altitude', value: formatAltitude(state.maxAltitude) },
     { label: 'Max-Q', value: state.maxDynamicPressure.toFixed(2) },
     { label: 'Heat shield', value: `${Math.round(Math.min(state.heat, 1) * 100)}%` },
   ];
@@ -57,7 +58,7 @@ export function buildDebrief(params: RocketParams, state: RocketState): Debrief 
         suggestions.push(`Raise thrust to about ${Math.ceil(thrustForTwr(params, 1.4))} kN, or carry less fuel or dry mass.`);
       } else {
         const needed = escapeSpeedAt(params, 0) * 0.75;
-        causes.unshift(`It only reached altitude ${state.maxAltitude.toFixed(1)}: a Δv budget of ${summary.deltaV.toFixed(2)} is too small to climb far against gravity (getting to space takes roughly ${needed.toFixed(1)} or more).`);
+        causes.unshift(`It only reached ${formatAltitude(state.maxAltitude)}: a Δv budget of ${summary.deltaV.toFixed(2)} is too small to climb far against gravity (getting to space takes roughly ${needed.toFixed(1)} or more).`);
         if (summary.liftoffThrustToWeight < 1.3) suggestions.push('More thrust: below about 1.3× weight, most of the fuel is spent just holding the rocket up.');
         suggestions.push('Add fuel or cut dry mass: the rocket equation rewards a high fuel-to-empty mass ratio.');
       }
@@ -91,8 +92,8 @@ export function buildDebrief(params: RocketParams, state: RocketState): Debrief 
       const elements = orbitalElements(params, { px: state.position[0], py: state.position[1], vx: state.velocity[0], vy: state.velocity[1] });
       const perigee = elements.periapsisRadius - params.planetRadius;
       const apogee = elements.semiMajorAxis * (1 + elements.eccentricity) - params.planetRadius;
-      numbers.push({ label: 'Lowest point', value: perigee.toFixed(1) }, { label: 'Highest point', value: apogee.toFixed(1) });
-      causes.unshift(`Stage 2 burned at the top of the climb and raised the lowest point of the path to altitude ${perigee.toFixed(1)}, above the thick air (${MIN_PERIAPSIS_ALTITUDE}+).`);
+      numbers.push({ label: 'Lowest point', value: formatAltitude(perigee) }, { label: 'Highest point', value: formatAltitude(apogee) });
+      causes.unshift(`Stage 2 burned at the top of the climb and raised the lowest point of the path to ${formatAltitude(perigee)}, above the thick air (${formatAltitude(MIN_PERIAPSIS_ALTITUDE)} or more).`);
       suggestions.push('Next challenge: give stage 2 more fuel and see how much it takes to escape.');
       break;
     }

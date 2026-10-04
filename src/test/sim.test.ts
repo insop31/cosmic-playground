@@ -188,3 +188,18 @@ describe('Gravity Slingshot template', () => {
     expect(energy()).toBeGreaterThan(before + 0.1);
   });
 });
+
+describe('rocket scenarios', () => {
+  it('teaches the same arc everywhere: one burn falls back, staging reaches orbit', async () => {
+    const { predictFlight } = await import('@/physics/rocket');
+    const { ROCKET_SCENARIOS } = await import('@/worlds/rocket/rocketScenarios');
+    const { normalizeRocketParams } = await import('@/worlds/rocket/rocketTypes');
+    const { applyWeatherToParams } = await import('@/worlds/rocket/weatherPresets');
+    for (const scenario of ROCKET_SCENARIOS) {
+      const fly = (staged: boolean) =>
+        predictFlight(applyWeatherToParams(normalizeRocketParams({ ...scenario.params, stageSeparation: staged }), new Set(scenario.weather)), 600, 30).verdict?.outcome;
+      expect(fly(false), scenario.id).toBe('suborbital');
+      expect(fly(true), scenario.id).toBe('orbiting');
+    }
+  });
+});

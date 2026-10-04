@@ -3,6 +3,7 @@ import { NotebookPen, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { differingParams, type NotebookEntry } from '@/lib/notebook';
+import { formatAltitude } from '@/physics/altitude';
 import { useAppStore } from '@/stores/appStore';
 import { useRocketStore } from '@/stores/rocketStore';
 import type { LaunchOutcome, RocketParams } from '@/worlds/rocket/rocketTypes';
@@ -57,7 +58,7 @@ const Comparison = ({ before, after }: { before: NotebookEntry; after: NotebookE
   const rows: [string, string, string][] = [
     ['Weather', before.weather.join(', ') || 'clear', after.weather.join(', ') || 'clear'],
     ['Δv budget', before.metrics.deltaV.toFixed(2), after.metrics.deltaV.toFixed(2)],
-    ['Peak altitude', before.metrics.peakAltitude.toFixed(1), after.metrics.peakAltitude.toFixed(1)],
+    ['Peak altitude', formatAltitude(before.metrics.peakAltitude), formatAltitude(after.metrics.peakAltitude)],
     ['Max-Q', before.metrics.maxQ.toFixed(2), after.metrics.maxQ.toFixed(2)],
     ['Peak heat', `${Math.round(before.metrics.heat * 100)}%`, `${Math.round(after.metrics.heat * 100)}%`],
   ];
