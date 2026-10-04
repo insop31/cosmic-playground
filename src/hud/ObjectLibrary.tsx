@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
 import type { CelestialBody } from '@/worlds/spacetime/types';
 import type { SavedSpacetimeScenario } from '@/lib/scenarioStorage';
+import type { LibraryTab } from '@/stores/appStore';
 import { HudSlider, HudSwitch, IconButton, Segmented } from './controls';
 
 interface PlanetPreset {
@@ -50,7 +51,6 @@ const PLANET_RENDER_RADIUS_SCALE = 4e7;
 
 const formatMass = (mass: number) => MASS_FORMATTER.format(mass).replace('E', 'e');
 
-type LibraryTab = 'bodies' | 'systems' | 'saved';
 
 interface ObjectLibraryProps {
   onBeginPlacement: (body: Omit<CelestialBody, 'id'>) => void;
@@ -68,6 +68,9 @@ interface ObjectLibraryProps {
   onLoadScenario: (scenarioId: string) => void;
   onDeleteScenario: (scenarioId: string) => void;
   onCollapse?: () => void;
+  /** Controlled section; falls back to internal state when omitted. */
+  tab?: LibraryTab;
+  onTabChange?: (tab: LibraryTab) => void;
 }
 
 /** A small CSS-shaded sphere used as a swatch for bodies. */
@@ -143,8 +146,12 @@ const ObjectLibrary = ({
   onLoadScenario,
   onDeleteScenario,
   onCollapse,
+  tab: tabProp,
+  onTabChange,
 }: ObjectLibraryProps) => {
-  const [tab, setTab] = useState<LibraryTab>('bodies');
+  const [internalTab, setInternalTab] = useState<LibraryTab>('bodies');
+  const tab = tabProp ?? internalTab;
+  const setTab = onTabChange ?? setInternalTab;
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [armedKey, setArmedKey] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -239,7 +246,7 @@ const ObjectLibrary = ({
           <Orbit size={17} className="text-primary" />
           <h2 className="hud-title flex-1 text-foreground">Spacetime Lab</h2>
           {onCollapse && (
-            <IconButton label="Collapse dock ([)" onClick={onCollapse} size="sm">
+            <IconButton label="Close panel ([)" onClick={onCollapse} size="sm">
               <PanelLeftClose size={15} />
             </IconButton>
           )}

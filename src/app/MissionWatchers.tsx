@@ -1,10 +1,24 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { logLabEvent, type EventTone } from '@/stores/eventStore';
 import { useProgressStore } from '@/stores/progressStore';
 import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
 import { stability, universeClock, useSpacetimeStore } from '@/stores/spacetimeStore';
 import { useTimeStore } from '@/stores/timeStore';
 import type { RocketState } from '@/worlds/rocket/rocketTypes';
+
+const PHASE_EVENT: Partial<Record<RocketState['phase'], string>> = {
+  launching: 'Liftoff',
+  coasting: 'Engine cutoff · coasting',
+};
+
+const OUTCOME_EVENT: Partial<Record<RocketState['outcome'], [string, EventTone]>> = {
+  orbiting: ['Stable orbit achieved', 'ok'],
+  escape: ['Escape velocity reached', 'ok'],
+  suborbital: ['Suborbital trajectory', 'warn'],
+  crashed: ['Impact with the surface', 'danger'],
+  burnup: ['Burn-up during ascent', 'danger'],
+};
 
 // Universe expansion starts after this many real seconds of forward time.
 const EXPANSION_DELAY_S = 600;
@@ -84,6 +98,19 @@ const MissionWatchers = () => {
 
     return () => clearInterval(interval);
   }, [awardScore, bodies, isPlaying, mode, timeScale, unlock]);
+
+  // ─── Rocket flight events for the event ribbon ───
+  const loggedPhaseRef = useRef<RocketState['phase']>('idle');
+  useEffect(() => {
+    if (phase === loggedPhaseRef.current) return;
+    loggedPhaseRef.current = phase;
+    if (phase === 'outcome') {
+      const entry = OUTCOME_EVENT[outcome];
+      if (entry) logLabEvent('rocket', entry[0], entry[1]);
+    } else if (PHASE_EVENT[phase]) {
+      logLabEvent('rocket', PHASE_EVENT[phase]!);
+    }
+  }, [outcome, phase]);
 
   // ─── Rocket objectives (once per flight outcome) ───
   const previousOutcomeRef = useRef<RocketState['outcome']>('none');

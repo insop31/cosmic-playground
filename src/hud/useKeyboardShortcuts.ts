@@ -26,6 +26,20 @@ export const useKeyboardShortcuts = () => {
       const time = useTimeStore.getState();
 
       switch (event.key) {
+        case 'Tab': {
+          // Only when nothing is focused, so keyboard users can still tab through controls.
+          if (target && target !== document.body && target.tagName !== 'CANVAS') return;
+          event.preventDefault();
+          app.toggleMode();
+          break;
+        }
+        case 'l':
+        case 'L':
+          app.toggleMissions();
+          break;
+        case '?':
+          document.querySelector<HTMLButtonElement>('[data-shortcuts-trigger]')?.click();
+          break;
         case ' ': {
           // A focused button already activates on Space.
           if (target?.closest('button, [role="slider"], [role="switch"], [role="radio"]')) return;

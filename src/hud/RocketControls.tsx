@@ -307,7 +307,7 @@ const RocketControls = ({
           <h2 className="hud-title flex-1 text-foreground">Launch Control</h2>
           <PresetMenu savedPresets={savedPresets} onSavePreset={onSavePreset} onLoadPreset={onLoadPreset} onDeletePreset={onDeletePreset} />
           {onCollapse && (
-            <IconButton label="Collapse dock ([)" onClick={onCollapse} size="sm">
+            <IconButton label="Close panel ([)" onClick={onCollapse} size="sm">
               <PanelLeftClose size={15} />
             </IconButton>
           )}

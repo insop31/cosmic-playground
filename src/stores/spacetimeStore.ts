@@ -7,6 +7,7 @@ import {
   saveSpacetimeScenario,
   type SavedSpacetimeScenario,
 } from '@/lib/scenarioStorage';
+import { useEventStore } from './eventStore';
 import { useProgressStore } from './progressStore';
 import { useTimeStore } from './timeStore';
 
@@ -101,6 +102,11 @@ interface SpacetimeState {
 }
 
 const progress = () => useProgressStore.getState();
+const events = () => useEventStore.getState();
+
+/** Human-readable name for a body, e.g. "Earth" or "black hole". */
+export const bodyLabel = (body: Pick<CelestialBody, 'name' | 'type'>) =>
+  body.name ?? ({ blackhole: 'black hole', neutron: 'neutron star' } as Record<string, string>)[body.type] ?? body.type;
 
 export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
   bodies: [SUN, EARTH, MARS],
@@ -134,6 +140,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
       bodies: [...bodies, { ...pendingPlacement, id: `obj_${nextId++}`, position: spawnPos, velocity }],
       pendingPlacement: null,
     });
+    events().log('spacetime', `Placed ${bodyLabel(pendingPlacement)}`);
   },
 
   removeBody: (id) => set((state) => ({ bodies: state.bodies.filter((b) => b.id !== id) })),
@@ -146,6 +153,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
     stability.system = 0;
     stability.blackHole = 0;
     set({ bodies: [] });
+    events().log('spacetime', 'Removed every body');
   },
 
   applyTemplate: (templateId) => {
@@ -157,12 +165,16 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
     }));
     resetSimulationClocks();
     set({ bodies, pendingPlacement: null, universeScale: 1 });
+    events().clear('spacetime');
+    events().log('spacetime', `Loaded ${template.name}`);
     progress().registerExperiment(`template:${templateId}`, 24);
   },
 
   reset: () => {
     resetSimulationClocks();
     set({ bodies: [SUN, EARTH], pendingPlacement: null, universeScale: 1 });
+    events().clear('spacetime');
+    events().log('spacetime', 'Lab reset');
   },
 
   setVelocityScale: (value) => {
@@ -196,6 +208,8 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
       pendingPlacement: null,
       universeScale: 1,
     });
+    events().clear('spacetime');
+    events().log('spacetime', `Loaded ${scenario.name}`);
     progress().registerExperiment(`saved-scenario:${scenario.id}`, 20);
   },
 

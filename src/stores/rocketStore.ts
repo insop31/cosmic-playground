@@ -8,6 +8,7 @@ import {
   saveRocketPreset,
   type SavedRocketPreset,
 } from '@/lib/scenarioStorage';
+import { useEventStore } from './eventStore';
 import { useProgressStore } from './progressStore';
 
 interface RocketStoreState {
@@ -52,7 +53,10 @@ export const useRocketStore = create<RocketStoreState>()((set, get) => ({
     set({ flight: { ...INITIAL_STATE, phase: 'launching', fuel: 1 } });
   },
 
-  resetFlight: () => set({ flight: { ...INITIAL_STATE } }),
+  resetFlight: () => {
+    set({ flight: { ...INITIAL_STATE } });
+    useEventStore.getState().clear('rocket');
+  },
 
   updateFlight: (updater) => set((state) => ({ flight: updater(state.flight) })),
 

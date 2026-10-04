@@ -1,8 +1,9 @@
-import { useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { WorldEffects, useWorldActive } from '@/stage/World';
-import { useSpacetimeStore } from '@/stores/spacetimeStore';
+import { bodyLabel, useSpacetimeStore } from '@/stores/spacetimeStore';
+import { logLabEvent } from '@/stores/eventStore';
 import { useEffectiveTimeScale } from '@/stores/timeStore';
 import SpacetimeGrid from './SpacetimeGrid';
 import Starfield from './Starfield';
@@ -17,12 +18,19 @@ const SpacetimeWorld = () => {
   const bodies = useSpacetimeStore((state) => state.bodies);
   const realisticMode = useSpacetimeStore((state) => state.realisticMode);
   const universeScale = useSpacetimeStore((state) => state.universeScale);
-  const onBodyRemoved = useSpacetimeStore((state) => state.removeBody);
+  const removeBody = useSpacetimeStore((state) => state.removeBody);
   const onBodyUpdated = useSpacetimeStore((state) => state.updateBody);
   const onGridClick = useSpacetimeStore((state) => state.placeOnGrid);
   const liveTimeScale = useEffectiveTimeScale();
   // A hidden world is paused.
   const timeScale = active ? liveTimeScale : 0;
+
+  // The simulator only removes a body when another one absorbs it.
+  const onBodyRemoved = useCallback((id: string) => {
+    const body = useSpacetimeStore.getState().bodies.find((entry) => entry.id === id);
+    if (body) logLabEvent('spacetime', `${bodyLabel(body)} absorbed in a collision`, 'danger');
+    removeBody(id);
+  }, [removeBody]);
 
   // Shared ref written by PhysicsSimulator and read by SpacetimeGrid every frame.
   // Using a plain ref keeps grid deformation in sync with physics without any

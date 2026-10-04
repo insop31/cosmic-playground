@@ -195,6 +195,44 @@
   }
 }
 
+/*
+ * HUD layout: five fixed zones on a grid so panels can never overlap.
+ *   bar      flight bar (full width)
+ *   left     instrument rail + tool panel (full height)
+ *   center   context banner (top of the free area)
+ *   right    objectives
+ *   temporal time controls (bottom of the free area)
+ */
+.hud-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'bar bar bar'
+    'left center right'
+    'left temporal right';
+  pointer-events: none;
+}
+
+/* Time controls adapt to the width the grid leaves them. */
+.temporal { container-type: inline-size; }
+@container (max-width: 540px) {
+  .temporal-chips { display: none; }
+  .temporal-speed { display: inline; }
+}
+@container (max-width: 330px) {
+  .temporal-reset,
+  .temporal-clock { display: none; }
+}
+
+@media (max-width: 1023px) {
+  .objectives-chip-text { display: none; }
+}
+
 @keyframes hud-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }

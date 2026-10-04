@@ -2,7 +2,6 @@ import { forwardRef, useId, useState, type ButtonHTMLAttributes, type ReactNode 
 import * as SliderPrimitive from '@radix-ui/react-slider';
 import * as SwitchPrimitive from '@radix-ui/react-switch';
 import * as SelectPrimitive from '@radix-ui/react-select';
-import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -193,13 +192,14 @@ interface SegmentedProps<T extends string | number> {
   options: SegmentedOption<T>[];
   value: T | null;
   onChange: (value: T) => void;
-  layoutId: string;
+  /** @deprecated kept for call-site compatibility; the indicator is CSS-only now. */
+  layoutId?: string;
   size?: 'sm' | 'md';
   className?: string;
   ariaLabel: string;
 }
 
-export const Segmented = <T extends string | number>({ options, value, onChange, layoutId, size = 'md', className, ariaLabel }: SegmentedProps<T>) => (
+export const Segmented = <T extends string | number>({ options, value, onChange, size = 'md', className, ariaLabel }: SegmentedProps<T>) => (
   <div role="radiogroup" aria-label={ariaLabel} className={cn('relative flex items-center gap-0.5 rounded-lg bg-white/[0.04] p-[3px]', className)}>
     {options.map((option) => {
       const active = option.value === value;
@@ -213,23 +213,15 @@ export const Segmented = <T extends string | number>({ options, value, onChange,
           title={option.title}
           onClick={() => onChange(option.value)}
           className={cn(
-            'hud-focus relative flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150',
+            'hud-focus relative flex items-center justify-center gap-1.5 rounded-[5px] font-medium transition-[color,background-color,box-shadow] duration-150 ease-hud',
             size === 'sm' ? 'h-6 min-w-[30px] px-1.5 text-[11px]' : 'h-8 px-3 text-[12.5px]',
             active
-              ? warn ? 'text-warn' : 'text-primary'
+              ? warn
+                ? 'bg-warn/15 text-warn shadow-[inset_0_0_0_1px_hsl(var(--warn)/0.35)]'
+                : 'bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]'
               : 'text-hud-dim hover:text-foreground',
           )}
         >
-          {active && (
-            <motion.span
-              layoutId={layoutId}
-              className={cn(
-                'absolute inset-0 rounded-md',
-                warn ? 'bg-warn/15 shadow-[inset_0_0_0_1px_hsl(var(--warn)/0.35)]' : 'bg-primary/15 shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]',
-              )}
-              transition={{ type: 'spring', stiffness: 520, damping: 38 }}
-            />
-          )}
           <span className="relative z-10 flex items-center gap-1.5">{option.label}</span>
         </button>
       );
@@ -309,21 +301,16 @@ export const HudSection = ({ title, icon, aside, defaultOpen = true, children }:
         </button>
         {aside}
       </div>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            id={contentId}
-            key="content"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="pb-4">{children}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* grid-rows 0fr→1fr animates to the content's natural height without measuring it */}
+      <div
+        id={contentId}
+        className={cn('grid transition-[grid-template-rows,opacity] duration-200 ease-hud', open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}
+        ref={(el) => { if (el) el.inert = !open; }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="pb-4">{children}</div>
+        </div>
+      </div>
     </section>
   );
 };
