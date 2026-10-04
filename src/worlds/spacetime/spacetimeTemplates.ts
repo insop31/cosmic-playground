@@ -1,5 +1,6 @@
 import type { UnlockId } from '@/lib/unlocks';
 import type { CelestialBody } from './types';
+import { DEFAULT_STAR_MASS, REALISTIC_G, circularOrbitSpeed, tangentialOrbitVelocity } from '@/physics/constants';
 
 export interface TemplatePreviewBody {
   x: number;
@@ -29,32 +30,12 @@ export interface SpacetimeTemplate {
   unlock?: UnlockId;
 }
 
-const DEFAULT_STAR_MASS = 1.989e30;
-const REAL_G = 6.674e-11;
-const REAL_GRAVITY_BOOST = 7.5e-20;
-const MASSIVE_ATTRACTOR_THRESHOLD = 1e27;
-const MIN_ORBITAL_SPEED = 0.08;
-const MAX_ORBITAL_SPEED = 3.0;
-
-const orbitalSpeed = (anchorMass: number, radius: number, multiplier = 1) => {
-  const normalizedDistance = Math.max(radius, 0.25);
-  const effectiveMass = Math.max(anchorMass, MASSIVE_ATTRACTOR_THRESHOLD);
-  const speed = Math.sqrt((REAL_G * effectiveMass * REAL_GRAVITY_BOOST) / normalizedDistance);
-  return Math.min(MAX_ORBITAL_SPEED, Math.max(MIN_ORBITAL_SPEED, speed)) * multiplier;
-};
-
 const tangentialVelocity = (
   position: [number, number, number],
   anchor: [number, number, number],
   multiplier = 1,
   anchorMass = DEFAULT_STAR_MASS,
-): [number, number, number] => {
-  const dx = position[0] - anchor[0];
-  const dz = position[2] - anchor[2];
-  const distance = Math.max(Math.sqrt(dx * dx + dz * dz), 0.01);
-  const speed = orbitalSpeed(anchorMass, distance, multiplier);
-  return [(-dz / distance) * speed, 0, (dx / distance) * speed];
-};
+): [number, number, number] => tangentialOrbitVelocity(position, anchor, anchorMass, multiplier);
 
 const createPlanet = ({
   name,
@@ -172,7 +153,7 @@ const createBinaryPair = (
   separation: number,
 ) => {
   const totalMass = starA.mass + starB.mass;
-  const omega = Math.sqrt((REAL_G * REAL_GRAVITY_BOOST * totalMass) / Math.pow(separation, 3));
+  const omega = Math.sqrt((REALISTIC_G * totalMass) / Math.pow(separation, 3));
   const starAPosition: [number, number, number] = [-(starB.mass / totalMass) * separation, 0, 0];
   const starBPosition: [number, number, number] = [(starA.mass / totalMass) * separation, 0, 0];
   const starAVelocity: [number, number, number] = [0, 0, -(Math.abs(starAPosition[0]) * omega)];
@@ -562,7 +543,7 @@ export const SPACETIME_TEMPLATES: SpacetimeTemplate[] = [
       const sun: [number, number, number] = [0, 0, 0];
       const giantPos: [number, number, number] = [18, 0, 0];
       const cometPos: [number, number, number] = [24, 0, 0];
-      const circular24 = orbitalSpeed(DEFAULT_STAR_MASS, 24);
+      const circular24 = circularOrbitSpeed(DEFAULT_STAR_MASS, 24);
       const lean = 0.4; // radians inward from the prograde direction
       return [
         createStar({ name: 'Sun', position: sun, mass: DEFAULT_STAR_MASS, radius: 2.4, color: '#ffcc00', velocity: [0, 0, 0] }),
@@ -589,5 +570,26 @@ export const SPACETIME_TEMPLATES: SpacetimeTemplate[] = [
         },
       ];
     },
+  },
+  {
+    id: 'slingshot-lab',
+    name: 'Slingshot Lab',
+    subtitle: 'Gravity assist set-up',
+    description: 'A comet heads into the path of a moving companion star. Watch its speed before and after the flyby, then try your own aims.',
+    bodyCount: 3,
+    preview: {
+      orbits: [{ radius: 42, stroke: '#f97316', dashed: true }],
+      bodies: [
+        { x: 50, y: 50, radius: 6.5, color: '#ffcc00' },
+        { x: 92, y: 50, radius: 4.4, color: '#f97316' },
+        { x: 86, y: 43, radius: 2.2, color: '#66ddff' },
+      ],
+    },
+    createBodies: () => [
+      createStar({ name: 'Sol', position: [0, 0, 0], mass: DEFAULT_STAR_MASS, radius: 2.4, color: '#ffcc00', velocity: [0, 0, 0] }),
+      // Zero velocity: the simulator gives the companion a circular orbit around Sol.
+      { ...createStar({ name: 'Ember', position: [30, 0, 0], mass: DEFAULT_STAR_MASS * 0.4, radius: 1.4, color: '#f97316', velocity: [0, 0, 0] }) },
+      createSmallBody({ name: 'Swift', type: 'comet', position: [26, 0, 5], mass: 2.0e14, radius: 0.22, color: '#66ddff', velocity: [0, 0, -0.6] }),
+    ],
   },
 ];

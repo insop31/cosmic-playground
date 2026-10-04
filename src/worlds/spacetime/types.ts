@@ -1,14 +1,2 @@
-export interface CelestialBody {
-  id: string;
-  name?: string;
-  type: string;
-  bodyClass?: 'rocky' | 'gas' | 'ice' | 'star' | 'asteroid' | 'blackhole' | 'neutron' | 'comet';
-  position: [number, number, number];
-  mass: number;
-  radius: number;
-  physicalRadius?: number;
-  color: string;
-  atmosphere?: boolean;
-  eventHorizonRadius?: number;
-  velocity?: [number, number, number];
-}
+// The Spacetime Lab's body type is defined once, next to the physics that uses it.
+export type { CelestialBody } from '@/physics/types';

@@ -7,19 +7,10 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@/stage/World';
 import * as THREE from 'three';
 import type { WeatherConditionId } from './weatherPresets';
+import type { LightningStrikeState } from './lightningStrike';
 
 const pyToWorldY = (py: number) => 1.2 + py * 2;
 
-// ─── Shared lightning strike state (mutated by LightningEffect, read by shake + HUD) ─
-export interface LightningStrikeState {
-  version: number;
-  /** 0–1, decays in WeatherShakeGroup for a hard jolt */
-  impulse: number;
-}
-
-export function createLightningStrikeState(): LightningStrikeState {
-  return { version: 0, impulse: 0 };
-}
 
 // ─── Particle / geometry counts ──────────────────────────────────────────────
 const RAIN_COUNT  = 520;   // LineSegments pairs
@@ -1092,12 +1083,15 @@ export const WeatherShakeGroup = ({
   altitude,
   phase,
   lightningStrike,
+  reduceMotion = false,
   children,
 }: {
   activeWeather: Set<WeatherConditionId>;
   altitude: number;
   phase: string;
   lightningStrike?: LightningStrikeState;
+  /** Skip the shaking entirely (reduced-motion setting). */
+  reduceMotion?: boolean;
   children: ReactNode;
 }) => {
   const groupRef  = useRef<THREE.Group>(null);
@@ -1110,7 +1104,7 @@ export const WeatherShakeGroup = ({
       lightningStrike.impulse = Math.max(0, lightningStrike.impulse - dt * 4.2);
     }
 
-    if (phase === 'idle' || phase === 'outcome') {
+    if (phase === 'idle' || phase === 'outcome' || reduceMotion) {
       groupRef.current.position.x = THREE.MathUtils.damp(groupRef.current.position.x, 0, 10, dt);
       groupRef.current.rotation.z = THREE.MathUtils.damp(groupRef.current.rotation.z, 0, 10, dt);
       return;

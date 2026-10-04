@@ -1,7 +1,7 @@
-import * as THREE from 'three';
+import { predictFlight } from '../../physics/rocket';
 
 export interface RocketParams {
-  launchAngle: number;       // degrees from vertical (0 = straight up)
+  launchAngle: number;       // pitch-over angle in degrees from vertical (gravity turn)
   thrustForce: number;       // kN
   fuelMass: number;          // kg
   dryMass: number;           // kg
@@ -17,6 +17,8 @@ export interface RocketParams {
   atmosphericPressure: number; // 0.6-1.4 relative pressure
   padTilt: number;           // degrees offset from ideal launch pad alignment
   stageSeparation: boolean;
+  stage2Thrust: number;      // kN, upper-stage engine
+  stage2FuelShare: number;   // 0.05-0.5 share of the propellant carried by stage 2
 }
 
 export const DEFAULT_PARAMS: RocketParams = {
@@ -36,7 +38,12 @@ export const DEFAULT_PARAMS: RocketParams = {
   atmosphericPressure: 1,
   padTilt: 0,
   stageSeparation: false,
+  stage2Thrust: 8,
+  stage2FuelShare: 0.12,
 };
+
+/** Fill in settings added after a preset was saved, so old presets keep loading. */
+export const normalizeRocketParams = (params: Partial<RocketParams>): RocketParams => ({ ...DEFAULT_PARAMS, ...params });
 
 export type LaunchOutcome = 'none' | 'orbiting' | 'suborbital' | 'escape' | 'crashed' | 'burnup';
 
@@ -63,6 +70,35 @@ export interface RocketState {
   maxAltitude: number;
   trajectory: [number, number][];
   orbit: OrbitPathState | null;
+  /** Accumulated heating as a fraction of the heat-shield limit (burn-up at 1). */
+  heat: number;
+  stageSeparated: boolean;
+  /** Plain-language explanation of the outcome, shown after the flight. */
+  outcomeReason: string;
+  /** Current and peak dynamic pressure q = ½ρv² (scene units). */
+  dynamicPressure: number;
+  maxDynamicPressure: number;
+  /** Notable moments of the flight, in order. */
+  events: FlightEventRecord[];
+  /** Seeds the weather hazards for this launch so rewinds replay them exactly. */
+  seed: number;
+}
+
+export type FlightEventKind =
+  | 'liftoff'
+  | 'pitch-over'
+  | 'max-q'
+  | 'stage-separation'
+  | 'stage-ignition'
+  | 'burnout'
+  | 'lightning'
+  | 'seal-failure';
+
+export interface FlightEventRecord {
+  time: number;
+  altitude: number;
+  kind: FlightEventKind;
+  message: string;
 }
 
 export const INITIAL_STATE: RocketState = {
@@ -76,57 +112,16 @@ export const INITIAL_STATE: RocketState = {
   maxAltitude: 0,
   trajectory: [],
   orbit: null,
+  heat: 0,
+  stageSeparated: false,
+  outcomeReason: '',
+  dynamicPressure: 0,
+  maxDynamicPressure: 0,
+  events: [],
+  seed: 1,
 };
 
-// Compute predicted trajectory arc for preview
+/** Predicted path for the current settings; same model and time step as the real flight. */
 export function computeTrajectoryPreview(params: RocketParams): [number, number][] {
-  const points: [number, number][] = [];
-  const dt = 0.1;
-  const effectiveLaunchAngle = params.launchAngle + params.padTilt;
-  const angleRad = (effectiveLaunchAngle * Math.PI) / 180;
-  let vx = Math.sin(angleRad) * 0;
-  let vy = 0;
-  let x = 0;
-  let y = 0;
-  let fuel = params.fuelMass;
-  const totalMass = params.fuelMass + params.dryMass;
-  const burnRate = params.fuelMass / params.burnDuration;
-
-  for (let t = 0; t < 60; t += dt) {
-    const currentMass = params.dryMass + Math.max(fuel, 0);
-    const massRatio = currentMass / totalMass;
-
-    if (fuel > 0) {
-      const pressureFactor = THREE.MathUtils.clamp(1.04 - (params.atmosphericPressure - 1) * 0.22, 0.78, 1.14);
-      const temperatureFactor = THREE.MathUtils.clamp(1 - (params.ambientTemperature - 15) * 0.0024, 0.82, 1.08);
-      const thrustEnvironmentFactor = pressureFactor * temperatureFactor;
-      const thrustAcc = (params.thrustForce * thrustEnvironmentFactor) / massRatio;
-      vx += Math.sin(angleRad) * thrustAcc * dt * 0.01;
-      vy += Math.cos(angleRad) * thrustAcc * dt * 0.01;
-      fuel -= burnRate * dt;
-    }
-
-    vy -= params.gravity * dt * 0.01;
-
-    const speed = Math.sqrt(vx * vx + vy * vy);
-    const atmosphereFactor = Math.max(0, 1 - y * 0.015) * params.atmosphericDensity;
-    const shearWave = Math.sin(t * 0.9 + y * 0.35) * params.windShear;
-    const wind = params.crosswind * (1 + shearWave) * atmosphereFactor;
-    vx += wind * dt * 0.0009;
-
-    const thermalPenalty = 1 + params.thermalLoad * Math.max(0, speed - 0.3) * atmosphereFactor * 1.8;
-    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.001 * thermalPenalty;
-    if (speed > 0) {
-      vx -= (vx / speed) * dragForce * dt;
-      vy -= (vy / speed) * dragForce * dt;
-    }
-
-    x += vx * dt;
-    y += vy * dt;
-
-    if (y < 0 && t > 1) break;
-    points.push([x, Math.max(y, 0)]);
-  }
-
-  return points;
+  return predictFlight(params).points;
 }

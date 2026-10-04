@@ -23,4 +23,12 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  {
+    // Vendored shadcn/ui primitives export variant helpers next to their components by design.
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    ignores: ["src/components/ui/ObjectLibrary.tsx", "src/components/ui/TimeControls.tsx"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 );

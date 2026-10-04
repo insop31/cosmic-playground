@@ -12,7 +12,10 @@
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "assets:optimize": "node scripts/optimize-assets.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "docs:guide": "node scripts/build-guide.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
@@ -25,8 +28,6 @@
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "@react-three/postprocessing": "^2.19.1",
-    "@tanstack/react-query": "^5.83.0",
-    "@types/three": "^0.170.0",
     "clsx": "^2.1.1",
     "gsap": "^3.15.0",
     "lucide-react": "^0.462.0",
@@ -36,16 +37,19 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.170.0",
+    "zod": "^3.25.76",
     "zustand": "^4.5.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/node": "^22.16.5",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
+    "@types/three": "^0.170.0",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.32.0",
