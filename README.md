@@ -51,7 +51,7 @@ A printable guide for students and teachers is in [`docs/Cosmic_Playground_User_
 
 ### Prerequisites
 
-[Node.js](https://nodejs.org/) 18 or later, with `npm`.
+[Node.js](https://nodejs.org/) 20.19+ or 22.12+ (the current LTS release works), with `npm`. Check with `node -v`: Vite 7 does not run on Node 18 or 21.
 
 ### Installation
 
@@ -63,6 +63,8 @@ npm run dev
 ```
 
 Then open `http://localhost:8080`.
+
+To update an existing copy, run `git pull` and then `npm install` again, since dependencies change between versions.
 
 ### Scripts
 
