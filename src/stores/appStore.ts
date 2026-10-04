@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import type { AppMode } from '@/lib/challengePacks';
 
+export type QualityTier = 'high' | 'medium' | 'low';
+export type QualitySetting = 'auto' | QualityTier;
+const QUALITY_KEY = 'cosmic-playground.quality';
+
 /** Sections of the Spacetime tool panel. */
 export type LibraryTab = 'bodies' | 'systems' | 'saved';
 
@@ -42,6 +46,10 @@ interface AppState {
   booting: boolean;
   /** Timestamps (ms since page load) of real start-up milestones, for the boot log. */
   readiness: { stage?: number; physics?: number; mesh?: number };
+  /** Graphics quality chosen by the user; 'auto' follows measured frame rate. */
+  quality: QualitySetting;
+  /** Tier picked automatically from frame rate (used when quality is 'auto'). */
+  autoTier: QualityTier;
   setMode: (mode: AppMode) => void;
   toggleMode: () => void;
   setHudHidden: (hidden: boolean) => void;
@@ -57,6 +65,8 @@ interface AppState {
   /** Leaves the opening sequence into the chosen lab. */
   finishBoot: (mode: AppMode) => void;
   replayIntro: () => void;
+  setQuality: (quality: QualitySetting) => void;
+  setAutoTier: (tier: QualityTier) => void;
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -68,6 +78,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   missionLogOpen: false,
   booting: readStorage(INTRO_KEY) !== '1',
   readiness: {},
+  quality: (['high', 'medium', 'low'] as const).find((q) => q === readStorage(QUALITY_KEY)) ?? 'auto',
+  autoTier: 'high',
   setMode: (mode) => {
     writeStorage(LAST_LAB_KEY, mode);
     set({ mode });
@@ -97,4 +109,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ booting: false });
   },
   replayIntro: () => set({ booting: true, missionLogOpen: false }),
+  setQuality: (quality) => {
+    writeStorage(QUALITY_KEY, quality);
+    set({ quality });
+  },
+  setAutoTier: (autoTier) => set({ autoTier }),
 }));
+
+/** The quality tier actually in effect. */
+export const useQualityTier = () =>
+  useAppStore((state) => (state.quality === 'auto' ? state.autoTier : state.quality));

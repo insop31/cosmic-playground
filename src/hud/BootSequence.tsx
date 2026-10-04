@@ -125,13 +125,12 @@ const BootSequence = () => {
         </div>
       </div>
 
-      <ol className="font-mono text-[11.5px] leading-[1.9] text-hud-dim" aria-label="Start-up progress">
+      <ol className="grid w-fit grid-cols-[auto_auto] gap-x-6 font-mono text-[11.5px] leading-[1.9] text-hud-dim" aria-label="Start-up progress">
         {LOG_LINES.map((line) => {
           const at = readiness[line.key];
           return (
-            <li key={line.key} className="flex gap-3">
+            <li key={line.key} className="contents">
               <span>&gt;&gt; {line.text}</span>
-              <span className="text-hud-faint">{'.'.repeat(Math.max(2, 44 - line.text.length))}</span>
               {at !== undefined ? <span className="text-ok">DONE · {at} ms</span> : <span className="animate-pulse-dot text-warn">WAIT</span>}
             </li>
           );

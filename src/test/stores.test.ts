@@ -120,3 +120,35 @@ describe('app store layout rules', () => {
     expect(useAppStore.getState()).toMatchObject({ dockCollapsed: false, missionsCollapsed: true });
   });
 });
+
+describe('progress persistence and unlocks', () => {
+  it('saves score and objectives to this browser', () => {
+    useProgressStore.getState().unlock('time-bender');
+    const saved = JSON.parse(window.localStorage.getItem('cosmic-playground.progress')!);
+    expect(saved.score).toBe(90);
+    expect(saved.achievements['time-bender']).toBe(true);
+  });
+
+  it('announces an unlock when the score crosses its threshold', () => {
+    useProgressStore.setState({ score: 480, lastUnlock: null });
+    useProgressStore.getState().awardScore(30);
+    expect(useProgressStore.getState().lastUnlock?.id).toBe('gravity-slingshot');
+  });
+
+  it('refuses a locked template until the score allows it', () => {
+    useProgressStore.setState({ score: 0 });
+    const before = useSpacetimeStore.getState().bodies;
+    useSpacetimeStore.getState().applyTemplate('gravity-slingshot');
+    expect(useSpacetimeStore.getState().bodies).toBe(before);
+    useProgressStore.setState({ score: 500 });
+    useSpacetimeStore.getState().applyTemplate('gravity-slingshot');
+    expect(useSpacetimeStore.getState().bodies.map((b) => b.name)).toEqual(['Sun', 'Goliath', 'Comet']);
+  });
+
+  it('clears everything on reset', () => {
+    useProgressStore.getState().unlock('time-bender');
+    useProgressStore.getState().resetProgress();
+    expect(useProgressStore.getState().score).toBe(0);
+    expect(useProgressStore.getState().achievements['time-bender']).toBe(false);
+  });
+});

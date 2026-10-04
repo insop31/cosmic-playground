@@ -18,7 +18,7 @@ import TemporalHud from '@/hud/TemporalHud';
 import { LabTransition, StasisField } from '@/hud/StageOverlays';
 import { Kbd } from '@/hud/controls';
 import { useKeyboardShortcuts, useResponsivePanels } from '@/hud/useKeyboardShortcuts';
-import { gsap, useGSAP } from '@/motion/gsap';
+import { gsap, prefersReducedMotion, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
 
 const Index = () => {
@@ -37,6 +37,23 @@ const Index = () => {
     gsap.to(hudRef.current, { autoAlpha: hidden ? 0 : 1, duration: booting ? 0 : 0.4 });
   }, { dependencies: [hudHidden, booting] });
 
+  // Leaving the intro: zones dock in from their edges.
+  const wasBooting = useRef(booting);
+  useGSAP(() => {
+    if (booting) {
+      wasBooting.current = true;
+      return;
+    }
+    if (!wasBooting.current || !hudRef.current || prefersReducedMotion()) return;
+    wasBooting.current = false;
+    const zone = (area: string) => hudRef.current!.querySelector(`[data-zone="${area}"]`);
+    gsap.timeline({ defaults: { duration: 0.6, ease: 'hud' }, delay: 0.5 })
+      .from(zone('bar'), { y: -24, autoAlpha: 0 })
+      .from(zone('left'), { x: -24, autoAlpha: 0 }, '<0.08')
+      .from(zone('right'), { x: 24, autoAlpha: 0 }, '<0.04')
+      .from(zone('temporal'), { y: 24, autoAlpha: 0 }, '<0.04');
+  }, { dependencies: [booting] });
+
   return (
     <div data-hud-mode={mode} className="relative h-screen w-full overflow-hidden bg-background">
       <div className="absolute inset-0">
@@ -54,21 +71,21 @@ const Index = () => {
 
       <ErrorBoundary fallback={(reset) => <HudFallback reset={reset} />}>
         <div ref={hudRef} className="hud-shell z-10">
-          <div className="[grid-area:bar]">
+          <div data-zone="bar" className="[grid-area:bar]">
             <FlightBar />
           </div>
-          <div className="min-h-0 [grid-area:left]">
+          <div data-zone="left" className="min-h-0 [grid-area:left]">
             <InstrumentRail />
           </div>
           <div className="flex min-h-0 min-w-0 flex-col items-center gap-3 [grid-area:center]">
             <ContextBanner />
             {mode === 'rocket' && <MissionReport />}
           </div>
-          <div className="flex min-h-0 flex-col items-end gap-3 [grid-area:right]">
+          <div data-zone="right" className="flex min-h-0 flex-col items-end gap-3 [grid-area:right]">
             {mode === 'spacetime' ? <BodyInspector /> : <FlightDirector />}
             <ObjectivesPanel />
           </div>
-          <div className="flex min-w-0 items-end justify-center [grid-area:temporal]">
+          <div data-zone="temporal" className="flex min-w-0 items-end justify-center [grid-area:temporal]">
             <div className="w-full max-w-[640px]">
               <TemporalHud />
             </div>

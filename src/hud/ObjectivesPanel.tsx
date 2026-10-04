@@ -88,6 +88,7 @@ const ObjectivesPanel = () => {
   const mode = useAppStore((state) => state.mode);
   const collapsed = useAppStore((state) => state.missionsCollapsed);
   const toggle = useAppStore((state) => state.toggleMissions);
+  const setMissionLogOpen = useAppStore((state) => state.setMissionLogOpen);
   const activePackId = useProgressStore((state) => state.activePacks[mode]);
   const achievements = useProgressStore((state) => state.achievements);
   const queue = useProgressStore((state) => state.missionQueues[mode]);
@@ -169,6 +170,13 @@ const ObjectivesPanel = () => {
             </li>
           )}
         </ul>
+        <button
+          type="button"
+          onClick={() => setMissionLogOpen(true)}
+          className="hud-focus justify-self-start rounded-[4px] px-1 text-[12px] text-hud-dim transition-colors hover:text-primary"
+        >
+          Open mission log <span className="hud-num text-hud-faint">(M)</span>
+        </button>
       </div>
     </section>
   );

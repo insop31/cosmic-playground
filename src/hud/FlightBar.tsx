@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { EyeOff, Keyboard, Target } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { BookOpen, EyeOff, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useProgressStore } from '@/stores/progressStore';
@@ -11,8 +10,8 @@ import { useTimeStore } from '@/stores/timeStore';
 import type { RocketState } from '@/worlds/rocket/rocketTypes';
 import { altitudeKm } from '@/sim/units';
 import { IconButton, Kbd, Readout } from './controls';
+import SettingsMenu from './SettingsMenu';
 import { LAB_META } from './labs';
-import { SHORTCUTS } from './shortcuts';
 
 const PHASE_LABEL: Record<RocketState['phase'], string> = {
   idle: 'On pad',
@@ -129,6 +128,7 @@ const FlightBar = () => {
   const objectivesOpen = useAppStore((state) => !state.missionsCollapsed);
   const toggleObjectives = useAppStore((state) => state.toggleMissions);
   const setHudHidden = useAppStore((state) => state.setHudHidden);
+  const setMissionLogOpen = useAppStore((state) => state.setMissionLogOpen);
   const score = useProgressStore((state) => state.score);
   const lab = LAB_META[mode];
 
@@ -154,27 +154,13 @@ const FlightBar = () => {
         <div className="hidden h-7 w-px bg-[hsl(var(--hud-line)/0.14)] lg:block" />
         <Readout label="Score" value={score} tone="primary" className="hidden w-12 lg:grid" />
         <div className="flex items-center">
+          <IconButton label="Mission log (M)" onClick={() => setMissionLogOpen(true)}>
+            <BookOpen size={15} />
+          </IconButton>
           <IconButton label="Objectives (L)" onClick={toggleObjectives} active={objectivesOpen}>
             <Target size={15} />
           </IconButton>
-          <Popover>
-            <PopoverTrigger asChild>
-              <IconButton label="Keyboard shortcuts (?)" data-shortcuts-trigger="">
-                <Keyboard size={15} />
-              </IconButton>
-            </PopoverTrigger>
-            <PopoverContent align="end" sideOffset={10} className="hud-panel w-80 border-0 p-3 text-foreground">
-              <p className="hud-label mb-2">Keyboard shortcuts</p>
-              <ul className="grid gap-1.5">
-                {SHORTCUTS.map((shortcut) => (
-                  <li key={shortcut.label} className="flex items-center justify-between gap-3 text-[12.5px] text-foreground/85">
-                    <span>{shortcut.label}</span>
-                    <span className="flex shrink-0 gap-1">{shortcut.keys.map((key) => <Kbd key={key}>{key}</Kbd>)}</span>
-                  </li>
-                ))}
-              </ul>
-            </PopoverContent>
-          </Popover>
+          <SettingsMenu />
           <IconButton label="Hide interface (H)" onClick={() => setHudHidden(true)}>
             <EyeOff size={15} />
           </IconButton>

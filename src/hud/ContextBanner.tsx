@@ -1,9 +1,10 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowUpRight, CheckCircle2, Crosshair, Orbit, Pause, TrendingUp, X } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, Crosshair, Orbit, Pause, TrendingUp, Unlock, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
 import { findMission, useProgressStore } from '@/stores/progressStore';
+import { UNLOCKS } from '@/lib/unlocks';
 import { useFlightStore } from '@/stores/flightStore';
 import { useRocketStore } from '@/stores/rocketStore';
 import { bodyLabel, useSpacetimeStore } from '@/stores/spacetimeStore';
@@ -55,6 +56,38 @@ const ObjectiveNotice = () => {
   );
 };
 
+/** Announces newly unlocked content, with a way into the mission log. */
+const UnlockNotice = () => {
+  const lastUnlock = useProgressStore((state) => state.lastUnlock);
+  const openLog = useAppStore((state) => state.setMissionLogOpen);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!lastUnlock) return undefined;
+    setVisible(true);
+    const id = window.setTimeout(() => setVisible(false), NOTICE_MS * 2);
+    return () => window.clearTimeout(id);
+  }, [lastUnlock]);
+
+  const unlock = lastUnlock ? UNLOCKS.find((u) => u.id === lastUnlock.id) : undefined;
+  if (!visible || !unlock) return null;
+  return (
+    <Enter key={lastUnlock!.at} role="status" className="hud-panel pointer-events-auto flex items-center gap-2.5 border-primary/45 py-1.5 pl-3 pr-1.5">
+      <Unlock size={14} className="shrink-0 text-primary" />
+      <span className="text-[12.5px] text-foreground">
+        Unlocked · <span className="font-semibold">{unlock.name}</span>
+      </span>
+      <button
+        type="button"
+        onClick={() => { setVisible(false); openLog(true); }}
+        className="hud-focus rounded-[4px] px-2 py-0.5 text-[12px] text-primary transition-colors hover:bg-primary/10"
+      >
+        View
+      </button>
+    </Enter>
+  );
+};
+
 /** Top-centre zone: the one message that matters right now. */
 const ContextBanner = () => {
   const mode = useAppStore((state) => state.mode);
@@ -69,6 +102,7 @@ const ContextBanner = () => {
 
   return (
     <div className="flex flex-col items-center gap-2">
+      <UnlockNotice />
       <ObjectiveNotice />
       {mode === 'spacetime' && pendingPlacement && (
         <Enter role="status" className="hud-panel pointer-events-auto flex items-center gap-2.5 border-primary/40 py-1.5 pl-3 pr-1.5">
