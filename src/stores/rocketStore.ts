@@ -8,6 +8,8 @@ import {
   saveRocketPreset,
   type SavedRocketPreset,
 } from '@/lib/scenarioStorage';
+import { isUnlocked } from '@/lib/unlocks';
+import { ROCKET_SCENARIOS, type RocketScenario } from '@/worlds/rocket/rocketScenarios';
 import { useEventStore } from './eventStore';
 import { useProgressStore } from './progressStore';
 
@@ -27,6 +29,8 @@ interface RocketStoreState {
   savePreset: (name: string) => boolean;
   loadPreset: (presetId: string) => void;
   deletePreset: (presetId: string) => void;
+  /** Loads a scenario's vehicle, planet and weather (if unlocked). */
+  applyScenario: (id: RocketScenario['id']) => void;
 }
 
 const progress = () => useProgressStore.getState();
@@ -81,6 +85,16 @@ export const useRocketStore = create<RocketStoreState>()((set, get) => ({
   },
 
   deletePreset: (presetId) => set({ savedPresets: deleteRocketPreset(presetId) }),
+
+  applyScenario: (id) => {
+    const scenario = ROCKET_SCENARIOS.find((entry) => entry.id === id);
+    if (!scenario) return;
+    if (scenario.unlock && !isUnlocked(scenario.unlock, progress().score)) return;
+    set({ params: scenario.params, activeWeather: new Set(scenario.weather), flight: { ...INITIAL_STATE } });
+    useEventStore.getState().clear('rocket');
+    useEventStore.getState().log('rocket', `Loaded ${scenario.name}`);
+    progress().registerExperiment(`rocket:scenario:${id}`, 20);
+  },
 }));
 
 /** Params with the active weather applied: what the simulation actually flies. */

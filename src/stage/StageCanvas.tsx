@@ -13,17 +13,20 @@ const ROCKET_CAMERA: WorldCameraOptions = { position: [5.5, 4.8, 13.5], fov: 42,
  */
 const StageCanvas = () => {
   const mode = useAppStore((state) => state.mode);
+  const booting = useAppStore((state) => state.booting);
+  const markReady = useAppStore((state) => state.markReady);
 
   return (
     <Canvas
       dpr={[1, 2]}
       gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
       style={{ background: 'hsl(var(--background))' }}
+      onCreated={() => markReady('stage')}
     >
-      <World active={mode === 'spacetime'} camera={SPACETIME_CAMERA}>
+      <World active={booting || mode === 'spacetime'} camera={SPACETIME_CAMERA}>
         <SpacetimeWorld />
       </World>
-      <World active={mode === 'rocket'} camera={ROCKET_CAMERA}>
+      <World active={!booting && mode === 'rocket'} camera={ROCKET_CAMERA}>
         <RocketWorld />
       </World>
     </Canvas>

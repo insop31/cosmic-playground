@@ -5,6 +5,8 @@ import MissionWatchers from '@/app/MissionWatchers';
 import { ErrorBoundary, HudFallback, StageFallback } from '@/app/ErrorBoundary';
 import FlightRecorder from '@/app/FlightRecorder';
 import Countdown from '@/hud/Countdown';
+import BootSequence from '@/hud/BootSequence';
+import MissionLog from '@/hud/MissionLog';
 import FlightDirector from '@/hud/FlightDirector';
 import MissionReport from '@/hud/MissionReport';
 import FlightBar from '@/hud/FlightBar';
@@ -22,6 +24,7 @@ import { useAppStore } from '@/stores/appStore';
 const Index = () => {
   const mode = useAppStore((state) => state.mode);
   const hudHidden = useAppStore((state) => state.hudHidden);
+  const booting = useAppStore((state) => state.booting);
   const setHudHidden = useAppStore((state) => state.setHudHidden);
   const hudRef = useRef<HTMLDivElement>(null);
 
@@ -29,9 +32,10 @@ const Index = () => {
   useResponsivePanels();
 
   useGSAP(() => {
-    if (hudRef.current) hudRef.current.inert = hudHidden; // hidden HUD must not take focus
-    gsap.to(hudRef.current, { autoAlpha: hudHidden ? 0 : 1, duration: 0.2 });
-  }, { dependencies: [hudHidden] });
+    const hidden = hudHidden || booting;
+    if (hudRef.current) hudRef.current.inert = hidden; // hidden HUD must not take focus
+    gsap.to(hudRef.current, { autoAlpha: hidden ? 0 : 1, duration: booting ? 0 : 0.4 });
+  }, { dependencies: [hudHidden, booting] });
 
   return (
     <div data-hud-mode={mode} className="relative h-screen w-full overflow-hidden bg-background">
@@ -45,6 +49,8 @@ const Index = () => {
       <MissionWatchers />
       <FlightRecorder />
       <Countdown />
+      <BootSequence />
+      <MissionLog />
 
       <ErrorBoundary fallback={(reset) => <HudFallback reset={reset} />}>
         <div ref={hudRef} className="hud-shell z-10">

@@ -1,11 +1,13 @@
 import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FolderOpen, LayoutTemplate, Maximize2, Orbit, PanelLeftClose, Save, Sparkles, Trash2, X } from 'lucide-react';
+import { FolderOpen, LayoutTemplate, Lock, Maximize2, Orbit, PanelLeftClose, Save, Sparkles, Trash2, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
 import type { CelestialBody } from '@/worlds/spacetime/types';
 import type { SavedSpacetimeScenario } from '@/lib/scenarioStorage';
 import type { LibraryTab } from '@/stores/appStore';
+import { useProgressStore } from '@/stores/progressStore';
+import { UNLOCKS } from '@/lib/unlocks';
 import { HudSlider, HudSwitch, IconButton, Segmented } from './controls';
 
 interface PlanetPreset {
@@ -154,6 +156,7 @@ const ObjectLibrary = ({
   onTabChange,
 }: ObjectLibraryProps) => {
   const [internalTab, setInternalTab] = useState<LibraryTab>('bodies');
+  const score = useProgressStore((state) => state.score);
   const tab = tabProp ?? internalTab;
   const setTab = onTabChange ?? setInternalTab;
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -411,22 +414,32 @@ const ObjectLibrary = ({
                   </div>
                   <p className="text-[12px] text-hud-dim">Loading a template replaces everything on the grid.</p>
                   <ul className="mt-1 grid gap-1.5">
-                    {SPACETIME_TEMPLATES.map((template) => (
-                      <li key={template.id}>
-                        <button
-                          type="button"
-                          onClick={() => onApplyTemplate(template.id)}
-                          className="hud-focus group flex w-full items-center gap-3 rounded-md border border-white/[0.06] bg-white/[0.02] p-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.05]"
-                        >
-                          <TemplatePreview templateId={template.id} className="h-14 w-14 shrink-0" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[13px] font-medium text-foreground">{template.name}</span>
-                            <span className="block truncate text-[11.5px] text-hud-dim">{template.subtitle}</span>
-                          </span>
-                          <span className="hud-num shrink-0 text-[10.5px] text-hud-faint group-hover:text-primary">{template.bodyCount} bodies</span>
-                        </button>
-                      </li>
-                    ))}
+                    {SPACETIME_TEMPLATES.map((template) => {
+                      const unlock = template.unlock ? UNLOCKS.find((u) => u.id === template.unlock) : undefined;
+                      const locked = Boolean(unlock && score < unlock.threshold);
+                      return (
+                        <li key={template.id}>
+                          <button
+                            type="button"
+                            disabled={locked}
+                            onClick={() => onApplyTemplate(template.id)}
+                            title={locked ? `Unlocks at ${unlock!.threshold} exploration points` : undefined}
+                            className="hud-focus group flex w-full items-center gap-3 rounded-md border border-white/[0.06] bg-white/[0.02] p-2 text-left transition-colors enabled:hover:border-primary/30 enabled:hover:bg-primary/[0.05] disabled:cursor-not-allowed"
+                          >
+                            <TemplatePreview templateId={template.id} className={`h-14 w-14 shrink-0 ${locked ? 'opacity-40 grayscale' : ''}`} />
+                            <span className="min-w-0 flex-1">
+                              <span className={`block text-[13px] font-medium ${locked ? 'text-hud-dim' : 'text-foreground'}`}>{template.name}</span>
+                              <span className="block truncate text-[11.5px] text-hud-dim">{template.subtitle}</span>
+                            </span>
+                            {locked ? (
+                              <span className="hud-num flex shrink-0 items-center gap-1 text-[10.5px] text-hud-faint"><Lock size={11} /> {unlock!.threshold}</span>
+                            ) : (
+                              <span className="hud-num shrink-0 text-[10.5px] text-hud-faint group-hover:text-primary">{template.bodyCount} bodies</span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -504,12 +517,16 @@ const ObjectLibrary = ({
           </div>
 
           <div className="hud-scroll grid max-h-[70vh] grid-cols-1 gap-3 overflow-y-auto p-5 md:grid-cols-2">
-            {SPACETIME_TEMPLATES.map((template) => (
+            {SPACETIME_TEMPLATES.map((template) => {
+              const unlock = template.unlock ? UNLOCKS.find((u) => u.id === template.unlock) : undefined;
+              const locked = Boolean(unlock && score < unlock.threshold);
+              return (
               <button
                 key={template.id}
                 type="button"
+                disabled={locked}
                 onClick={() => handleTemplateSelect(template.id)}
-                className="hud-focus group rounded-lg border border-white/[0.07] bg-white/[0.02] p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary/[0.04]"
+                className="hud-focus group rounded-lg border border-white/[0.07] bg-white/[0.02] p-3 text-left transition-colors enabled:hover:border-primary/35 enabled:hover:bg-primary/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <TemplatePreview templateId={template.id} />
                 <div className="mt-3 flex items-start justify-between gap-3">
@@ -522,11 +539,18 @@ const ObjectLibrary = ({
                   </span>
                 </div>
                 <p className="mt-2 text-[13px] leading-relaxed text-hud-dim">{template.description}</p>
-                <span className="mt-3 flex items-center gap-1 text-[12.5px] font-medium text-primary opacity-80 group-hover:opacity-100">
-                  <Sparkles size={12} /> Load template
-                </span>
+                {locked ? (
+                  <span className="mt-3 flex items-center gap-1 text-[12.5px] text-hud-dim">
+                    <Lock size={12} /> Unlocks at {unlock!.threshold} exploration points
+                  </span>
+                ) : (
+                  <span className="mt-3 flex items-center gap-1 text-[12.5px] font-medium text-primary opacity-80 group-hover:opacity-100">
+                    <Sparkles size={12} /> Load template
+                  </span>
+                )}
               </button>
-            ))}
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

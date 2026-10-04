@@ -1,3 +1,4 @@
+import type { UnlockId } from '@/lib/unlocks';
 import type { CelestialBody } from './types';
 
 export interface TemplatePreviewBody {
@@ -24,6 +25,8 @@ export interface SpacetimeTemplate {
     bodies: TemplatePreviewBody[];
   };
   createBodies: () => Array<Omit<CelestialBody, 'id'>>;
+  /** Earned with exploration score; locked until then. */
+  unlock?: UnlockId;
 }
 
 const DEFAULT_STAR_MASS = 1.989e30;
@@ -531,6 +534,59 @@ export const SPACETIME_TEMPLATES: SpacetimeTemplate[] = [
           color: '#66ddff',
           velocity: tangentialVelocity([0, 0, -14.5], anchor, 0.94, DEFAULT_STAR_MASS),
         }),
+      ];
+    },
+  },
+  {
+    id: 'gravity-slingshot',
+    name: 'Gravity Slingshot',
+    subtitle: 'Comet borrows a giant’s momentum',
+    description: 'A comet falls inward and passes just behind a giant planet. The planet’s pull swings it round and flings it out faster than it arrived: watch its trail stretch.',
+    bodyCount: 3,
+    unlock: 'gravity-slingshot',
+    preview: {
+      orbits: [
+        { radius: 18, stroke: '#d8c58f' },
+        { radius: 30, stroke: '#a8c6d8', dashed: true },
+      ],
+      bodies: [
+        { x: 50, y: 50, radius: 6, color: '#ffcc00' },
+        { x: 68, y: 50, radius: 3.4, color: '#d8c58f' },
+        { x: 74, y: 44, radius: 1.6, color: '#a8c6d8' },
+      ],
+    },
+    // Starting conditions found by searching with the real integrator
+    // (see src/test/sim.test.ts): closest pass about 1.5 u behind the giant,
+    // and the comet's orbital energy rises from about −0.21 to −0.02.
+    createBodies: () => {
+      const sun: [number, number, number] = [0, 0, 0];
+      const giantPos: [number, number, number] = [18, 0, 0];
+      const cometPos: [number, number, number] = [24, 0, 0];
+      const circular24 = orbitalSpeed(DEFAULT_STAR_MASS, 24);
+      const lean = 0.4; // radians inward from the prograde direction
+      return [
+        createStar({ name: 'Sun', position: sun, mass: DEFAULT_STAR_MASS, radius: 2.4, color: '#ffcc00', velocity: [0, 0, 0] }),
+        createPlanet({
+          name: 'Goliath',
+          position: giantPos,
+          mass: 1.9e28,
+          radius: 1.1,
+          physicalRadius: 69_911_000,
+          color: '#d8c58f',
+          bodyClass: 'gas',
+          atmosphere: true,
+          velocity: tangentialVelocity(giantPos, sun),
+        }),
+        {
+          name: 'Comet',
+          type: 'comet',
+          bodyClass: 'comet',
+          position: cometPos,
+          mass: 1e13,
+          radius: 0.2,
+          color: '#a8c6d8',
+          velocity: [-Math.sin(lean) * circular24, 0, Math.cos(lean) * circular24],
+        },
       ];
     },
   },

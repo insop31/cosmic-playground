@@ -177,3 +177,24 @@ describe('rocket display units', () => {
     expect(liftoffTwr({ ...DEFAULT_PARAMS, thrustForce: 5 })).toBeLessThan(1);
   });
 });
+
+describe('Gravity Slingshot template', () => {
+  it('flings the comet out faster than it arrived, without a collision', async () => {
+    const { SPACETIME_TEMPLATES } = await import('@/worlds/spacetime/spacetimeTemplates');
+    const template = SPACETIME_TEMPLATES.find((t) => t.id === 'gravity-slingshot')!;
+    const world = template.createBodies().map((b, i) => seedBody({
+      id: `b${i}`, x: b.position[0], z: b.position[2], vx: b.velocity![0], vz: b.velocity![2], mass: b.mass, radius: b.radius, type: b.type,
+    }));
+    const [sun, giant, comet] = world;
+    const energy = () => 0.5 * comet.velocity.lengthSq() - (G * sun.mass) / comet.position.distanceTo(sun.position);
+    const before = energy();
+    let closest = Infinity;
+    for (let t = 0; t < 40; t += FIXED_SUBSTEP) {
+      const { removed } = stepWorld(world, G, adaptiveDt(FIXED_SUBSTEP, world));
+      expect(removed.size).toBe(0);
+      closest = Math.min(closest, comet.position.distanceTo(giant.position));
+    }
+    expect(closest).toBeLessThan(3);
+    expect(energy()).toBeGreaterThan(before + 0.1);
+  });
+});

@@ -28,6 +28,9 @@ import { liftoffTwr } from '@/sim/rocket';
 import { useAppStore } from '@/stores/appStore';
 import { useFlightStore, type RocketStep } from '@/stores/flightStore';
 import { useEffectiveRocketParams, useRocketStore } from '@/stores/rocketStore';
+import { useProgressStore } from '@/stores/progressStore';
+import { UNLOCKS } from '@/lib/unlocks';
+import { ROCKET_SCENARIOS } from '@/worlds/rocket/rocketScenarios';
 import { AI_HINTS, deriveHintScenario } from '@/worlds/rocket/rocketHints';
 import type { RocketParams } from '@/worlds/rocket/rocketTypes';
 import {
@@ -211,6 +214,38 @@ const SetupCoach = ({ params }: { params: RocketParams }) => {
         <p className="hud-label text-[9.5px] text-primary/80">Launch coach</p>
         <p className="mt-0.5 text-[12.5px] leading-snug text-foreground/90" aria-live="polite">{hint}</p>
       </div>
+    </div>
+  );
+};
+
+/* ─── Scenarios ──────────────────────────────────────────────────────────── */
+
+const ScenarioPicker = ({ disabled }: { disabled: boolean }) => {
+  const applyScenario = useRocketStore((state) => state.applyScenario);
+  const score = useProgressStore((state) => state.score);
+  return (
+    <div className="grid gap-1.5">
+      <p className="hud-label">Scenario</p>
+      {ROCKET_SCENARIOS.map((scenario) => {
+        const unlock = scenario.unlock ? UNLOCKS.find((u) => u.id === scenario.unlock) : undefined;
+        const locked = Boolean(unlock && score < unlock.threshold);
+        return (
+          <button
+            key={scenario.id}
+            type="button"
+            disabled={disabled || locked}
+            onClick={() => applyScenario(scenario.id)}
+            title={locked ? `Unlocks at ${unlock!.threshold} exploration points` : 'Load this scenario'}
+            className="hud-focus grid gap-0.5 rounded-[5px] border border-[hsl(var(--hud-line)/0.12)] bg-white/[0.015] px-3 py-2 text-left transition-colors enabled:hover:border-primary/35 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="flex items-center justify-between gap-2 text-[12.5px] font-medium text-foreground">
+              {scenario.name}
+              {locked && <span className="hud-num flex items-center gap-1 text-[10.5px] font-normal text-hud-faint"><Lock size={11} /> {unlock!.threshold} pts</span>}
+            </span>
+            <span className="text-[11.5px] leading-snug text-hud-dim">{scenario.summary}</span>
+          </button>
+        );
+      })}
     </div>
   );
 };
@@ -404,6 +439,7 @@ const LaunchSetup = () => {
         {step === 'launch' && (
           <div className="grid gap-4">
             <SetupCoach params={params} />
+            <ScenarioPicker disabled={locked} />
             {sliders(LAUNCH)}
             <div className="grid grid-cols-3 gap-2 rounded-[5px] border border-[hsl(var(--hud-line)/0.12)] bg-white/[0.015] p-3">
               <div><p className="hud-label text-[9.5px]">Thrust</p><p className="hud-num text-[13px]">{params.thrustForce} kN</p></div>

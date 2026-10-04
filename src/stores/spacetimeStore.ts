@@ -7,6 +7,7 @@ import {
   saveSpacetimeScenario,
   type SavedSpacetimeScenario,
 } from '@/lib/scenarioStorage';
+import { isUnlocked } from '@/lib/unlocks';
 import { useEventStore } from './eventStore';
 import { useProgressStore } from './progressStore';
 import { useTimeStore } from './timeStore';
@@ -182,6 +183,7 @@ export const useSpacetimeStore = create<SpacetimeState>()((set, get) => ({
   applyTemplate: (templateId) => {
     const template = SPACETIME_TEMPLATES.find((entry) => entry.id === templateId);
     if (!template) return;
+    if (template.unlock && !isUnlocked(template.unlock, progress().score)) return;
     const bodies = template.createBodies().map((body, index) => ({
       ...body,
       id: `template_${templateId}_${nextId++}_${index}`,

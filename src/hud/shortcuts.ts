@@ -5,6 +5,7 @@ export const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['←', '→'], label: 'Slower / faster (rewind below ½×)' },
   { keys: ['R'], label: 'Reset the current lab' },
   { keys: ['L'], label: 'Show or hide objectives' },
+  { keys: ['M'], label: 'Open the mission log' },
   { keys: ['['], label: 'Show or hide the tool panel' },
   { keys: ['Esc'], label: 'Cancel placement or close a panel' },
   { keys: ['H'], label: 'Hide or show the interface' },

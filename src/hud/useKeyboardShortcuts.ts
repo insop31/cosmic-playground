@@ -24,6 +24,7 @@ export const useKeyboardShortcuts = () => {
       const target = event.target instanceof Element ? event.target : null;
       const app = useAppStore.getState();
       const time = useTimeStore.getState();
+      if (app.booting) return; // the intro handles its own keys
 
       switch (event.key) {
         case 'Tab': {
@@ -36,6 +37,10 @@ export const useKeyboardShortcuts = () => {
         case 'l':
         case 'L':
           app.toggleMissions();
+          break;
+        case 'm':
+        case 'M':
+          app.toggleMissionLog();
           break;
         case '?':
           document.querySelector<HTMLButtonElement>('[data-shortcuts-trigger]')?.click();

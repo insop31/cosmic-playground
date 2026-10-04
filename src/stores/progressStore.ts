@@ -5,6 +5,7 @@ import {
   type AppMode,
   type ChallengePack,
 } from '@/lib/challengePacks';
+import { UNLOCKS, type UnlockId } from '@/lib/unlocks';
 
 export type MissionId = (typeof ALL_MISSIONS)[number]['id'];
 export type MissionCard = { id: MissionId; phase: 'incomplete' | 'complete' };
@@ -49,6 +50,47 @@ const buildMissionCards = (
 
 const NO_ACHIEVEMENTS = Object.fromEntries(ALL_MISSIONS.map((mission) => [mission.id, false])) as Record<MissionId, boolean>;
 
+// ─── Saved progress (this browser only) ───
+const STORAGE_KEY = 'cosmic-playground.progress';
+
+interface SavedProgress {
+  version: 1;
+  score: number;
+  achievements: Record<string, boolean>;
+  experimentKeys: string[];
+  activePacks: Record<AppMode, string>;
+}
+
+const loadProgress = (): SavedProgress | null => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedProgress;
+    return parsed?.version === 1 ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveProgress = (state: Pick<ProgressState, 'score' | 'achievements' | 'experimentKeys' | 'activePacks'>) => {
+  try {
+    const data: SavedProgress = {
+      version: 1,
+      score: state.score,
+      achievements: state.achievements,
+      experimentKeys: [...state.experimentKeys],
+      activePacks: state.activePacks,
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage full or blocked: progress simply isn't kept between visits.
+  }
+};
+
+const saved = typeof window !== 'undefined' ? loadProgress() : null;
+const INITIAL_ACHIEVEMENTS = { ...NO_ACHIEVEMENTS, ...(saved?.achievements ?? {}) } as Record<MissionId, boolean>;
+const INITIAL_PACKS = { ...DEFAULT_PACK_BY_MODE, ...(saved?.activePacks ?? {}) };
+
 // Pending "complete card leaves the queue" timers, keyed by mission.
 const removalTimers: Partial<Record<MissionId, number>> = {};
 
@@ -61,10 +103,14 @@ interface ProgressState {
   experimentKeys: ReadonlySet<string>;
   /** Most recent objective completion, shown briefly in the context banner. */
   lastCompleted: { id: MissionId; at: number } | null;
+  /** Most recent content unlock (score crossed a threshold). */
+  lastUnlock: { id: UnlockId; at: number } | null;
   awardScore: (points: number) => void;
   unlock: (id: MissionId) => void;
   registerExperiment: (key: string, points?: number) => void;
   setActivePack: (mode: AppMode, packId: string) => void;
+  /** Clears score, objectives and experiments (here and in saved progress). */
+  resetProgress: () => void;
 }
 
 export const useProgressStore = create<ProgressState>()((set, get) => {
@@ -103,15 +149,16 @@ export const useProgressStore = create<ProgressState>()((set, get) => {
   };
 
   return {
-    score: 0,
-    achievements: NO_ACHIEVEMENTS,
-    activePacks: DEFAULT_PACK_BY_MODE,
+    score: saved?.score ?? 0,
+    achievements: INITIAL_ACHIEVEMENTS,
+    activePacks: INITIAL_PACKS,
     missionQueues: {
-      spacetime: buildMissionCards(getActivePack('spacetime', DEFAULT_PACK_BY_MODE.spacetime), NO_ACHIEVEMENTS),
-      rocket: buildMissionCards(getActivePack('rocket', DEFAULT_PACK_BY_MODE.rocket), NO_ACHIEVEMENTS),
+      spacetime: buildMissionCards(getActivePack('spacetime', INITIAL_PACKS.spacetime), INITIAL_ACHIEVEMENTS),
+      rocket: buildMissionCards(getActivePack('rocket', INITIAL_PACKS.rocket), INITIAL_ACHIEVEMENTS),
     },
-    experimentKeys: new Set<string>(),
+    experimentKeys: new Set<string>(saved?.experimentKeys ?? []),
     lastCompleted: null,
+    lastUnlock: null,
 
     awardScore: (points) => set((state) => ({ score: state.score + points })),
 
@@ -145,7 +192,35 @@ export const useProgressStore = create<ProgressState>()((set, get) => {
       }));
       syncQueues();
     },
+
+    resetProgress: () => {
+      Object.values(removalTimers).forEach((timer) => window.clearTimeout(timer));
+      for (const key of Object.keys(removalTimers)) delete removalTimers[key as MissionId];
+      set((state) => ({
+        score: 0,
+        achievements: NO_ACHIEVEMENTS,
+        experimentKeys: new Set<string>(),
+        lastCompleted: null,
+        lastUnlock: null,
+        missionQueues: {
+          spacetime: buildMissionCards(getActivePack('spacetime', state.activePacks.spacetime), NO_ACHIEVEMENTS),
+          rocket: buildMissionCards(getActivePack('rocket', state.activePacks.rocket), NO_ACHIEVEMENTS),
+        },
+      }));
+    },
   };
+});
+
+// Save progress whenever it changes, and announce unlocks as the score crosses thresholds.
+useProgressStore.subscribe((state, prev) => {
+  if (state.score !== prev.score || state.achievements !== prev.achievements
+    || state.experimentKeys !== prev.experimentKeys || state.activePacks !== prev.activePacks) {
+    saveProgress(state);
+  }
+  if (state.score > prev.score) {
+    const crossed = UNLOCKS.find((u) => prev.score < u.threshold && state.score >= u.threshold);
+    if (crossed) useProgressStore.setState({ lastUnlock: { id: crossed.id, at: Date.now() } });
+  }
 });
 
 const isRocketExperiment = (key: string) => key.startsWith('rocket:') || key.startsWith('rocket-profile:');

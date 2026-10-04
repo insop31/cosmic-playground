@@ -11,6 +11,8 @@ import Starfield from './Starfield';
 import PhysicsSimulator from './PhysicsSimulator';
 import PlacementController from './PlacementController';
 import FocusController from './FocusController';
+import BootCamera from './BootCamera';
+import { useAppStore } from '@/stores/appStore';
 
 // Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
 const GRID_SIZE = 220;
@@ -25,6 +27,7 @@ const SpacetimeWorld = () => {
   const aiming = useSpacetimeStore((state) => Boolean(state.pendingPlacement));
   const removeBody = useSpacetimeStore((state) => state.removeBody);
   const onBodyUpdated = useSpacetimeStore((state) => state.updateBody);
+  const booting = useAppStore((state) => state.booting);
   const liveTimeScale = useEffectiveTimeScale();
   // A hidden world is paused.
   const timeScale = active ? liveTimeScale : 0;
@@ -77,10 +80,11 @@ const SpacetimeWorld = () => {
 
       <PlacementController />
       <FocusController controlsRef={controlsRef} />
+      <BootCamera controlsRef={controlsRef} />
 
       <OrbitControls
         ref={controlsRef}
-        enabled={active}
+        enabled={active && !booting}
         // While aiming a new body, left-drag sets its velocity instead of turning the view.
         enableRotate={!aiming}
         enableDamping
