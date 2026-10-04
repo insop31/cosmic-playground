@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   build: {
+    // three.js alone is ~690 kB minified and is already split into its own long-lived chunk.
+    chunkSizeWarningLimit: 750,
     rollupOptions: {
       output: {
         // Long-lived vendor chunks: the 3D stack changes far less often than app code.

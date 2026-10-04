@@ -16,10 +16,8 @@ const Countdown = () => {
   const setCountdown = useFlightStore((state) => state.setCountdown);
   const [shown, setShown] = useState<number | null>(null);
   const digitRef = useRef<HTMLDivElement>(null);
-  const timeline = useRef<gsap.core.Timeline | null>(null);
 
   const liftoff = useCallback(() => {
-    timeline.current?.kill();
     setCountdown(null);
     setShown(null);
     useTimeStore.getState().resetClock();
@@ -29,16 +27,23 @@ const Countdown = () => {
 
   useEffect(() => {
     if (countdown === null) {
-      timeline.current?.kill();
       setShown(null);
       return undefined;
     }
-    const tl = gsap.timeline({ onComplete: liftoff });
-    for (let n = countdown; n >= 1; n--) {
-      tl.call(() => setShown(n)).to({}, { duration: 1 });
-    }
-    timeline.current = tl;
-    return () => { tl.kill(); };
+    // Plain timers, not GSAP: the countdown is timing, so it must not be
+    // shortened by the reduced-motion setting.
+    let n = countdown;
+    setShown(n);
+    const id = window.setInterval(() => {
+      n -= 1;
+      if (n <= 0) {
+        window.clearInterval(id);
+        liftoff();
+      } else {
+        setShown(n);
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
   }, [countdown, liftoff]);
 
   useGSAP(() => {

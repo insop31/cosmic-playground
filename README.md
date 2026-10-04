@@ -1,53 +1,64 @@
-# Cosmic Playground 🚀✨
+# Cosmic Playground
 
-Welcome to **Cosmic Playground**, an interactive Spacetime Lab and Rocket Simulator built with modern web technologies. This project explores gravitational physics, universe expansion, and orbital mechanics in a beautiful 3D web interface.
+An interactive 3D lab for learning gravity, orbits and rocket flight. Two labs share one stage:
 
-## 🌟 Features
+- **Spacetime Lab**: place stars, planets, black holes, neutron stars, asteroids and comets on a sheet that bends with mass. Aim each launch by dragging, see the predicted path before you commit (green stays in orbit, amber escapes, red ends in a collision), and read live orbital elements for any body.
+- **Rocket Lab**: configure a two-stage launch vehicle, set the weather and planet, then fly it. A flight director tracks the phases of ascent, aerodynamic heating and dynamic pressure (Max-Q), a coach explains what is happening, and a mission report shows what went right or wrong, with a forensic rewind for failures.
 
-- **Spacetime Gravity Sandbox**: Place stars and planets, and watch them orbit and warp spacetime dynamically. Features real-time planetary physics and time-scaling (including rewind and universe expansion).
-- **Rocket Simulator**: Launch a rocket and simulate its trajectory and phases using adjustible parameters.
-- **Interactive 3D UI**: Fully interactive 3D visualizations built using `three.js` and React Three Fiber.
-- **Glassmorphism Design**: Sleek and modern user interface styled with Tailwind CSS and Radix UI primitives.
+Time can run from −4× (rewind) to 64× (warp). Objectives award exploration points, which unlock a Gravity Slingshot template (500 points) and a Mars dust-storm ascent scenario (750 points). Progress is saved in the browser.
 
-## 🛠️ Technologies Used
+See [docs/user-guide.md](docs/user-guide.md) for how to use it, and [CREDITS.md](CREDITS.md) for fonts and libraries.
 
-- **Framework**: [React 18](https://react.dev/) + [Vite](https://vitejs.dev/)
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **3D Graphics**: [Three.js](https://threejs.org/), [@react-three/fiber](https://docs.pmnd.rs/react-three-fiber), [@react-three/drei](https://github.com/pmndrs/drei)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **UI Components**: [shadcn/ui](https://ui.shadcn.com/) + [Radix UI](https://www.radix-ui.com/)
-- **Icons**: [Lucide React](https://lucide.dev/)
+## Getting started
 
-## 🚀 Getting Started
+Requires Node.js 18 or newer.
 
-Follow these instructions to set up and run the project locally.
+```bash
+npm install
+npm run dev
+```
 
-### Prerequisites
+Then open http://localhost:8080.
 
-Make sure you have [Node.js](https://nodejs.org/) (v18+) and `npm` installed.
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Development server with hot reload |
+| `npm run build` | Production build into `dist/` |
+| `npm run preview` | Serve the production build |
+| `npm test` | Unit tests (Vitest) |
+| `npm run typecheck` | TypeScript check |
+| `npm run lint` | ESLint |
+| `npm run assets:optimize` | Compress 3D models from `assets-src/` into `public/models/` |
 
-### Installation
+## How it is built
 
-1. **Clone the repository:**
-   ```bash
-   git clone <YOUR_GIT_URL>
-   cd cosmic-playground
-   ```
+React 18, TypeScript and Vite; 3D with three.js and React Three Fiber; state in zustand; animation with GSAP; styling with Tailwind CSS.
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+```
+src/
+  app/        Background watchers (objectives, flight recorder), error boundaries
+  hud/        Everything on screen over the 3D view
+  motion/     GSAP setup: plugins, eases, reduced-motion handling
+  sim/        Simulation maths with no rendering: N-body gravity, rocket flight,
+              time scheduling (warp/rewind), orbit prediction (runs in a worker),
+              orbital elements, display units
+  stage/      The single WebGL canvas, per-lab "worlds", post-processing, materials
+  stores/     zustand stores: app, time, spacetime, rocket, flight, progress, events
+  worlds/     3D content for each lab
+  test/       Unit tests
+```
 
-3. **Start the development server:**
-   ```bash
-   npm run dev
-   ```
+Design notes:
 
-4. **Open your browser:**
-   Navigate to `http://localhost:5173` (or the port specified in your terminal) to explore the playground!
+- **One canvas, two worlds.** Both labs stay mounted as R3F portals with their own scene and camera; only the active one renders, takes input and shows labels. The hidden lab pauses.
+- **Physics is separate from rendering.** `src/sim` holds the integrators as pure functions. Warp runs more of the same fixed steps per frame (within a work budget), so 64× gives the same result as 64 times as many 1× frames; tests check this.
+- **The spacetime sheet is drawn on the GPU** from a softened (Plummer) well field. The same formula runs on the CPU so bodies, trails and predicted paths sit on the surface. It is a visual aid; the physics runs on a flat plane.
+- **Graphics quality** has High, Medium and Low tiers (resolution and post-processing). Auto steps down when the frame rate stays low.
+- **Rendering guardrails.** The effect composer keeps `multisampling={0}` and has no ToneMapping effect, and shaders that feed Bloom never produce NaN. Each of these once turned whole frames black on ANGLE/D3D11.
 
-## 🎮 How to Play
+## Simplifications to be aware of
 
-- **Spacetime Mode:** Drag to orbit the camera, scroll to zoom, and use the left panel to add celestial objects to warp spacetime. You can play, pause, or rewind time.
-- **Rocket Mode:** Switch to the Rocket tab to adjust parameters (like fuel and thrust), launch your creation, and observe its altitude and trajectory.
+This is a teaching model, not a mission planner.
+
+- Spacetime Lab scales gravity so solar-system masses produce motion at scene distances. Speeds and distances are in scene units (u, u/s).
+- Rocket Lab uses explicit Euler integration with simplified drag, wind and heating. Altitude is shown in km on the scene's atmosphere-layer scale; speed is in model units with its fraction of the model's escape speed. There is no aerodynamic lift, and stage separation is visual only (mass does not change).

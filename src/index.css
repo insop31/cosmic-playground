@@ -29,7 +29,7 @@
     --secondary-foreground: 215 46% 93%;
 
     --muted: 221 46% 12%;              /* #111a2e raised hull */
-    --muted-foreground: 218 17% 59%;   /* #8592a8 */
+    --muted-foreground: 218 18% 66%;   /* #9ba5b8 */
 
     --accent: 221 46% 12%;
     --accent-foreground: 215 46% 93%;
@@ -50,8 +50,8 @@
     --hud-line: 216 60% 70%;
     --hud-line-alpha: 0.13;
     --hud-fg: 215 46% 93%;
-    --hud-dim: 218 17% 59%;            /* #8592a8 */
-    --hud-faint: 220 17% 41%;          /* #56627a */
+    --hud-dim: 218 18% 66%;            /* #9ba5b8 */
+    --hud-faint: 220 15% 54%;          /* #7a8499, ≥4.5:1 on panels */
     --cobalt: 228 100% 61%;            /* #3a63ff depth, wells */
     --ok: 142 69% 58%;                 /* #4ade80 bound orbit */
     --warn: 40 90% 60%;                /* #f5b83d caution */

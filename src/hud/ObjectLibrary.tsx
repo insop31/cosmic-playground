@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { gsap, useGSAP } from '@/motion/gsap';
 import { FolderOpen, LayoutTemplate, Lock, Maximize2, Orbit, PanelLeftClose, Save, Sparkles, Trash2, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
@@ -157,8 +157,14 @@ const ObjectLibrary = ({
 }: ObjectLibraryProps) => {
   const [internalTab, setInternalTab] = useState<LibraryTab>('bodies');
   const score = useProgressStore((state) => state.score);
+  const tabBodyRef = useRef<HTMLDivElement>(null);
   const tab = tabProp ?? internalTab;
   const setTab = onTabChange ?? setInternalTab;
+
+  // Switching sections: the new content settles in from just below.
+  useGSAP(() => {
+    gsap.from(tabBodyRef.current, { autoAlpha: 0, y: 6, duration: 0.16 });
+  }, { dependencies: [tab] });
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [armedKey, setArmedKey] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -275,15 +281,7 @@ const ObjectLibrary = ({
         <div className="hud-divider" />
 
         <div className="hud-scroll min-h-0 flex-1 overflow-y-auto px-4">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={tab}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
-              className="py-4"
-            >
+            <div ref={tabBodyRef} className="py-4">
               {tab === 'bodies' && (
                 <div className="grid gap-5">
                   <div className="grid gap-2">
@@ -498,8 +496,7 @@ const ObjectLibrary = ({
                   </div>
                 </div>
               )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
         </div>
       </div>
 

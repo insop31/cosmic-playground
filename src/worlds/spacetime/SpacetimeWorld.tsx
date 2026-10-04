@@ -12,7 +12,7 @@ import PhysicsSimulator from './PhysicsSimulator';
 import PlacementController from './PlacementController';
 import FocusController from './FocusController';
 import BootCamera from './BootCamera';
-import { useAppStore } from '@/stores/appStore';
+import { useAppStore, useQualityTier } from '@/stores/appStore';
 
 // Larger grid gives bodies more physical room — reduces extreme close-range forces on placement
 const GRID_SIZE = 220;
@@ -28,6 +28,7 @@ const SpacetimeWorld = () => {
   const removeBody = useSpacetimeStore((state) => state.removeBody);
   const onBodyUpdated = useSpacetimeStore((state) => state.updateBody);
   const booting = useAppStore((state) => state.booting);
+  const tier = useQualityTier();
   const liveTimeScale = useEffectiveTimeScale();
   // A hidden world is paused.
   const timeScale = active ? liveTimeScale : 0;
@@ -65,7 +66,7 @@ const SpacetimeWorld = () => {
 
       <Starfield />
 
-      <SpacetimeGrid gridSize={GRID_SIZE} universeScale={universeScale} onPointerDown={onGridDown} onPointerUp={onGridUp} />
+      <SpacetimeGrid gridSize={GRID_SIZE} gridResolution={tier === 'low' ? 120 : 200} universeScale={universeScale} onPointerDown={onGridDown} onPointerUp={onGridUp} />
 
       <PhysicsSimulator
         bodies={bodies}
