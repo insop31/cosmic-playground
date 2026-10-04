@@ -3,15 +3,14 @@
 // thread. It owns the bodies, the fixed-step clock, the rewind history and event markers.
 import { gravityConstant, maxSpeedFor, velocityScaleFor } from './constants';
 import { diagnostics, spawnOrbitalVelocity, stepSystem, type Diagnostics, type ImpactEvent } from './nbody';
-import { MOTION_BOUND, MOTION_ESCAPING, NBodySystem } from './system';
+import { addSeed, flyPrediction, type Prediction } from './predict';
+import { planForwardSteps, stepCap } from './schedule';
+import { MOTION_BOUND, NBodySystem } from './system';
 import type { CelestialBody } from './types';
 
 export const SIM_STEP = 1 / 120;          // Fixed physics step (s of simulated time)
-export const MAX_STEPS_PER_TICK = 8;      // Steps per tick before the backlog is dropped
 export const HISTORY_LENGTH = 3600;       // One snapshot per step → 30 s to rewind
 export const MAX_SIM_BODIES = 180;
-const PREDICT_STEP = SIM_STEP * 2;
-const PREDICT_ESCAPE_DISTANCE = 140;
 const DIAGNOSTICS_EVERY = 12;             // Steps between conservation readouts (10 Hz)
 
 /** Per-body values in a snapshot's `data` array. */
@@ -47,17 +46,7 @@ export interface BodyUpdate {
   radius: number;
 }
 
-export type PredictedOutcome = 'bound' | 'escape' | 'collision';
-
-export interface Prediction {
-  /** Path of the candidate as x, z pairs. */
-  points: Float32Array;
-  outcome: PredictedOutcome;
-  /** Id of the body it hits, for collisions. */
-  hitId?: string;
-  /** Seconds of simulated time until the outcome (or the full horizon). */
-  time: number;
-}
+export type { PredictedOutcome, Prediction } from './predict';
 
 export interface TickResult {
   impacts: ImpactEvent[];
@@ -67,6 +56,8 @@ export interface TickResult {
   spawned: CelestialBody[];
   updated: BodyUpdate[];
   stepsTaken: number;
+  /** True when this tick hit its step budget and dropped the rest (warp is being limited). */
+  limited: boolean;
   /** 1 forward, −1 rewound or sought backwards, 0 nothing happened. */
   direction: 1 | -1 | 0;
 }
@@ -89,7 +80,7 @@ export interface SimConfig {
   expansionRate: number;
 }
 
-const emptyResult = (): TickResult => ({ impacts: [], removed: [], restored: [], spawned: [], updated: [], stepsTaken: 0, direction: 0 });
+const emptyResult = (): TickResult => ({ impacts: [], removed: [], restored: [], spawned: [], updated: [], stepsTaken: 0, limited: false, direction: 0 });
 
 export class SimulationCore {
   readonly sys = new NBodySystem();
@@ -198,10 +189,14 @@ export class SimulationCore {
 
   private forward(dt: number): TickResult {
     const result = emptyResult();
-    this.accum += dt;
+    // Warp runs more fixed steps per tick, within a work budget that shrinks as the
+    // system gets crowded; time beyond the budget is dropped, never carried.
+    const plan = planForwardSteps(this.accum + dt, SIM_STEP, stepCap(this.sys.count));
+    this.accum = plan.carry;
+    result.limited = plan.limited;
     const effectiveG = gravityConstant(this.realistic);
     const maxSpeed = maxSpeedFor(this.realistic);
-    while (this.accum >= SIM_STEP && result.stepsTaken < MAX_STEPS_PER_TICK) {
+    for (let n = 0; n < plan.steps; n++) {
       this.record();
       const { impacts, removed, spawned } = stepSystem(this.sys, SIM_STEP, {
         effectiveG,
@@ -230,7 +225,6 @@ export class SimulationCore {
         result.spawned.push(body);
       }
       this.step++;
-      this.accum -= SIM_STEP;
       result.stepsTaken++;
       for (const impact of impacts) {
         this.markers.push({ step: this.step, kind: impact.kind, title: impact.title });
@@ -239,8 +233,6 @@ export class SimulationCore {
       result.removed.push(...removed);
       if (this.step % DIAGNOSTICS_EVERY === 0 || impacts.length) this.refreshDiagnostics();
     }
-    // On an overloaded tick drop the backlog instead of letting it grow every tick.
-    if (this.accum > SIM_STEP) this.accum = SIM_STEP;
     if (result.stepsTaken > 0) result.direction = 1;
     result.updated = this.collectUpdates();
     return result;
@@ -378,35 +370,20 @@ export class SimulationCore {
    */
   predict(candidate: CelestialBody, seconds = 20, sampleEvery = 4): Prediction {
     const sim = this.sys.clone();
-    const effectiveG = gravityConstant(this.realistic);
-    const velScale = velocityScaleFor(this.realistic);
     const v = candidate.velocity ?? [0, 0, 0];
-    const [vx, vz] = v[0] * v[0] + v[2] * v[2] > 1e-12
-      ? [v[0] * velScale, v[2] * velScale]
-      : spawnOrbitalVelocity(sim, candidate.position[0], candidate.position[2], effectiveG);
-    const id = candidate.id;
-    sim.add({ id, type: candidate.type, x: candidate.position[0], z: candidate.position[2], vx, vz, mass: candidate.mass, radius: candidate.radius, physRadius: candidate.physicalRadius });
-    const points: number[] = [candidate.position[0], candidate.position[2]];
-    const steps = Math.round(seconds / PREDICT_STEP);
-    const options = { effectiveG, maxSpeed: maxSpeedFor(this.realistic), maxBodies: MAX_SIM_BODIES, velocityScale: velScale };
-    for (let s = 1; s <= steps; s++) {
-      const { impacts } = stepSystem(sim, PREDICT_STEP, options);
-      const hit = impacts.find((impact) => impact.bodies.includes(id));
-      const i = sim.indexOf(id);
-      if (hit || i < 0) {
-        if (i >= 0) points.push(sim.px[i], sim.pz[i]);
-        else if (hit) points.push(hit.position[0], hit.position[2]);
-        const hitId = hit ? hit.bodies.find((b) => b !== id) : undefined;
-        return { points: Float32Array.from(points), outcome: 'collision', hitId, time: s * PREDICT_STEP };
-      }
-      if (s % sampleEvery === 0) points.push(sim.px[i], sim.pz[i]);
-      if (Math.hypot(sim.px[i], sim.pz[i]) > PREDICT_ESCAPE_DISTANCE) {
-        return { points: Float32Array.from(points), outcome: 'escape', time: s * PREDICT_STEP };
-      }
-    }
-    const i = sim.indexOf(id);
-    const outcome: PredictedOutcome = i >= 0 && sim.motion[i] === MOTION_ESCAPING ? 'escape' : 'bound';
-    return { points: Float32Array.from(points), outcome, time: seconds };
+    addSeed(sim, {
+      id: candidate.id,
+      type: candidate.type,
+      x: candidate.position[0],
+      z: candidate.position[2],
+      vx: v[0],
+      vz: v[2],
+      mass: candidate.mass,
+      radius: candidate.radius,
+      physRadius: candidate.physicalRadius,
+      pinned: candidate.pinned,
+    }, this.realistic);
+    return flyPrediction(sim, candidate.id, this.realistic, seconds, sampleEvery);
   }
 
   snapshot(): SimSnapshot {

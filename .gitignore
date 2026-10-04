@@ -23,6 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Raw 3D sources (only optimized output in public/ is committed)
+assets-src/
+
 # Playwright
 test-results/
 playwright-report/

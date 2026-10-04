@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_PARAMS, INITIAL_STATE, type RocketParams, type RocketState } from '../components/rocket/rocketTypes';
+import { DEFAULT_PARAMS, INITIAL_STATE, type RocketParams, type RocketState } from '@/worlds/rocket/rocketTypes';
 import { DEFAULT_STAR_MASS } from '../physics/constants';
 import { FLIGHT_DT, initialFlightState, stepFlight } from '../physics/rocket';
 import { SIM_STEP, SimulationCore } from '../physics/simulation';
 import type { CelestialBody } from '../physics/types';
-import { buildDebrief } from './debrief';
+import { buildDebrief, peakAltitude } from './debrief';
+import { formatAltitude } from '../physics/altitude';
 import { liveCoachMessage } from './coach';
 import { SpacetimeMissionTracker } from './spacetimeMissions';
 import { addNotebookEntry, clearNotebook, differingParams, listNotebook } from '../lib/notebook';
@@ -50,6 +51,15 @@ describe('flight debrief', () => {
     expect(debrief.causes.length).toBeGreaterThan(0);
     expect(debrief.suggestions.join(' ')).toMatch(suggestion);
     expect(debrief.numbers.find((n) => n.label === 'Δv budget')).toBeDefined();
+  });
+
+  it('reports the top of the arc when the verdict comes before it', () => {
+    const state = flyToState(DEFAULT_PARAMS);
+    expect(state.outcome).toBe('suborbital');
+    const peak = peakAltitude(DEFAULT_PARAMS, state);
+    expect(peak).toBeGreaterThan(state.maxAltitude);
+    // The same number the verdict announced ("Will reach … and then fall back").
+    expect(state.outcomeReason).toContain(formatAltitude(peak));
   });
 });
 

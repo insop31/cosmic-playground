@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_PARAMS } from '../components/rocket/rocketTypes';
+import { DEFAULT_PARAMS } from '@/worlds/rocket/rocketTypes';
 import {
   deleteRocketPreset,
   deleteSpacetimeScenario,

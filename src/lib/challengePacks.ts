@@ -1,4 +1,4 @@
-import type { RocketParams } from '../components/rocket/rocketTypes';
+import type { RocketParams } from '@/worlds/rocket/rocketTypes';
 
 export type AppMode = 'spacetime' | 'rocket';
 

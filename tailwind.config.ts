@@ -15,8 +15,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ["Space Grotesk", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "monospace"],
+        sans: ["IBM Plex Sans", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        mono: ["IBM Plex Mono", "ui-monospace", "SFMono-Regular", "Consolas", "monospace"],
+        display: ["Michroma", "Eurostile", "IBM Plex Sans", "system-ui", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -62,6 +63,18 @@ export default {
           dim: "hsl(var(--cyan-dim))",
         },
         nebula: "hsl(var(--nebula))",
+        cobalt: "hsl(var(--cobalt))",
+        burn: "hsl(var(--burn))",
+        ok: "hsl(var(--ok))",
+        warn: "hsl(var(--warn))",
+        danger: "hsl(var(--danger))",
+        hud: {
+          surface: "hsl(var(--hud-surface))",
+          raised: "hsl(var(--hud-raised))",
+          fg: "hsl(var(--hud-fg))",
+          dim: "hsl(var(--hud-dim))",
+          faint: "hsl(var(--hud-faint))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -106,6 +119,9 @@ export default {
         "pulse-glow": "pulse-glow 3s ease-in-out infinite",
         "float": "float 4s ease-in-out infinite",
         "fade-in": "fade-in 0.5s ease-out forwards",
+      },
+      transitionTimingFunction: {
+        hud: "cubic-bezier(0.2, 0.8, 0.2, 1)",
       },
     },
   },

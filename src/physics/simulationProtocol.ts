@@ -40,7 +40,7 @@ export class SimulationHost {
     if (cmd.type === 'load') {
       this.epoch = cmd.epoch;
       this.core.load(cmd.bodies, cmd.config);
-      return this.state({ impacts: [], removed: [], restored: [], spawned: [], updated: [], stepsTaken: 0, direction: 0 });
+      return this.state({ impacts: [], removed: [], restored: [], spawned: [], updated: [], stepsTaken: 0, limited: false, direction: 0 });
     }
     if (cmd.epoch !== this.epoch) return null;
     switch (cmd.type) {

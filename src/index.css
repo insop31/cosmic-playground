@@ -1,48 +1,86 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap');
+/* Fonts are loaded from index.html (preconnected). */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Mission-control design tokens.
+ * One accent (signal cyan, from the logo). Semantic colours are reserved for
+ * state: ok = bound / success, warn = caution, burn = thrust / heat,
+ * danger = collision / failure. Never use them as decoration.
+ */
 @layer base {
   :root {
-    --background: 260 40% 5%; /* very dark deep space purple/navy */
-    --foreground: 210 40% 98%; /* crisp white */
+    /* ── Core palette (shadcn-compatible names) ── */
+    --background: 225 44% 4%;          /* #05070d deep space */
+    --foreground: 215 46% 93%;         /* #e4ebf5 */
 
-    --card: 260 30% 8%;
-    --card-foreground: 210 40% 98%;
+    --card: 223 49% 8%;                /* #0b1120 hull */
+    --card-foreground: 215 46% 93%;
 
-    --popover: 260 30% 8%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 223 49% 8%;
+    --popover-foreground: 215 46% 93%;
 
-    /* Neon Cyan Glow */
-    --primary: 188 100% 50%;
-    --primary-foreground: 260 40% 5%;
+    --primary: 190 90% 60%;            /* #3fd8f5 signal cyan */
+    --primary-foreground: 225 44% 4%;
 
-    /* Magenta/Purple Accent */
-    --secondary: 290 80% 60%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 228 100% 61%;         /* #3a63ff cobalt */
+    --secondary-foreground: 215 46% 93%;
 
-    --muted: 260 20% 12%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 221 46% 12%;              /* #111a2e raised hull */
+    --muted-foreground: 218 18% 66%;   /* #9ba5b8 */
 
-    --accent: 188 80% 40%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 221 46% 12%;
+    --accent-foreground: 215 46% 93%;
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 354 100% 68%;       /* #ff5c6c */
+    --destructive-foreground: 225 44% 4%;
 
-    --border: 260 30% 20%;
-    --input: 260 30% 20%;
-    --ring: 188 100% 50%;
+    --border: 222 39% 18%;             /* #1c2740 hairline */
+    --input: 222 39% 18%;
+    --ring: 190 90% 60%;
 
-    --radius: 1rem;
+    --radius: 0.375rem;
 
-    /* Custom Cosmic Variables */
-    --glass-bg: 260 30% 12%;       /* Base for glassmorphism */
-    --glass-border: 210 40% 98%;   /* White for thin transparent borders */
-    --glass-glow: 290 80% 60%;     /* Magenta/Purple soft glow */
-    --glass-glow-cyan: 188 100% 50%; /* Cyan soft glow */
+    /* ── HUD tokens ── */
+    --hud-surface: 223 49% 8%;
+    --hud-surface-alpha: 0.86;
+    --hud-raised: 221 46% 12%;
+    --hud-line: 216 60% 70%;
+    --hud-line-alpha: 0.13;
+    --hud-fg: 215 46% 93%;
+    --hud-dim: 218 18% 66%;            /* #9ba5b8 */
+    --hud-faint: 220 15% 54%;          /* #7a8499, ≥4.5:1 on panels */
+    --cobalt: 228 100% 61%;            /* #3a63ff depth, wells */
+    --ok: 142 69% 58%;                 /* #4ade80 bound orbit */
+    --warn: 40 90% 60%;                /* #f5b83d caution */
+    --burn: 19 100% 62%;               /* #ff7a3d thrust, heat */
+    --danger: 354 100% 68%;            /* #ff5c6c collision */
+    --violet: 255 92% 76%;
+
+    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --dur-fast: 140ms;
+    --dur-med: 220ms;
+
+    /* Legacy tokens still referenced by Tailwind config */
+    --space-deep: 225 44% 4%;
+    --space-navy: 223 49% 8%;
+    --space-purple: 255 40% 14%;
+    --cyan-glow: 190 90% 60%;
+    --cyan-dim: 190 60% 30%;
+    --nebula: 255 92% 76%;
+
+    --sidebar-background: 223 49% 8%;
+    --sidebar-foreground: 215 46% 93%;
+    --sidebar-primary: 190 90% 60%;
+    --sidebar-primary-foreground: 225 44% 4%;
+    --sidebar-accent: 221 46% 12%;
+    --sidebar-accent-foreground: 215 46% 93%;
+    --sidebar-border: 222 39% 18%;
+    --sidebar-ring: 190 90% 60%;
+
+    color-scheme: dark;
   }
 }
 
@@ -50,174 +88,230 @@
   * {
     @apply border-border;
   }
+  html, body, #root {
+    height: 100%;
+  }
   body {
-    @apply bg-background text-foreground font-sans;
-    font-family: 'Space Grotesk', system-ui, sans-serif;
+    @apply bg-background text-foreground font-sans antialiased;
+    overscroll-behavior: none;
+    /* Michroma ships a single weight; never fake bold or italic. */
+    font-synthesis: none;
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.3);
   }
 }
 
 @layer components {
-  .glass-panel {
-    @apply rounded-2xl border backdrop-blur-xl relative overflow-hidden;
-    background: hsla(var(--glass-bg) / 0.4);
-    border-color: hsla(var(--glass-border) / 0.1);
-    box-shadow: 0 0 30px hsla(var(--glass-glow) / 0.15),
-                inset 0 1px 1px hsla(var(--glass-border) / 0.1);
+  /* One surface for every HUD panel */
+  .hud-panel {
+    @apply relative rounded-md border;
+    background: hsl(var(--hud-surface) / var(--hud-surface-alpha));
+    border-color: hsl(var(--hud-line) / var(--hud-line-alpha));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 10px 30px -14px rgb(0 0 0 / 0.7);
   }
 
-  .glass-panel-strong {
-    @apply rounded-2xl border backdrop-blur-2xl relative overflow-hidden;
-    background: hsla(var(--glass-bg) / 0.6);
-    border-color: hsla(var(--glass-border) / 0.15);
-    box-shadow: 0 0 40px hsla(var(--glass-glow-cyan) / 0.15),
-                inset 0 1px 1px hsla(var(--glass-border) / 0.15);
+  .hud-inset {
+    @apply rounded-md border;
+    background: hsl(0 0% 100% / 0.025);
+    border-color: hsl(var(--hud-line) / 0.06);
   }
 
-  .glow-text {
-    color: hsl(var(--primary));
-    text-shadow: 0 0 10px hsla(var(--primary) / 0.5),
-                 0 0 30px hsla(var(--primary) / 0.2);
+  .hud-label {
+    @apply font-mono text-[10.5px] font-medium uppercase;
+    letter-spacing: 0.12em;
+    color: hsl(var(--hud-dim));
   }
 
-  .glow-border {
-    box-shadow: 0 0 15px -3px hsla(var(--primary) / 0.3),
-                inset 0 0 15px -3px hsla(var(--primary) / 0.05);
+  .hud-num {
+    @apply font-mono;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum', 'zero';
   }
 
-  .font-mono {
-    font-family: 'JetBrains Mono', monospace;
+  .hud-title {
+    @apply font-display text-[13px] font-normal uppercase;
+    letter-spacing: 0.06em;
   }
 
-  .slider-space {
-    @apply w-full h-1.5 rounded-full appearance-none cursor-pointer;
-    background: transparent;
+  .hud-divider {
+    height: 1px;
+    background: hsl(var(--hud-line) / var(--hud-line-alpha));
   }
 
-  .slider-space::-webkit-slider-thumb {
-    @apply appearance-none w-3.5 h-3.5 rounded-full;
-    background: hsl(var(--primary));
-    box-shadow: 0 0 10px hsla(var(--primary) / 0.6);
-    cursor: grab;
+  .hud-focus {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-0;
   }
 
-  .slider-space::-webkit-slider-thumb:active {
-    cursor: grabbing;
-    transform: scale(1.2);
-  }
-
-  .slider-space::-moz-range-thumb {
-    @apply w-3.5 h-3.5 rounded-full border-0;
-    background: hsl(var(--primary));
-    box-shadow: 0 0 10px hsla(var(--primary) / 0.6);
-    cursor: grab;
-  }
-
-  .scrollbar-thin {
+  .hud-scroll {
     scrollbar-width: thin;
-    scrollbar-color: hsla(var(--primary) / 0.2) transparent;
+    scrollbar-color: hsl(var(--hud-line) / 0.16) transparent;
   }
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 4px;
-  }
-  .scrollbar-thin::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: hsla(var(--primary) / 0.2);
-    border-radius: 4px;
+  .hud-scroll::-webkit-scrollbar { width: 6px; }
+  .hud-scroll::-webkit-scrollbar-track { background: transparent; }
+  .hud-scroll::-webkit-scrollbar-thumb {
+    background: hsl(var(--hud-line) / 0.14);
+    border-radius: 6px;
   }
 
+  .kbd {
+    @apply inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border px-1 font-mono text-[10px] leading-none;
+    border-color: hsl(var(--hud-line) / 0.16);
+    color: hsl(var(--hud-dim));
+    background: hsl(0 0% 100% / 0.03);
+  }
+
+  /* Labels drawn inside the 3D scenes (drei <Html>) */
+  .scene-label {
+    @apply rounded-lg border font-sans text-foreground;
+    background: hsl(var(--hud-surface) / 0.9);
+    border-color: hsl(var(--hud-line) / 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.7);
+  }
+  .scene-label-accent {
+    border-left-width: 2px;
+  }
+  .scene-tag {
+    @apply inline-flex items-center rounded px-1.5 py-px font-mono text-[9.5px] uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  /* Legacy helpers kept for the in-scene weather HUD */
+  .glass-panel {
+    @apply hud-panel overflow-hidden;
+  }
+  .glow-border {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.3);
+  }
+  .scrollbar-thin {
+    @apply hud-scroll;
+  }
   .animate-fade-in {
-    animation: fadeIn 0.3s ease-out;
+    animation: hud-fade-in var(--dur-med) var(--ease-out);
   }
 }
 
-@keyframes fadeIn {
+/*
+ * HUD layout: five fixed zones on a grid so panels can never overlap.
+ *   bar      flight bar (full width)
+ *   left     instrument rail + tool panel (full height)
+ *   center   context banner (top of the free area)
+ *   right    objectives
+ *   temporal time controls (bottom of the free area)
+ */
+.hud-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'bar bar bar'
+    'left center right'
+    'left temporal right';
+  pointer-events: none;
+}
+
+/* Time controls adapt to the width the grid leaves them. */
+.temporal { container-type: inline-size; }
+@container (max-width: 540px) {
+  .temporal-chips { display: none; }
+  .temporal-speed { display: inline; }
+}
+@container (max-width: 330px) {
+  .temporal-reset,
+  .temporal-clock { display: none; }
+}
+
+@media (max-width: 1023px) {
+  .objectives-chip-text { display: none; }
+}
+
+@keyframes hud-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes hud-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 @layer utilities {
-  .text-gradient-cyan {
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .animate-pulse-dot {
+    animation: hud-pulse-dot 1.4s ease-in-out infinite;
   }
-
-  .text-gradient-premium {
-    background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    text-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
-  }
-
-  .bg-noise {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.04;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-  }
-
-  .hover-lift {
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-  }
-  .hover-lift:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 25px -5px hsla(var(--primary) / 0.25);
+  .text-balance {
+    text-wrap: balance;
   }
 }
 
-/* Small press feedback for icon buttons (replaces per-button animation code). */
-.press {
-  transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.press:hover { transform: scale(1.06); }
-.press:active { transform: scale(0.94); }
-
-/* Visible keyboard focus everywhere. */
-:focus-visible {
-  outline: 2px solid hsl(var(--primary));
-  outline-offset: 2px;
-}
-
-/* Reduced motion: follows the system setting, or the in-app toggle (html.reduce-motion). */
+/*
+ * Reduced motion follows the system setting unless the user overrides it in
+ * Help and settings: html.reduce-motion forces it on, html.allow-motion off.
+ */
 @media (prefers-reduced-motion: reduce) {
   html:not(.allow-motion) *,
   html:not(.allow-motion) *::before,
   html:not(.allow-motion) *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
 }
 html.reduce-motion *,
 html.reduce-motion *::before,
 html.reduce-motion *::after {
-  animation-duration: 0.01ms !important;
+  animation-duration: 1ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition-duration: 1ms !important;
   scroll-behavior: auto !important;
 }
 
-/* High contrast: solid panels and full-strength secondary text. */
+/* High contrast: near-solid panels, brighter secondary text and hairlines. */
 html.high-contrast {
-  --muted-foreground: 215 30% 88%;
-  --border: 215 30% 55%;
+  --hud-surface-alpha: 0.97;
+  --hud-line-alpha: 0.4;
+  --hud-dim: 215 30% 86%;
+  --hud-faint: 215 22% 76%;
+  --muted-foreground: 215 30% 86%;
+  --border: 216 40% 55%;
 }
-html.high-contrast .glass-panel,
-html.high-contrast .glass-panel-strong {
-  background: hsl(240 35% 7% / 0.94);
-  border-color: hsl(215 30% 70% / 0.6);
+html.high-contrast .hud-panel,
+html.high-contrast .scene-label {
   backdrop-filter: none;
 }
-html.high-contrast [class*="text-muted-foreground"] {
-  color: hsl(var(--muted-foreground)) !important;
+
+/* Scrubber for the Spacetime history track: the track is drawn by the HUD, only the thumb shows. */
+.history-scrub {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
 }
-html.high-contrast [class*="text-foreground/"] {
-  color: hsl(var(--foreground)) !important;
+.history-scrub::-webkit-slider-runnable-track { background: transparent; }
+.history-scrub::-moz-range-track { background: transparent; }
+.history-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(var(--hud-surface)), 0 0 8px hsl(var(--primary) / 0.7);
 }
+.history-scrub::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+}
+.history-scrub:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; border-radius: 4px; }

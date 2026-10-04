@@ -1,6 +1,6 @@
 // Reading shared files: everything is validated before it is stored.
 import { z } from 'zod';
-import { DEFAULT_PARAMS, normalizeRocketParams } from '../components/rocket/rocketTypes';
+import { DEFAULT_PARAMS, normalizeRocketParams } from '@/worlds/rocket/rocketTypes';
 import type { SavedRocketPreset, SavedSpacetimeScenario } from './scenarioStorage';
 import { EXPORT_FORMAT, EXPORT_VERSION } from './exportFile';
 

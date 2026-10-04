@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ALL_MISSIONS, CHALLENGE_PACKS } from './challengePacks';
-import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
-import { DEFAULT_PARAMS } from '../components/rocket/rocketTypes';
+import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
+import { DEFAULT_PARAMS } from '@/worlds/rocket/rocketTypes';
 import { SIM_STEP, SimulationCore } from '../physics/simulation';
 import { SpacetimeMissionTracker } from '../learning/spacetimeMissions';
-import { DEFAULT_SETTINGS, QUALITY_PROFILES, applySettingsToDocument, loadSettings, saveSettings } from './settings';
 
 describe('challenge and teacher packs', () => {
   it('give every mission one definition and point teacher packs at real setups', () => {
@@ -39,24 +38,24 @@ describe('challenge and teacher packs', () => {
   });
 });
 
-describe('display settings', () => {
+describe('display preferences', () => {
   beforeEach(() => window.localStorage.clear());
 
-  it('round-trips through storage and ignores bad values', () => {
-    expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
-    saveSettings({ quality: 'low', reduceMotion: true, highContrast: true });
-    expect(loadSettings()).toEqual({ quality: 'low', reduceMotion: true, highContrast: true });
-    window.localStorage.setItem('cosmic-playground.settings', JSON.stringify({ quality: 'ultra', reduceMotion: 'yes' }));
-    expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
-  });
-
-  it('lowers the cost of drawing at lower quality and marks the page for CSS', () => {
-    expect(QUALITY_PROFILES.low.stars).toBeLessThan(QUALITY_PROFILES.high.stars);
-    expect(QUALITY_PROFILES.low.gridResolution).toBeLessThan(QUALITY_PROFILES.high.gridResolution);
-    applySettingsToDocument({ quality: 'low', reduceMotion: true, highContrast: true });
+  it('saves reduced motion and high contrast and marks the page for CSS', async () => {
+    const { useAppStore, QUALITY_DETAIL } = await import('@/stores/appStore');
+    const { reducedMotion } = await import('@/motion/preference');
+    useAppStore.getState().setReduceMotion(true);
+    useAppStore.getState().setHighContrast(true);
+    expect(reducedMotion()).toBe(true);
     expect(document.documentElement.classList.contains('reduce-motion')).toBe(true);
     expect(document.documentElement.classList.contains('high-contrast')).toBe(true);
-    applySettingsToDocument(DEFAULT_SETTINGS);
+    expect(JSON.parse(window.localStorage.getItem('cosmic-playground.display')!)).toEqual({ reduceMotion: true, highContrast: true });
+    useAppStore.getState().setReduceMotion(false);
+    expect(document.documentElement.classList.contains('allow-motion')).toBe(true);
+    useAppStore.getState().setReduceMotion(null);
+    useAppStore.getState().setHighContrast(false);
     expect(document.documentElement.classList.contains('high-contrast')).toBe(false);
+    expect(QUALITY_DETAIL.low.stars).toBeLessThan(QUALITY_DETAIL.high.stars);
+    expect(QUALITY_DETAIL.low.trailPoints).toBeLessThan(QUALITY_DETAIL.high.trailPoints);
   });
 });

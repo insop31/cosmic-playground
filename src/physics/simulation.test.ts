@@ -5,7 +5,7 @@ import { HISTORY_LENGTH, MAX_SIM_BODIES, SIM_STEP, SimulationCore } from './simu
 import { SimulationClient } from './simulationClient';
 import { SimulationHost } from './simulationProtocol';
 import type { CelestialBody } from './types';
-import { SPACETIME_TEMPLATES } from '../components/space/spacetimeTemplates';
+import { SPACETIME_TEMPLATES } from '@/worlds/spacetime/spacetimeTemplates';
 
 const body = (id: string, x: number, mass: number, radius: number, type = 'planet', velocity: [number, number, number] = [0, 0, 0]): CelestialBody => ({
   id, type, position: [x, 0, 0], mass, radius, color: '#fff', velocity,

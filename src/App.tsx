@@ -4,7 +4,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
-  <TooltipProvider>
+  <TooltipProvider delayDuration={150}>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Index />} />

@@ -1,6 +1,6 @@
 // Lab notebook: every rocket launch is written down with its settings, outcome and cause,
 // so students can compare runs side by side. Stored in the browser; newest first.
-import type { LaunchOutcome, RocketParams } from '../components/rocket/rocketTypes';
+import type { LaunchOutcome, RocketParams } from '@/worlds/rocket/rocketTypes';
 
 const NOTEBOOK_KEY = 'cosmic-playground.notebook';
 export const MAX_NOTEBOOK_ENTRIES = 50;

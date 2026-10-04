@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PARAMS, normalizeRocketParams, type RocketParams } from '../components/rocket/rocketTypes';
-import { applyWeatherToParams } from '../components/rocket/weatherPresets';
+import { DEFAULT_PARAMS, normalizeRocketParams, type RocketParams } from '@/worlds/rocket/rocketTypes';
+import { applyWeatherToParams } from '@/worlds/rocket/weatherPresets';
 import {
   FLIGHT_DT,
   THRUST_SCALE,
