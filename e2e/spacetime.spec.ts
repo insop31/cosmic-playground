@@ -15,6 +15,8 @@ test.beforeEach(async ({ page }) => {
 test('the gravity sandbox loads with a running solar system', async ({ page }) => {
   await expect(bodiesInScene(page)).toHaveText('In the scene · 3');
   await expect(page.getByRole('region', { name: 'Objectives' })).toBeVisible();
+  // The frame-rate readout in the top bar fills in with a live number.
+  await expect(page.getByLabel('Frames per second')).toHaveText(/^\d+$/);
   // Simulated time advances.
   const elapsed = page.getByText('Time elapsed').locator('..');
   const first = await elapsed.textContent();

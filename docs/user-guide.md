@@ -99,7 +99,9 @@ The course menu in the Objectives panel includes five **teacher packs**: Kepler'
 
 ## Settings
 
-**Graphics quality**: Auto adjusts to your device; High, Medium and Low trade resolution and glow for speed. Choose Low on older or integrated graphics.
+**Graphics quality**: Auto adjusts to your device (it starts on Medium and remembers what suits your computer); High, Medium and Low trade resolution and glow for speed. Choose Low on older or integrated graphics.
+
+**FPS** in the top bar shows how many frames per second the screen gets, and the quality tier in use (Hi, Med, Lo). Green is smooth (50 or more), amber is usable, red means switch to a lower quality.
 
 **Motion**: System follows your device's setting; Reduced turns camera flights into cuts, stops camera shake and skips interface animations; Full keeps them.
 

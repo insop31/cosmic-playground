@@ -1,8 +1,8 @@
 import { useRef, useMemo, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useReducedMotion } from '@/motion/useReducedMotion';
 import * as THREE from 'three';
-import { NOISE_GLSL } from '@/stage/materials';
+import { NOISE_GLSL, bakeCubeMap } from '@/stage/materials';
 
 // Star colour by spectral class, weighted toward cooler stars like the real sky.
 const STAR_TINTS: [number, string][] = [
@@ -13,6 +13,28 @@ const STAR_TINTS: [number, string][] = [
   [0.88, '#ffd2a1'], // K orange
   [1.0, '#ffb07a'],  // M red
 ];
+
+/** The Milky Way band and wisps, by direction; written gamma-encoded for bakeCubeMap. */
+const NEBULA_BAKE = /* glsl */ `
+varying vec3 vObjPos;
+${NOISE_GLSL}
+void main() {
+  vec3 d = normalize(vObjPos);
+  // galactic band, tilted to match the starfield
+  vec3 axis = normalize(vec3(0.0, 0.82, -0.57));
+  float bd = dot(d, axis) * 3.2;
+  float band = exp(-bd * bd);
+  float n = fbm3(d * 2.4);
+  float wisps = smoothstep(-0.1, 0.7, n + snoise(d * 6.0) * 0.2);
+  vec3 teal = vec3(0.02, 0.10, 0.16);
+  vec3 violet = vec3(0.12, 0.03, 0.18);
+  vec3 col = mix(teal, violet, smoothstep(-0.3, 0.5, snoise(d * 1.6 + 4.0) * 0.5));
+  float intensity = wisps * wisps * (0.08 + band * 0.42);
+  // dark dust lane through the band
+  intensity *= 1.0 - band * smoothstep(0.1, 0.6, fbm3(d * 4.0 + 9.0)) * 0.7;
+  gl_FragColor = vec4(sqrt(col * intensity), 1.0);
+}
+`;
 
 interface StarfieldProps {
   count?: number;
@@ -105,44 +127,35 @@ const Starfield = ({ count = 4200, innerRadius = 90, depth = 160, nebula = true 
     toneMapped: false,
   }), []);
 
+  // The nebula is baked once into a cube map: evaluating its noise for every pixel of
+  // the sky, every frame, was the most expensive thing on screen.
+  const gl = useThree((state) => state.gl);
   const nebulaMaterial = useMemo(() => new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 } },
+    uniforms: { uSky: { value: nebula ? bakeCubeMap(gl, NEBULA_BAKE, 512) : null } },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main() {
-        vDir = normalize(position);
+        vDir = position;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: /* glsl */ `
+      uniform samplerCube uSky;
       varying vec3 vDir;
-      uniform float uTime;
-      ${NOISE_GLSL}
       void main() {
-        vec3 d = normalize(vDir);
-        // galactic band, tilted to match the starfield
-        vec3 axis = normalize(vec3(0.0, 0.82, -0.57));
-        float bd = dot(d, axis) * 3.2;
-        float band = exp(-bd * bd);
-        float n = fbm3(d * 2.4 + vec3(0.0, 0.0, uTime * 0.002));
-        float wisps = smoothstep(-0.1, 0.7, n + snoise(d * 6.0) * 0.2);
-        vec3 teal = vec3(0.02, 0.10, 0.16);
-        vec3 violet = vec3(0.12, 0.03, 0.18);
-        vec3 col = mix(teal, violet, smoothstep(-0.3, 0.5, snoise(d * 1.6 + 4.0) * 0.5));
-        float intensity = wisps * wisps * (0.08 + band * 0.42);
-        // dark dust lane through the band
-        intensity *= 1.0 - band * smoothstep(0.1, 0.6, fbm3(d * 4.0 + 9.0)) * 0.7;
-        gl_FragColor = vec4(col * intensity, 1.0);
+        vec3 c = textureCube(uSky, normalize(vDir)).rgb;
+        gl_FragColor = vec4(c * c, 1.0);
       }
     `,
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
-  }), []);
+  }), [gl, nebula]);
 
   useEffect(() => () => {
     geometry.dispose();
     material.dispose();
+    nebulaMaterial.uniforms.uSky.value?.dispose();
     nebulaMaterial.dispose();
   }, [geometry, material, nebulaMaterial]);
 
@@ -152,7 +165,6 @@ const Starfield = ({ count = 4200, innerRadius = 90, depth = 160, nebula = true 
     if (still) return;
     const t = state.clock.elapsedTime;
     material.uniforms.uTime.value = t;
-    nebulaMaterial.uniforms.uTime.value = t;
     if (pointsRef.current) {
       pointsRef.current.rotation.y = t * 0.003;
     }

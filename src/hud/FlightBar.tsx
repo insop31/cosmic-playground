@@ -11,6 +11,7 @@ import type { RocketState } from '@/worlds/rocket/rocketTypes';
 import { altitudeKm } from '@/worlds/rocket/units';
 import { useUniverseScale } from '@/worlds/spacetime/useUniverseScale';
 import { IconButton, Kbd, Readout } from './controls';
+import FpsMeter from './FpsMeter';
 import SettingsMenu from './SettingsMenu';
 import { LAB_META } from './labs';
 
@@ -99,8 +100,10 @@ const RocketTelemetry = () => {
   return (
     <>
       <Readout label="Altitude" value={altitudeKm(altitude).toFixed(altitudeKm(altitude) < 100 ? 1 : 0)} unit="km" className="w-[72px]" />
-      <Readout label="Speed" value={speed.toFixed(2)} unit="u/s" className="hidden w-[68px] xl:grid" />
-      <div className="hidden w-16 gap-1 leading-tight xl:grid">
+      {/* Narrower screens drop speed first (it has its own tape on the left), then fuel,
+          so the flight phase never gets clipped. */}
+      <Readout label="Speed" value={speed.toFixed(2)} unit="u/s" className="hidden w-[68px] min-[1600px]:grid" />
+      <div className="hidden w-16 gap-1 leading-tight min-[1440px]:grid">
         <span className="hud-label text-[9.5px]">Fuel</span>
         <div className="flex items-center gap-1.5">
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
@@ -133,8 +136,10 @@ const FlightBar = () => {
   const score = useProgressStore((state) => state.score);
   const lab = LAB_META[mode];
 
+  // The lab switch is centred once the title shows (xl); below that the empty left
+  // half would starve the telemetry, so the switch sits beside the logo instead.
   return (
-    <header className="hud-panel pointer-events-auto grid h-[52px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-2.5">
+    <header className="hud-panel pointer-events-auto grid h-[52px] grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 px-2.5 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
       {/* Identity */}
       <div className="flex min-w-0 items-center gap-3">
         <img src="/logo-mark.png" alt="" className="h-8 w-8 shrink-0 select-none" draggable={false} />
@@ -154,6 +159,7 @@ const FlightBar = () => {
         </div>
         <div className="hidden h-7 w-px bg-[hsl(var(--hud-line)/0.14)] lg:block" />
         <Readout label="Score" value={score} tone="primary" className="hidden w-12 lg:grid" />
+        <FpsMeter />
         <div className="flex items-center">
           <IconButton label="Mission log (M)" onClick={() => setMissionLogOpen(true)}>
             <BookOpen size={15} />

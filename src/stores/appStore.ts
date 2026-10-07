@@ -5,6 +5,8 @@ import { setMotionOverride } from '@/motion/preference';
 export type QualityTier = 'high' | 'medium' | 'low';
 export type QualitySetting = 'auto' | QualityTier;
 const QUALITY_KEY = 'cosmic-playground.quality';
+/** The tier Auto settled on last time, so the next visit starts there. */
+const AUTO_TIER_KEY = 'cosmic-playground.autoTier';
 
 /** Sections of the Spacetime tool panel. */
 export type LibraryTab = 'bodies' | 'systems' | 'saved';
@@ -121,7 +123,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   booting: readStorage(INTRO_KEY) !== '1',
   readiness: {},
   quality: (['high', 'medium', 'low'] as const).find((q) => q === readStorage(QUALITY_KEY)) ?? 'auto',
-  autoTier: 'high',
+  // Unknown hardware starts on medium; fast machines step up to high within seconds.
+  autoTier: (['high', 'medium', 'low'] as const).find((q) => q === readStorage(AUTO_TIER_KEY)) ?? 'medium',
   reduceMotion: INITIAL_DISPLAY.reduceMotion,
   highContrast: INITIAL_DISPLAY.highContrast,
   setMode: (mode) => {
@@ -159,7 +162,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     writeStorage(QUALITY_KEY, quality);
     set({ quality });
   },
-  setAutoTier: (autoTier) => set({ autoTier }),
+  setAutoTier: (autoTier) => {
+    writeStorage(AUTO_TIER_KEY, autoTier);
+    set({ autoTier });
+  },
   setReduceMotion: (reduceMotion) => {
     const display = { reduceMotion, highContrast: get().highContrast };
     writeStorage(DISPLAY_KEY, JSON.stringify(display));

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useFrame, type ThreeEvent } from '@react-three/fiber';
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { CelestialBody } from './types';
 import {
@@ -109,6 +109,7 @@ export const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef
   const isSaturn  = body.name === 'Saturn';
   const isUranus  = body.name === 'Uranus';
   const selected  = useSpacetimeStore((state) => state.selectedBodyId === body.id);
+  const gl        = useThree((state) => state.gl);
 
   // Selection uses a dedicated hit sphere: halos and tails are far larger than the body.
   const handleSelect = (event: ThreeEvent<MouseEvent>) => {
@@ -148,26 +149,26 @@ export const BodyRenderer: React.FC<BodyRendererProps> = ({ body, meshEntriesRef
   [isPlanet, body.name, body.bodyClass, body.color]);
 
   const surfaceMaterial = useMemo(() => {
-    if (look) return createSurfaceMaterial(look.surface);
-    if (isAst) return createSurfaceMaterial(ASTEROID_SURFACE);
-    if (isComet) return createSurfaceMaterial(COMET_SURFACE);
+    if (look) return createSurfaceMaterial(look.surface, gl);
+    if (isAst) return createSurfaceMaterial(ASTEROID_SURFACE, gl, 128);
+    if (isComet) return createSurfaceMaterial(COMET_SURFACE, gl, 128);
     if (!isStar && !isBH && !isNS) {
-      return createSurfaceMaterial({ kind: 'rocky', colors: [shade(body.color, -0.2), body.color, shade(body.color, 0.15)], frequency: 2.4, craters: 0.4 });
+      return createSurfaceMaterial({ kind: 'rocky', colors: [shade(body.color, -0.2), body.color, shade(body.color, 0.15)], frequency: 2.4, craters: 0.4 }, gl);
     }
     return null;
-  }, [look, isAst, isComet, isStar, isBH, isNS, body.color]);
+  }, [look, isAst, isComet, isStar, isBH, isNS, body.color, gl]);
 
   const cloudMaterial = useMemo(
-    () => (look?.clouds ? createSurfaceMaterial({ kind: 'clouds', colors: ['#fff', '#fff', '#fff'], seed: 2.7, roughness: 1, nightGlow: 0.02 }) : null),
-    [look],
+    () => (look?.clouds ? createSurfaceMaterial({ kind: 'clouds', colors: ['#fff', '#fff', '#fff'], seed: 2.7, roughness: 1, nightGlow: 0.02 }, gl) : null),
+    [look, gl],
   );
   const atmosphereMaterial = useMemo(
     () => (look?.atmosphere ? createAtmosphereMaterial(look.atmosphere.color, look.atmosphere.strength, 3.2) : null),
     [look],
   );
   const starMaterial = useMemo(
-    () => (isStar ? createStarMaterial(body.color, 1.35) : isNS ? createStarMaterial('#9ef4ff', 3.2) : null),
-    [isStar, isNS, body.color],
+    () => (isStar ? createStarMaterial(body.color, 1.35, gl) : isNS ? createStarMaterial('#9ef4ff', 3.2, gl) : null),
+    [isStar, isNS, body.color, gl],
   );
   const coronaMaterial = useMemo(
     () => (isStar ? createAtmosphereMaterial(body.color, 0.9, 2.6) : isNS ? createAtmosphereMaterial('#7ff7ff', 1.6, 2.0) : null),

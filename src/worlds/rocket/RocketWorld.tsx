@@ -88,6 +88,12 @@ const ATMO_LAYERS = [
 
 const EXOSPHERE_LIMIT = 62;
 
+/** World-y of every layer boundary, bottom to top (the shells are centred on the launch base). */
+const LAYER_BOUNDARIES = [
+  ...ATMO_LAYERS.map((l) => pyToWorldY(l.pyMin)),
+  pyToWorldY(ATMO_LAYERS[ATMO_LAYERS.length - 1].pyMax),
+];
+
 // ─── Scene components ─────────────────────────────────────────────────────────
 
 const PlanetSurface = () => <LaunchComplex />;
@@ -212,8 +218,10 @@ const Atmosphere = ({ density }: { density: number }) => (
 const PlanetGlobe = ({ planetRadius, atmosphericDensity }: { planetRadius: number; atmosphericDensity: number }) => {
   const worldRadius = planetRadius * 2;
   const centerY = pyToWorldY(-planetRadius);
-  const surface = useMemo(() => createSurfaceMaterial({ kind: 'earth', colors: ['#000', '#000', '#000'], caps: 0.82, seed: 4.2, nightGlow: 0.05 }), []);
-  const clouds = useMemo(() => createSurfaceMaterial({ kind: 'clouds', colors: ['#fff', '#fff', '#fff'], seed: 1.9, roughness: 1, nightGlow: 0.03 }), []);
+  const gl = useThree((state) => state.gl);
+  // The globe can fill the screen, so its baked maps are larger than a Spacetime body's.
+  const surface = useMemo(() => createSurfaceMaterial({ kind: 'earth', colors: ['#000', '#000', '#000'], caps: 0.82, seed: 4.2, nightGlow: 0.05 }, gl, 1024), [gl]);
+  const clouds = useMemo(() => createSurfaceMaterial({ kind: 'clouds', colors: ['#fff', '#fff', '#fff'], seed: 1.9, roughness: 1, nightGlow: 0.03 }, gl, 1024), [gl]);
   const atmosphere = useMemo(
     () => createAtmosphereMaterial('#5fb0ff', THREE.MathUtils.clamp(0.8 + atmosphericDensity * 1.4, 0.8, 2.2), 2.6),
     [atmosphericDensity],
@@ -245,43 +253,51 @@ const PlanetGlobe = ({ planetRadius, atmosphericDensity }: { planetRadius: numbe
 // Keep labels away from right-side UI panels.
 const TRAJECTORY_LABEL_GAP = 1.25;
 
-const LayerBand = ({
-  color,
-  opacity,
-  yMin,
-  yMax,
-  planetCenterY,
-}: {
+interface ShellLayer {
   color: string;
   opacity: number;
-  yMin: number;
-  yMax: number;
-  planetCenterY: number;
-}) => {
-  const radiusMin = Math.max(1, yMin - planetCenterY);
-  const radiusMax = Math.max(radiusMin + 0.01, yMax - planetCenterY);
-  const shellOpacity = Math.min(opacity * 1.25, 0.14);
-  const edgeOpacity = Math.min(opacity * 1.7, 0.2);
+}
+
+/** One translucent shell that looks like several stacked ones ("over" blending, inner first). */
+const combineShells = (layers: ShellLayer[]) => {
+  const premultiplied = new THREE.Color(0, 0, 0);
+  let transmitted = 1;
+  for (const { color, opacity } of layers) {
+    premultiplied.multiplyScalar(1 - opacity).add(new THREE.Color(color).multiplyScalar(opacity));
+    transmitted *= 1 - opacity;
+  }
+  const opacity = 1 - transmitted;
+  return { color: premultiplied.multiplyScalar(opacity > 0 ? 1 / opacity : 0), opacity };
+};
+
+/**
+ * The layer boundaries as hemispherical shells around the launch base. Each layer
+ * used to be three shells (fill, a brighter edge 0.15 above it, and a faint inner
+ * edge), drawn on both faces: up to 30 blended layers per pixel. Shells that sit
+ * on the same boundary are merged into one with the same combined colour, which
+ * draws the same picture with 6 shells.
+ */
+const LayerShells = ({ boundaries }: { boundaries: number[] }) => {
+  const shells = useMemo(() => boundaries.map((radius, k) => {
+    const stack: ShellLayer[] = [];
+    const above = ATMO_LAYERS[k];       // this boundary is the bottom of `above`…
+    const below = ATMO_LAYERS[k - 1];   // …and the top of `below`
+    if (above) stack.push({ color: above.color, opacity: Math.min(above.alpha * 1.7, 0.2) * 0.35 });
+    if (below) {
+      stack.push({ color: below.color, opacity: Math.min(below.alpha * 1.25, 0.14) });
+      stack.push({ color: below.color, opacity: Math.min(below.alpha * 1.7, 0.2) });
+    }
+    return { radius: Math.max(1, radius), ...combineShells(stack) };
+  }), [boundaries]);
 
   return (
     <group>
-      {/* Subtle spherical layer fill */}
-      <mesh position={[0, planetCenterY, 0]}>
-        <sphereGeometry args={[radiusMax, 56, 36, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshBasicMaterial color={color} transparent opacity={shellOpacity} depthWrite={false} side={THREE.DoubleSide} />
-      </mesh>
-
-      {/* Thin outer boundary arc */}
-      <mesh position={[0, planetCenterY, 0]}>
-        <sphereGeometry args={[radiusMax + 0.15, 56, 36, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshBasicMaterial color={color} transparent opacity={edgeOpacity} depthWrite={false} side={THREE.DoubleSide} />
-      </mesh>
-
-      {/* Very faint inner boundary for layer separation */}
-      <mesh position={[0, planetCenterY, 0]}>
-        <sphereGeometry args={[radiusMin, 48, 28, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshBasicMaterial color={color} transparent opacity={edgeOpacity * 0.35} depthWrite={false} side={THREE.DoubleSide} />
-      </mesh>
+      {shells.map((shell) => (
+        <mesh key={shell.radius}>
+          <sphereGeometry args={[shell.radius, 56, 36, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshBasicMaterial color={shell.color} transparent opacity={shell.opacity} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
     </group>
   );
 };
@@ -294,13 +310,7 @@ const AtmosphericLayers = ({
   params: RocketParams;
 }) => {
   void planetRadius;
-  // Precompute all boundary world-Y values
-  const boundaries = [
-    ...ATMO_LAYERS.map((l) => pyToWorldY(l.pyMin)),
-    pyToWorldY(ATMO_LAYERS[ATMO_LAYERS.length - 1].pyMax),
-  ];
-  // Keep hemisphere base aligned with the launch base.
-  const hemisphereBaseY = 0;
+  const boundaries = LAYER_BOUNDARIES;
   const rulerBottom = boundaries[0];
   const rulerTop = boundaries[boundaries.length - 1];
   const rulerHeight = rulerTop - rulerBottom;
@@ -316,17 +326,15 @@ const AtmosphericLayers = ({
         <meshBasicMaterial color="#ffffff" transparent opacity={0.12} />
       </mesh>
 
-      {ATMO_LAYERS.map((layer, i) => {
-        const yMin = pyToWorldY(layer.pyMin);
+      <LayerShells boundaries={boundaries} />
+
+      {ATMO_LAYERS.map((layer) => {
         const yMax = pyToWorldY(layer.pyMax);
         const trajectoryX = THREE.MathUtils.clamp((layer.pyMax * trajectorySlope) * 2, -60, 60);
         const labelX = trajectoryX + TRAJECTORY_LABEL_GAP * trajectoryDir;
 
         return (
           <group key={layer.name}>
-            {/* ── Seamless Shader Gradient Band ── */}
-            <LayerBand color={layer.color} opacity={layer.alpha} yMin={yMin} yMax={yMax} planetCenterY={hemisphereBaseY} />
-
             {/* Trajectory anchor marker */}
             <mesh position={[trajectoryX, yMax, 0]}>
               <sphereGeometry args={[0.07, 10, 10]} />

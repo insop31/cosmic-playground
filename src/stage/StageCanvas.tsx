@@ -8,10 +8,14 @@ import { World, type WorldCameraOptions } from './World';
 const SPACETIME_CAMERA: WorldCameraOptions = { position: [0, 45, 45], fov: 55, near: 0.1, far: 800 };
 const ROCKET_CAMERA: WorldCameraOptions = { position: [5.5, 4.8, 13.5], fov: 42, near: 0.1, far: 20000 };
 
-/** Device-pixel-ratio range per quality tier. */
+/**
+ * Device-pixel-ratio range per quality tier. Every extra pixel is shaded, bloomed
+ * and anti-aliased, so 2× on a high-density laptop screen cost 4× the GPU work of
+ * 1× for little visible gain; 1.5× with SMAA looks the same.
+ */
 const DPR: Record<QualityTier, number | [number, number]> = {
-  high: [1, 2],
-  medium: [1, 1.5],
+  high: [1, 1.5],
+  medium: [1, 1.25],
   low: 1,
 };
 
@@ -38,12 +42,17 @@ const StageCanvas = () => {
   return (
     <Canvas
       dpr={DPR[tier]}
-      gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+      // No MSAA on the canvas: medium and high render through the effect composer (SMAA
+      // on high), so a multisampled default framebuffer only cost memory and bandwidth.
+      gl={{ antialias: false, alpha: false, powerPreference: 'high-performance', stencil: false }}
       style={{ background: 'hsl(var(--background))' }}
       onCreated={() => markReady('stage')}
       aria-label={mode === 'spacetime' ? 'Spacetime Lab 3D view' : 'Rocket Lab 3D view'}
     >
       <PerformanceMonitor
+        // Step down when most of the last 2.5 s ran under 50 fps (70 on 120 Hz screens):
+        // the default 40 left laptops in the 40s, which still feels laggy, on high.
+        bounds={(refreshRate) => (refreshRate > 100 ? [70, 100] : [50, 58])}
         onDecline={() => adjust('down')}
         onIncline={() => adjust('up')}
         flipflops={4}

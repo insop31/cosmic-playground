@@ -166,10 +166,104 @@ vec3 surfaceColor(vec3 p) {
 }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Baking: procedural patterns rendered once into cube maps
+// ─────────────────────────────────────────────────────────────────────────────
+// Evaluating layered noise for every pixel, every frame, is what made large
+// bodies (a followed planet, the Sun, the Rocket Lab globe) and the sky so
+// expensive on laptop GPUs. Patterns that only depend on direction are rendered
+// once into a cube map and sampled by direction afterwards.
+
+const BAKE_VERTEX = /* glsl */ `
+varying vec3 vObjPos;
+void main() {
+  vObjPos = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+/**
+ * Renders `fragmentShader` (which reads `varying vec3 vObjPos`, a direction from
+ * the centre) into a cube map of `size`² per face. Colours should be written
+ * gamma-encoded (sqrt) so 8 bits keep dark gradients smooth; decode with c * c.
+ */
+export const bakeCubeMap = (renderer: THREE.WebGLRenderer, fragmentShader: string, size: number, uniforms: Record<string, THREE.IUniform> = {}) => {
+  const target = new THREE.WebGLCubeRenderTarget(size, {
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+    magFilter: THREE.LinearFilter,
+  });
+  const scene = new THREE.Scene();
+  const geometry = new THREE.BoxGeometry(2, 2, 2);
+  const material = new THREE.ShaderMaterial({ vertexShader: BAKE_VERTEX, fragmentShader, uniforms, side: THREE.BackSide, depthTest: false, depthWrite: false });
+  scene.add(new THREE.Mesh(geometry, material));
+  new THREE.CubeCamera(0.1, 10, target).update(renderer, scene);
+  geometry.dispose();
+  material.dispose();
+  return target.texture;
+};
+
+/** Rotation of a direction about the y axis, for drifting baked patterns. */
+const ROTATE_Y_GLSL = /* glsl */ `
+vec3 rotateY(vec3 d, float a) {
+  float c = cos(a), s = sin(a);
+  return vec3(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+}
+vec3 rotateX(vec3 d, float a) {
+  float c = cos(a), s = sin(a);
+  return vec3(d.x, c * d.y - s * d.z, s * d.y + c * d.z);
+}
+`;
+
+const SURFACE_UNIFORMS_GLSL = /* glsl */ `
+uniform int uKind;
+uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uColorC;
+uniform vec3 uSeed; uniform float uFreq; uniform float uCaps; uniform float uCraters;
+uniform vec4 uSpot; uniform vec3 uSpotColor;
+float gOcean = 0.0;
+`;
+
+const surfaceUniforms = (opts: SurfaceOptions) => ({
+  uKind: { value: KIND_INDEX[opts.kind] },
+  uColorA: { value: new THREE.Color(opts.colors[0]) },
+  uColorB: { value: new THREE.Color(opts.colors[1]) },
+  uColorC: { value: new THREE.Color(opts.colors[2]) },
+  uSeed: { value: new THREE.Vector3(opts.seed ?? 0, (opts.seed ?? 0) * 0.37, (opts.seed ?? 0) * 0.71) },
+  uFreq: { value: opts.frequency ?? 2.2 },
+  uCaps: { value: opts.caps ?? 0 },
+  uCraters: { value: opts.craters ?? 0 },
+  uSpot: { value: new THREE.Vector4(...(opts.spot ?? [0, 0, 0, 0])) },
+  uSpotColor: { value: new THREE.Color(opts.spotColor ?? '#000000') },
+});
+
+/** Surface colour (gamma-encoded) with the ocean mask in alpha; clouds store their cover. */
+const bakeSurface = (renderer: THREE.WebGLRenderer, opts: SurfaceOptions, size: number) => {
+  const body = opts.kind === 'clouds'
+    ? `vec3 cp = normalize(vObjPos) * 2.2 + uSeed;
+  float cloud = smoothstep(0.05, 0.55, fbm(cp) + 0.35 * fbm(cp * 3.0));
+  gl_FragColor = vec4(cloud);`
+    : `vec3 col = surfaceColor(normalize(vObjPos));
+  gl_FragColor = vec4(sqrt(max(col, 0.0)), gOcean);`;
+  return bakeCubeMap(renderer, /* glsl */ `
+varying vec3 vObjPos;
+${SURFACE_UNIFORMS_GLSL}
+${NOISE_GLSL}
+${SURFACE_FRAGMENT}
+void main() {
+  ${body}
+}
+`, size, surfaceUniforms(opts));
+};
+
 const surfaceCache = new Map<string, THREE.MeshStandardMaterial>();
 
-export const createSurfaceMaterial = (opts: SurfaceOptions): THREE.MeshStandardMaterial => {
-  const key = JSON.stringify(opts);
+/**
+ * Procedural planet surface on a MeshStandardMaterial (so it keeps PBR lighting).
+ * The pattern is baked once into a cube map of `size`² per face; clouds drift by
+ * rotating their lookup over time.
+ */
+export const createSurfaceMaterial = (opts: SurfaceOptions, renderer: THREE.WebGLRenderer, size = 256): THREE.MeshStandardMaterial => {
+  const key = `${size}:${JSON.stringify(opts)}`;
   const cached = surfaceCache.get(key);
   if (cached) return cached;
 
@@ -182,16 +276,7 @@ export const createSurfaceMaterial = (opts: SurfaceOptions): THREE.MeshStandardM
   });
 
   const uniforms = {
-    uKind: { value: KIND_INDEX[opts.kind] },
-    uColorA: { value: new THREE.Color(opts.colors[0]) },
-    uColorB: { value: new THREE.Color(opts.colors[1]) },
-    uColorC: { value: new THREE.Color(opts.colors[2]) },
-    uSeed: { value: new THREE.Vector3(opts.seed ?? 0, (opts.seed ?? 0) * 0.37, (opts.seed ?? 0) * 0.71) },
-    uFreq: { value: opts.frequency ?? 2.2 },
-    uCaps: { value: opts.caps ?? 0 },
-    uCraters: { value: opts.craters ?? 0 },
-    uSpot: { value: new THREE.Vector4(...(opts.spot ?? [0, 0, 0, 0])) },
-    uSpotColor: { value: new THREE.Color(opts.spotColor ?? '#000000') },
+    uSurfaceMap: { value: bakeSurface(renderer, opts, size) },
     uNightGlow: { value: opts.nightGlow ?? 0.035 },
     uTime: { value: 0 },
   };
@@ -207,23 +292,21 @@ export const createSurfaceMaterial = (opts: SurfaceOptions): THREE.MeshStandardM
         '#include <common>',
         `#include <common>
 varying vec3 vObjPos;
-uniform int uKind;
-uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uColorC;
-uniform vec3 uSeed; uniform float uFreq; uniform float uCaps; uniform float uCraters;
-uniform vec4 uSpot; uniform vec3 uSpotColor; uniform float uNightGlow; uniform float uTime;
+uniform samplerCube uSurfaceMap;
+uniform float uNightGlow; uniform float uTime;
 float gOcean = 0.0;
-${NOISE_GLSL}
-${SURFACE_FRAGMENT}`,
+${ROTATE_Y_GLSL}`,
       )
       .replace(
         '#include <color_fragment>',
         isClouds
           ? `#include <color_fragment>
-vec3 cp = normalize(vObjPos) * 2.2 + uSeed + vec3(uTime * 0.012, 0.0, uTime * 0.008);
-float cloud = smoothstep(0.05, 0.55, fbm(cp) + 0.35 * fbm(cp * 3.0));
+float cloud = textureCube(uSurfaceMap, rotateY(normalize(vObjPos), uTime * 0.0065)).r;
 diffuseColor = vec4(vec3(1.0), cloud * 0.85);`
           : `#include <color_fragment>
-diffuseColor.rgb = surfaceColor(normalize(vObjPos));`,
+vec4 baked = textureCube(uSurfaceMap, normalize(vObjPos));
+diffuseColor.rgb = baked.rgb * baked.rgb;
+gOcean = baked.a;`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
@@ -234,21 +317,44 @@ diffuseColor.rgb = surfaceColor(normalize(vObjPos));`,
         '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * uNightGlow;',
       );
   };
-  material.customProgramCacheKey = () => (isClouds ? 'cp-surface-clouds' : 'cp-surface');
+  material.customProgramCacheKey = () => (isClouds ? 'cp-surface-clouds-baked' : 'cp-surface-baked');
 
   surfaceCache.set(key, material);
   return material;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Star photosphere — animated granulation, sunspots, limb darkening (HDR)
+// Star photosphere — granulation, sunspots, limb darkening (HDR)
 // ─────────────────────────────────────────────────────────────────────────────
-export const createStarMaterial = (color: string, intensity = 2.2) => new THREE.ShaderMaterial({
+// The three noise fields are baked once (granulation, cells, spots in r, g, b);
+// motion comes from sampling them along slowly rotating directions.
+const starFieldCache = new Map<string, THREE.CubeTexture>();
+const bakeStarFields = (renderer: THREE.WebGLRenderer, seed: number) => {
+  const key = seed.toFixed(3);
+  const cached = starFieldCache.get(key);
+  if (cached) return cached;
+  const texture = bakeCubeMap(renderer, /* glsl */ `
+varying vec3 vObjPos;
+uniform float uSeed;
+${NOISE_GLSL}
+void main() {
+  vec3 p = normalize(vObjPos) * 3.0 + uSeed;
+  float gran = fbm(p * 2.2);
+  float cells = 1.0 - abs(snoise(p * 7.0));
+  float spots = fbm3(p * 0.9);
+  gl_FragColor = vec4(gran * 0.5 + 0.5, cells, spots * 0.5 + 0.5, 1.0);
+}
+`, 512, { uSeed: { value: seed } });
+  starFieldCache.set(key, texture);
+  return texture;
+};
+
+export const createStarMaterial = (color: string, intensity: number, renderer: THREE.WebGLRenderer) => new THREE.ShaderMaterial({
   uniforms: {
     uColor: { value: new THREE.Color(color) },
     uTime: { value: 0 },
     uIntensity: { value: intensity },
-    uSeed: { value: Math.random() * 10 },
+    uFields: { value: bakeStarFields(renderer, Math.floor(Math.random() * 4) * 2.5) },
   },
   vertexShader: /* glsl */ `
     varying vec3 vObjPos;
@@ -266,17 +372,20 @@ export const createStarMaterial = (color: string, intensity = 2.2) => new THREE.
     uniform vec3 uColor;
     uniform float uTime;
     uniform float uIntensity;
-    uniform float uSeed;
+    uniform samplerCube uFields;
     varying vec3 vObjPos;
     varying vec3 vNormalV;
     varying vec3 vViewDir;
-    ${NOISE_GLSL}
+    ${ROTATE_Y_GLSL}
     void main() {
-      vec3 p = normalize(vObjPos) * 3.0 + uSeed;
-      float t = uTime * 0.08;
-      float gran = fbm(p * 2.2 + vec3(t, -t, t * 0.6));
-      float cells = 1.0 - abs(snoise(p * 7.0 + t * 2.0));
-      float spots = smoothstep(0.55, 0.75, fbm3(p * 0.9 - t * 0.2));
+      vec3 d = normalize(vObjPos);
+      float t = uTime;
+      // Two copies of the granulation drifting apart read as a boiling surface.
+      float g1 = textureCube(uFields, rotateY(d, t * 0.035)).r;
+      float g2 = textureCube(uFields, rotateX(rotateY(d, -t * 0.024), 1.7)).r;
+      float gran = (g1 + g2 - 1.0) * 1.35;
+      float cells = textureCube(uFields, rotateY(d, -t * 0.05)).g;
+      float spots = smoothstep(0.55, 0.75, textureCube(uFields, rotateY(d, t * 0.012)).b * 2.0 - 1.0);
       float mu = clamp(dot(normalize(vNormalV), normalize(vViewDir)), 0.0, 1.0);
       float limb = 0.35 + 0.65 * pow(max(mu, 1e-4), 0.45);
       vec3 hot = mix(uColor, vec3(1.0, 0.98, 0.9), 0.55);

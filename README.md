@@ -40,8 +40,10 @@ A printable guide for students and teachers is in [`docs/Cosmic_Playground_User_
 
 ### Accessibility and performance
 - **Keyboard**: Space pauses or plays, ← and → change speed (left of 0 rewinds), R resets the current lab, 1 and 2 pick a lab, Tab switches labs when nothing is focused, Esc cancels placing or closes the inspector, L and M open objectives and the mission log, H hides the interface, ? opens help.
-- **Help and settings** (top right): graphics quality (Auto steps down when the frame rate stays low), motion (follows the system setting by default, or Reduced or Full) and high contrast.
+- **Help and settings** (top right): graphics quality, motion (follows the system setting by default, or Reduced or Full) and high contrast. Auto quality starts on Medium, steps up on fast machines and down when the frame rate stays under 50 fps, and remembers what it settled on.
+- **FPS readout** in the top bar: live frames per second (green from 50, amber from 30, red below) and the quality tier in use.
 - **Fast first load**: the interface loads first (about 240 KB of compressed script); the 3D engine loads behind the intro. CI fails if the first-load script grows past 300 KB.
+- **Light on the GPU**: procedural planet, star and sky patterns are rendered once into cube maps instead of being recomputed for every pixel each frame, and the render resolution is capped at 1.5× on high-density screens.
 
 ## Getting started
 
