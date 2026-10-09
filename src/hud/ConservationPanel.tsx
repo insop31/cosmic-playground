@@ -63,18 +63,8 @@ const ConservationPanel = () => {
   const realisticMode = useSpacetimeStore((state) => state.realisticMode);
   const expansionEnabled = useSpacetimeStore((state) => state.expansionEnabled);
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={toggle}
-        title="Show conservation graphs"
-        className="hud-panel hud-focus pointer-events-auto flex items-center gap-2 px-3 py-2 text-left text-[12px] text-hud-dim transition-colors hover:border-primary/40 hover:text-foreground"
-      >
-        <Activity size={13} className="text-primary" /> Conservation
-      </button>
-    );
-  }
+  // Opened from the Energy button in the tool rail.
+  if (!open) return null;
 
   const times = samples.map((s) => s.time);
   const series: Series[] = [

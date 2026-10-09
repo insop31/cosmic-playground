@@ -72,15 +72,16 @@ const makeStrakeGeometry = () => {
 };
 
 const makeNoseGeometry = () => {
-  // Tangent ogive fairing from base radius R to the tip
+  // Tangent ogive fairing: radius R at the base (h = 0), tapering to a point at h = L.
+  // r(h) = √(ρ² − h²) + R − ρ, with ρ = (R² + L²) / 2R.
   const pts: THREE.Vector2[] = [];
   const R = 0.15;
   const L = 0.62;
   const rho = (R * R + L * L) / (2 * R);
   for (let i = 0; i <= 28; i++) {
-    const x = (i / 28) * L;
-    const y = Math.sqrt(rho * rho - (L - x) * (L - x)) + R - rho;
-    pts.push(new THREE.Vector2(Math.max(y, 0.0005), x));
+    const h = (i / 28) * L;
+    const r = Math.sqrt(Math.max(0, rho * rho - h * h)) + R - rho;
+    pts.push(new THREE.Vector2(Math.max(r, 0.0005), h));
   }
   return new THREE.LatheGeometry(pts, 48);
 };

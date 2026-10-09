@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowUpRight, CheckCircle2, Crosshair, Orbit, Pause, TrendingUp, Unlock, X } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, Crosshair, Lightbulb, Orbit, Pause, TrendingUp, Unlock, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore } from '@/stores/appStore';
@@ -89,6 +89,38 @@ const UnlockNotice = () => {
 };
 
 /** Top-centre zone: the one message that matters right now. */
+/**
+ * A single plain sentence saying what to do next, shown only when nothing
+ * more important is on screen. Dismissed per lab for the rest of the visit.
+ */
+const NextStep = () => {
+  const mode = useAppStore((state) => state.mode);
+  const pendingPlacement = useSpacetimeStore((state) => state.pendingPlacement);
+  const selected = useSpacetimeStore((state) => state.selectedBodyId);
+  const phase = useRocketStore((state) => state.flight.phase);
+  const countdown = useFlightStore((state) => state.countdown);
+  const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
+
+  const text = mode === 'spacetime'
+    ? !pendingPlacement && !selected
+      ? 'Pick a body on the left, then click the grid to place it. Click any body to see its orbit.'
+      : null
+    : phase === 'idle' && countdown === null
+      ? 'Set up the rocket on the left (or keep the defaults), choose what you think will happen, then press Ignite.'
+      : null;
+
+  if (!text || dismissed[mode]) return null;
+  return (
+    <Enter key={mode} role="note" className="hud-panel pointer-events-auto flex max-w-[560px] items-center gap-2.5 py-1.5 pl-3 pr-1.5">
+      <Lightbulb size={14} className="shrink-0 text-primary" />
+      <span className="text-[12.5px] leading-snug text-foreground/90">{text}</span>
+      <IconButton label="Hide this tip" size="sm" onClick={() => setDismissed((d) => ({ ...d, [mode]: true }))}>
+        <X size={14} />
+      </IconButton>
+    </Enter>
+  );
+};
+
 const ContextBanner = () => {
   const mode = useAppStore((state) => state.mode);
   const pendingPlacement = useSpacetimeStore((state) => state.pendingPlacement);
@@ -99,6 +131,7 @@ const ContextBanner = () => {
   const reportOpen = useFlightStore((state) => state.reportOpen);
   const setReportOpen = useFlightStore((state) => state.setReportOpen);
   const outcomeInfo = mode === 'rocket' && !reportOpen ? OUTCOME[outcome] : undefined;
+  const busy = Boolean(pendingPlacement) || Boolean(outcomeInfo) || !isPlaying;
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -131,6 +164,8 @@ const ContextBanner = () => {
           </button>
         </Enter>
       )}
+
+      {!busy && <NextStep />}
 
       {!isPlaying && (
         <Enter role="status" className="hud-panel pointer-events-auto flex items-center gap-2.5 border-warn/40 py-1.5 pl-3 pr-1.5">

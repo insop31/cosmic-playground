@@ -289,9 +289,12 @@ const LayerBand = ({
 const AtmosphericLayers = ({
   planetRadius,
   params,
+  altitude,
 }: {
   planetRadius: number;
   params: RocketParams;
+  /** Current altitude (same units as the layers); only that layer is labelled. */
+  altitude: number;
 }) => {
   void planetRadius;
   // Precompute all boundary world-Y values
@@ -316,11 +319,13 @@ const AtmosphericLayers = ({
         <meshBasicMaterial color="#ffffff" transparent opacity={0.12} />
       </mesh>
 
-      {ATMO_LAYERS.map((layer, i) => {
+      {ATMO_LAYERS.map((layer) => {
         const yMin = pyToWorldY(layer.pyMin);
         const yMax = pyToWorldY(layer.pyMax);
         const trajectoryX = THREE.MathUtils.clamp((layer.pyMax * trajectorySlope) * 2, -60, 60);
         const labelX = trajectoryX + TRAJECTORY_LABEL_GAP * trajectoryDir;
+        // One label at a time keeps the view readable: the layer the rocket is in now.
+        const current = altitude >= layer.pyMin && altitude < layer.pyMax;
 
         return (
           <group key={layer.name}>
@@ -328,19 +333,19 @@ const AtmosphericLayers = ({
             <LayerBand color={layer.color} opacity={layer.alpha} yMin={yMin} yMax={yMax} planetCenterY={hemisphereBaseY} />
 
             {/* Trajectory anchor marker */}
-            <mesh position={[trajectoryX, yMax, 0]}>
+            {current && <mesh position={[trajectoryX, yMax, 0]}>
               <sphereGeometry args={[0.07, 10, 10]} />
               <meshBasicMaterial color={layer.borderColor} />
-            </mesh>
+            </mesh>}
 
             {/* Connector line from trajectory to label card */}
-            <mesh position={[(trajectoryX + labelX) / 2, yMax, 0.7]}>
+            {current && <mesh position={[(trajectoryX + labelX) / 2, yMax, 0.7]}>
               <boxGeometry args={[Math.max(0.2, Math.abs(labelX - trajectoryX)), 0.05, 0.05]} />
               <meshBasicMaterial color={layer.color} transparent opacity={0.45} />
-            </mesh>
+            </mesh>}
 
             {/* ── Html label card anchored near trajectory ── */}
-            <Html
+            {current && <Html
               position={[labelX, yMax, 1.3]}
               center={false}
               style={{ pointerEvents: 'none', userSelect: 'none' }}
@@ -358,7 +363,7 @@ const AtmosphericLayers = ({
                 <div className="text-[10.5px] text-hud-dim">{layer.sublabel}</div>
                 <div className="mt-1 font-mono text-[9.5px] tracking-wide text-foreground/70">{layer.altRange}</div>
               </div>
-            </Html>
+            </Html>}
           </group>
         );
       })}
@@ -541,7 +546,7 @@ const RocketWorld = () => {
       ) : (
         <>
           <PlanetSurface />
-          <AtmosphericLayers planetRadius={params.planetRadius} params={params} />
+          <AtmosphericLayers planetRadius={params.planetRadius} params={params} altitude={state.altitude} />
           <Atmosphere density={params.atmosphericDensity} />
         </>
       )}

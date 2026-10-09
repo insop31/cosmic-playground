@@ -113,7 +113,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   mode: readStorage(LAST_LAB_KEY) === 'rocket' ? 'rocket' : 'spacetime',
   hudHidden: false,
   dockCollapsed: isNarrow(1024),
-  missionsCollapsed: isNarrow(1280),
+  // Objectives start as a small chip so the first view stays uncluttered.
+  missionsCollapsed: true,
   spacetimeTab: 'bodies',
   missionLogOpen: false,
   conservationOpen: false,

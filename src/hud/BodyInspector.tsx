@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Crosshair, Pin, Trash2, X } from 'lucide-react';
+import { ChevronDown, Crosshair, Pin, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { missionTracker } from '@/app/missionTracker';
@@ -61,6 +61,7 @@ const BodyInspector = () => {
   const removeBody = useSpacetimeStore((state) => state.removeBody);
   const setPinned = useSpacetimeStore((state) => state.setPinned);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -143,35 +144,50 @@ const BodyInspector = () => {
       </p>
 
       {orbit && e && (
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
-          <Element label="Distance r" value={fmt(toAU(e.distance))} unit="AU" info={`Distance from ${snapshot.parentName}. 1 AU is the Earth–Sun distance; 8 grid squares.`} />
-          <Element label="Speed v" value={fmt(toKmPerSecond(e.speed), 1)} unit="km/s" info={`Speed relative to ${snapshot.parentName}.`} />
-          <Element label="Circular v" value={fmt(toKmPerSecond(orbit.circularSpeed), 1)} unit="km/s" info="Speed a perfectly circular orbit would need at this distance: √(GM/r)." />
-          <Element label="Escape v" value={fmt(toKmPerSecond(orbit.escapeSpeed), 1)} unit="km/s" info="Speed needed to leave for good: √(2GM/r), about 1.41× circular speed." />
-          {bound ? (
-            <>
-              <Element label="Semi-major a" value={fmt(aAU)} unit="AU" info="Half the longest diameter of the orbit's ellipse." />
-              <Element label="Eccentricity e" value={fmt(e.eccentricity, 3)} info={`Shape of the orbit: 0 is a circle, between 0 and 1 an ellipse. This one is ${describeShape(e.eccentricity)}.`} />
-              <Element label="Period T" value={formatDuration(simSecondsToDays(e.period))} info="Time for one full orbit, from Kepler's third law: T = 2π√(a³/GM)." />
-              <Element label="Closest · farthest" value={`${fmt(toAU(e.periapsisDistance))} · ${fmt(toAU(e.apoapsisDistance))}`} unit="AU" info="Periapsis and apoapsis: the nearest and farthest points of the orbit." />
-              <div className="col-span-2">
-                <Element
-                  label="Kepler: T² ÷ a³"
-                  value={fmt(kepler, 3)}
-                  unit="yr²/AU³"
-                  info={`Kepler's third law: every body orbiting the same parent shares this value, equal to 1 ÷ (the masses in solar masses) = ${(1 / toSolarMasses(snapshot.parentMass + snapshot.mass)).toFixed(3)}. Inspect a second body to compare.`}
-                />
-              </div>
-            </>
-          ) : (
-            <Element label="Closest approach" value={fmt(toAU(e.periapsisDistance))} unit="AU" info="The nearest it gets on its open path." />
-          )}
-        </div>
-      )}
+        <>
+          {/* The three numbers that tell the story; everything else is one click away. */}
+          <div className="mt-3 grid grid-cols-3 gap-x-3 border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
+            <Element label="Distance" value={fmt(toAU(e.distance))} unit="AU" info={`Distance from ${snapshot.parentName}. 1 AU is the Earth–Sun distance; 8 grid squares.`} />
+            <Element label="Speed" value={fmt(toKmPerSecond(e.speed), 1)} unit="km/s" info={`Speed relative to ${snapshot.parentName}.`} />
+            {bound
+              ? <Element label="One orbit" value={formatDuration(simSecondsToDays(e.period))} info="Time for one full orbit, from Kepler's third law: T = 2π√(a³/GM)." />
+              : <Element label="Closest" value={fmt(toAU(e.periapsisDistance))} unit="AU" info="The nearest it gets on its open path." />}
+          </div>
 
-      <p className="mt-2.5 text-[11px] leading-snug text-hud-faint">
-        The dashed line on the sheet is this orbit if nothing else interferes: green while bound, amber when escaping.
-      </p>
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((open) => !open)}
+            aria-expanded={detailsOpen}
+            className="hud-focus mt-2.5 flex items-center gap-1 rounded-[4px] text-[12px] text-hud-dim transition-colors hover:text-foreground"
+          >
+            <ChevronDown size={13} className={cn('transition-transform duration-200', detailsOpen && 'rotate-180')} />
+            {detailsOpen ? 'Less detail' : 'More detail: orbit shape, escape speed, Kepler’s law'}
+          </button>
+
+          {detailsOpen && (
+            <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2.5">
+              <Element label="Circular v" value={fmt(toKmPerSecond(orbit.circularSpeed), 1)} unit="km/s" info="Speed a perfectly circular orbit would need at this distance: √(GM/r)." />
+              <Element label="Escape v" value={fmt(toKmPerSecond(orbit.escapeSpeed), 1)} unit="km/s" info="Speed needed to leave for good: √(2GM/r), about 1.41× circular speed." />
+              {bound && (
+                <>
+                  <Element label="Semi-major a" value={fmt(aAU)} unit="AU" info="Half the longest diameter of the orbit's ellipse." />
+                  <Element label="Eccentricity e" value={fmt(e.eccentricity, 3)} info={`Shape of the orbit: 0 is a circle, between 0 and 1 an ellipse. This one is ${describeShape(e.eccentricity)}.`} />
+                  <Element label="Closest · farthest" value={`${fmt(toAU(e.periapsisDistance))} · ${fmt(toAU(e.apoapsisDistance))}`} unit="AU" info="Periapsis and apoapsis: the nearest and farthest points of the orbit." />
+                  <Element
+                    label="Kepler: T² ÷ a³"
+                    value={fmt(kepler, 3)}
+                    unit="yr²/AU³"
+                    info={`Kepler's third law: every body orbiting the same parent shares this value, equal to 1 ÷ (the masses in solar masses) = ${(1 / toSolarMasses(snapshot.parentMass + snapshot.mass)).toFixed(3)}. Inspect a second body to compare.`}
+                  />
+                </>
+              )}
+              <p className="col-span-2 text-[11px] leading-snug text-hud-faint">
+                The dashed line on the sheet is this orbit if nothing else interferes: green while bound, amber when escaping.
+              </p>
+            </div>
+          )}
+        </>
+      )}
 
       <div className="mt-2.5 flex items-center gap-1.5 border-t border-[hsl(var(--hud-line)/0.1)] pt-2.5">
         <button

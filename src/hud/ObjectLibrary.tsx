@@ -8,7 +8,7 @@ import type { SavedSpacetimeScenario } from '@/lib/scenarioStorage';
 import type { LibraryTab } from '@/stores/appStore';
 import { useProgressStore } from '@/stores/progressStore';
 import { UNLOCKS } from '@/lib/unlocks';
-import { HudSlider, HudSwitch, IconButton, Segmented } from './controls';
+import { HudSection, HudSlider, HudSwitch, IconButton, Segmented } from './controls';
 import ShareFileButtons from './ShareFileButtons';
 import { exportSavedWork, importSavedWork } from './sharing';
 
@@ -329,10 +329,12 @@ const ObjectLibrary = ({
                     </div>
                   </div>
 
-                  <div className="grid gap-3.5 border-t border-white/[0.06] pt-4">
-                    <span className="hud-label">Physics</span>
+                  {/* Rarely changed, so tucked away: the defaults suit a first experiment. */}
+                  <div className="border-t border-white/[0.06]">
+                  <HudSection title="Physics settings" defaultOpen={false}>
+                  <div className="grid gap-3.5">
                     <HudSlider
-                      label="Placement velocity"
+                      label="Launch speed"
                       info="Scales the orbital speed a new body is given when you place it. Above 1.5× sends comets and asteroids on fast flybys."
                       value={velocityScale}
                       min={0.2}
@@ -354,6 +356,8 @@ const ObjectLibrary = ({
                       checked={expansionEnabled}
                       onCheckedChange={onExpansionChange}
                     />
+                  </div>
+                  </HudSection>
                   </div>
 
                   <div className="grid gap-2 border-t border-white/[0.06] pt-4">

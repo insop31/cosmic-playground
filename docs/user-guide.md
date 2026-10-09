@@ -6,10 +6,10 @@ A printable version for students and teachers, with screenshots, is in [Cosmic_P
 
 | Area | What it holds |
 | --- | --- |
-| Top bar | Lab switch, live readings, score, mission log, objectives, help and settings, hide interface |
+| Top bar | Lab switch, your score (opens the mission log), objectives, help and settings, hide interface |
 | Left | Tool rail and the lab's tool panel; during a flight, the altitude and speed tapes |
 | Top centre | The current message: placement prompt, paused, outcome, objective complete, unlock |
-| Right | Body inspector or flight director, then objectives |
+| Right | Body inspector or energy graphs (Spacetime), flight status (Rocket), then the objectives chip |
 | Bottom | Time controls: reset, rewind, pause, faster, speed, clock, and the last 60 seconds of events |
 
 The first visit opens with a short introduction where you pick a lab. Replay it from **Help and settings**.
@@ -18,16 +18,16 @@ The first visit opens with a short introduction where you pick a lab. Replay it 
 
 **Add a body.** Pick one in **Bodies**, then:
 
-- **Click** the sheet to place it on a circular orbit around the heaviest body. The *Placement velocity* slider scales that speed.
+- **Click** the sheet to place it on a circular orbit around the heaviest body. The *Launch speed* slider under **Physics settings** scales that speed.
 - **Press and drag** to aim the launch yourself. The arrow is the velocity; longer is faster.
 
 Before you release, the dashed path shows where the body will go over the next 24 simulated seconds, computed with the same physics as the simulation: **green** stays in orbit, **amber** escapes, **red** ends in a collision (with the time to impact). While aiming, dragging sets the velocity instead of turning the view; scroll still zooms.
 
-**Inspect a body.** Click it, or its row under *In the scene*. The camera flies to it and follows it (turn off **Follow** to look around freely). The inspector shows, in real units, its distance and speed relative to what it orbits, the speeds needed for a circular orbit and to escape, and the orbit's semi-major axis, eccentricity, period, closest and farthest points, and Kepler's T² ÷ a³ (the same for every planet of one star). **Pin** holds a body still while it keeps pulling on the others. Hover the ⓘ icons for explanations. **Esc** or clicking empty space closes it.
+**Inspect a body.** Click it, or its row under *In the scene*. The camera flies to it and follows it (turn off **Follow** to look around freely). The inspector shows three numbers first, in real units: its distance from what it orbits, its speed, and how long one orbit takes. **More detail** adds the speeds needed for a circular orbit and to escape, and the orbit's semi-major axis, eccentricity, closest and farthest points, and Kepler's T² ÷ a³ (the same for every planet of one star). **Pin** holds a body still while it keeps pulling on the others. Hover the ⓘ icons for explanations. **Esc** or clicking empty space closes it.
 
 **What can happen.** Slow collisions merge, faster ones bounce and violent ones shatter, judged from the impact speed against the pair's escape speed. Black holes swallow what crosses the event horizon and tear apart bodies inside the Roche limit. Each impact is explained with the momentum kept and the energy released.
 
-**Conservation** (top right) plots energy, momentum and angular momentum over time: flat while only gravity acts, with jumps at collisions.
+**Energy** (in the tool rail on the left) plots energy, momentum and angular momentum over time: flat while only gravity acts, with jumps at collisions.
 
 **Systems** loads ready-made configurations. **Saved** stores your own.
 
@@ -46,8 +46,8 @@ Above **Ignite**, pick the outcome you expect: orbit, falls back, escape, crash 
 **Ignite** starts a three-second countdown (**Enter** launches now, **Esc** holds). During the flight:
 
 - **Tapes** show altitude (km) and speed, with speed as a percentage of escape speed.
-- **Flight director** marks the phases (liftoff, Max-Q, engine cutoff, reaching space, result), shows aerodynamic heating and dynamic pressure, and keeps the coach's commentary.
-- **Force arrows** on the vehicle show thrust, gravity, drag and wind; longer arrows are stronger forces.
+- **Flight status** (right) says in one line what the rocket is doing, marks the phases (liftoff, Max-Q, engine cutoff, reaching space, result) and shows the coach's latest message. **Show details** adds aerodynamic heating, dynamic pressure and earlier messages.
+- **Show forces on the rocket** draws thrust, gravity, drag and wind as arrows; longer arrows are stronger forces.
 
 The verdict comes as soon as the outcome is certain, often before the top of the climb; the rocket then coasts on so you can watch it. The **mission report** says whether your prediction held, explains the outcome with numbers (*Why*), suggests one change (*Try next*), and shows an altitude chart and the key numbers. After a failure, **Rewind 5 s** plays the last moments backwards and pauses so you can watch what went wrong. **Fly again** repeats the same setup; **Change setup** reopens the panel.
 
@@ -77,7 +77,7 @@ Progress is saved in this browser. **Reset progress** is at the bottom of the mi
 
 ## For teachers
 
-The course menu in the Objectives panel includes five **teacher packs**: Kepler's laws, gravity assists, black holes and tides, the rocket equation, and weather and launch safety. Each has notes with questions to ask and a **Load lesson setup** button that puts the right system or rocket on screen.
+The course menu in the Objectives panel (open it from the objectives chip on the right, or press L) includes five **teacher packs**: Kepler's laws, gravity assists, black holes and tides, the rocket equation, and weather and launch safety. Each has notes with questions to ask and a **Load lesson setup** button that puts the right system or rocket on screen.
 
 **Sharing set-ups.** Save a system (Spacetime Lab, *Saved* tab) or a rocket preset (Launch setup, *Saved setups*), then **Export file** downloads everything saved in this browser. **Import file** adds such a file on another computer; files are checked before anything is stored.
 
