@@ -1,5 +1,5 @@
-import { memo, useMemo, useRef } from 'react';
-import { Bot } from 'lucide-react';
+import { memo, useMemo, useRef, useState } from 'react';
+import { Bot, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, prefersReducedMotion, useGSAP } from '@/motion/gsap';
 import { useFlightStore, type CoachLine, type Milestone } from '@/stores/flightStore';
@@ -133,7 +133,7 @@ const QTrace = () => {
   );
 };
 
-/* ─── Coach feed ───────────────────────────────────────────────────────────── */
+/* ─── Coach ────────────────────────────────────────────────────────────────── */
 
 const CoachEntry = ({ line, latest }: { line: CoachLine; latest: boolean }) => {
   const textRef = useRef<HTMLSpanElement>(null);
@@ -152,18 +152,30 @@ const CoachEntry = ({ line, latest }: { line: CoachLine; latest: boolean }) => {
   );
 };
 
-const CoachFeed = () => {
-  const coach = useFlightStore((state) => state.coach);
-  const recent = coach.slice(-3);
+/** The coach's latest message, in plain words; earlier ones are under "details". */
+const CoachNow = () => {
+  const latest = useFlightStore((state) => state.coach[state.coach.length - 1]);
   return (
-    <div className="grid gap-2">
-      <span className="flex items-center gap-1.5">
-        <Bot size={13} className="text-primary" />
-        <span className="hud-label">Launch coach</span>
-      </span>
-      <ol className="grid gap-2" aria-live="polite">
-        {recent.length === 0 && <li className="text-[12px] text-hud-dim">Waiting for liftoff.</li>}
-        {recent.map((line, index) => <CoachEntry key={line.id} line={line} latest={index === recent.length - 1} />)}
+    <div className="flex gap-2.5 rounded-[5px] border border-primary/20 bg-primary/[0.05] px-3 py-2.5" aria-live="polite">
+      <Bot size={15} className="mt-0.5 shrink-0 text-primary" />
+      <ol className="min-w-0 flex-1">
+        {latest
+          ? <CoachEntry key={latest.id} line={latest} latest />
+          : <li className="text-[12.5px] text-hud-dim">Waiting for liftoff.</li>}
+      </ol>
+    </div>
+  );
+};
+
+const CoachHistory = () => {
+  const coach = useFlightStore((state) => state.coach);
+  const earlier = coach.slice(-4, -1);
+  if (earlier.length === 0) return null;
+  return (
+    <div className="grid gap-1.5">
+      <span className="hud-label">Earlier</span>
+      <ol className="grid gap-1.5">
+        {earlier.map((line) => <CoachEntry key={line.id} line={line} latest={false} />)}
       </ol>
     </div>
   );
@@ -171,12 +183,22 @@ const CoachFeed = () => {
 
 /* ─── Panel ────────────────────────────────────────────────────────────────── */
 
-/** Right-hand zone during a flight: where the vehicle is in its ascent and why. */
+const STATUS: Record<'launching' | 'coasting' | 'outcome', { title: string; detail: string }> = {
+  launching: { title: 'Engines firing', detail: 'Thrust is pushing the rocket up and sideways.' },
+  coasting: { title: 'Coasting', detail: 'Engines are off; gravity and air decide the rest.' },
+  outcome: { title: 'Flight over', detail: 'See the report for what happened and why.' },
+};
+
+/**
+ * Right-hand zone during a flight. By default it answers one question, "what
+ * is happening now?"; gauges, charts and earlier messages are one click away.
+ */
 const FlightDirector = () => {
   const phase = useRocketStore((state) => state.flight.phase);
   const elapsed = useRocketStore((state) => state.flight.elapsed);
   const showForces = useFlightStore((state) => state.showForces);
   const setShowForces = useFlightStore((state) => state.setShowForces);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const ref = useRef<HTMLElement>(null);
 
   useGSAP(() => {
@@ -184,28 +206,38 @@ const FlightDirector = () => {
   }, { scope: ref });
 
   if (phase === 'idle') return null;
+  const status = STATUS[phase];
 
   return (
-    <section ref={ref} aria-label="Flight director" className="hud-panel pointer-events-auto grid w-[300px] gap-3.5 p-3">
-      <div className="flex items-baseline justify-between">
-        <p className="hud-label">Flight director</p>
-        <span className="hud-num text-[12px] text-foreground">{formatT(elapsed)}</span>
+    <section ref={ref} aria-label="Flight status" className="hud-panel pointer-events-auto grid w-[300px] gap-3 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-display text-[13px] uppercase tracking-[0.06em] text-foreground">{status.title}</p>
+          <p className="mt-0.5 text-[12px] leading-snug text-hud-dim">{status.detail}</p>
+        </div>
+        <span className="hud-num shrink-0 text-[12px] text-foreground">{formatT(elapsed)}</span>
       </div>
       <PhaseStepper />
-      <div className="grid gap-3.5 border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
-        <HeatingGauge />
-        <QTrace />
-      </div>
-      <div className="border-t border-[hsl(var(--hud-line)/0.1)] pt-3">
-        <CoachFeed />
-      </div>
-      <div className="border-t border-[hsl(var(--hud-line)/0.1)] pt-2.5">
-        <HudSwitch
-          label="Show forces on the vehicle"
-          checked={showForces}
-          onCheckedChange={setShowForces}
-          hint="Thrust, gravity, drag and wind. Longer arrows are stronger forces."
-        />
+      <CoachNow />
+
+      <div className="grid gap-2.5 border-t border-[hsl(var(--hud-line)/0.1)] pt-2.5">
+        <HudSwitch label="Show forces on the rocket" checked={showForces} onCheckedChange={setShowForces} />
+        <button
+          type="button"
+          onClick={() => setDetailsOpen((open) => !open)}
+          aria-expanded={detailsOpen}
+          className="hud-focus flex items-center gap-1 justify-self-start rounded-[4px] text-[12px] text-hud-dim transition-colors hover:text-foreground"
+        >
+          <ChevronDown size={13} className={cn('transition-transform duration-200', detailsOpen && 'rotate-180')} />
+          {detailsOpen ? 'Hide details' : 'Show details: heating, air pressure'}
+        </button>
+        {detailsOpen && (
+          <div className="grid gap-3.5">
+            <HeatingGauge />
+            <QTrace />
+            <CoachHistory />
+          </div>
+        )}
       </div>
     </section>
   );

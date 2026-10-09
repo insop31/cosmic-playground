@@ -14,6 +14,8 @@ test.beforeEach(async ({ page }) => {
 
 test('the gravity sandbox loads with a running solar system', async ({ page }) => {
   await expect(bodiesInScene(page)).toHaveText('In the scene · 3');
+  // Objectives start as a compact chip that opens the full panel.
+  await page.getByRole('button', { name: /^Objectives: \d+ of \d+ complete/ }).click();
   await expect(page.getByRole('region', { name: 'Objectives' })).toBeVisible();
   // Simulated time advances.
   const elapsed = page.getByText('Time elapsed').locator('..');
@@ -26,6 +28,8 @@ test('selecting a body shows its orbit in real units', async ({ page }) => {
   const inspector = page.getByRole('region', { name: 'Earth details' });
   await expect(inspector).toContainText('Bound');
   await expect(inspector).toContainText('AU');
+  // Key numbers first; the rest is behind "More detail".
+  await inspector.getByRole('button', { name: /More detail/ }).click();
   await expect(inspector).toContainText('Kepler: T² ÷ a³');
 });
 
@@ -55,6 +59,7 @@ test('keyboard shortcuts pause, reset and switch labs', async ({ page }) => {
 });
 
 test('a teacher pack loads its lesson setup', async ({ page }) => {
+  await page.getByRole('button', { name: /^Objectives: \d+ of \d+ complete/ }).click();
   await page.getByRole('combobox', { name: 'Spacetime Lab course' }).click();
   await page.getByRole('option', { name: /Lesson: Kepler's Laws/ }).click();
   await expect(page.getByLabel('Teacher notes')).toContainText('T² ÷ a³');

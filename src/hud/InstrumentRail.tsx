@@ -1,6 +1,6 @@
 import { memo, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { CloudSun, FolderOpen, LayoutTemplate, Rocket, Shapes, Target, type LucideIcon } from 'lucide-react';
+import { Activity, CloudSun, FolderOpen, LayoutTemplate, Rocket, Shapes, Target, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/motion/gsap';
 import { useAppStore, type LibraryTab } from '@/stores/appStore';
@@ -125,6 +125,8 @@ const InstrumentRail = () => {
   const setStep = useFlightStore((state) => state.setSetupStep);
   const flying = useRocketStore((state) => state.flight.phase !== 'idle');
   const section = mode === 'spacetime' ? tab : step;
+  const conservationOpen = useAppStore((state) => state.conservationOpen);
+  const toggleConservation = useAppStore((state) => state.toggleConservation);
   const drawerRef = useRef<HTMLDivElement>(null);
   const items = mode === 'spacetime' ? SPACETIME_ITEMS : ROCKET_ITEMS;
 
@@ -155,6 +157,16 @@ const InstrumentRail = () => {
             onClick={() => handleSelect(item)}
           />
         ))}
+        {mode === 'spacetime' && (
+          <>
+            <span aria-hidden className="mx-2 my-0.5 h-px bg-[hsl(var(--hud-line)/0.14)]" />
+            <RailButton
+              item={{ id: 'energy', label: 'Energy', icon: Activity }}
+              active={conservationOpen}
+              onClick={toggleConservation}
+            />
+          </>
+        )}
       </nav>
       {!collapsed && (
         <div ref={drawerRef} className={cn('pointer-events-auto flex max-h-full min-h-0', mode === 'rocket' && 'h-full')}>

@@ -68,7 +68,7 @@ export const useFlightStore = create<FlightStore>()((set) => ({
   peakHeat: null,
   coach: [],
   scoreAtLaunch: 0,
-  showForces: true,
+  showForces: false,
   reportOpen: true,
   setupStep: 'vehicle',
   rewindUntil: null,

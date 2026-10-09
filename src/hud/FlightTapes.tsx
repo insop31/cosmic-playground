@@ -70,16 +70,16 @@ const FlightTapes = () => {
       </div>
       <div className="hud-panel px-2 py-1.5">
         <div className="flex items-baseline justify-between">
-          <span className="hud-label text-[9.5px]">Of escape speed</span>
+          <span className="flex items-center gap-1">
+            <span className="hud-label text-[9.5px]">Escape speed</span>
+            <InfoTip label="Units" side="right">{`How close the rocket is to the speed it needs to leave the planet for good. ${UNITS_NOTE}`}</InfoTip>
+          </span>
           <span className={`hud-num text-[12px] ${ofEscape >= 1 ? 'text-primary' : 'text-foreground'}`}>{Math.round(ofEscape * 100)}%</span>
         </div>
         <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.08]">
           <div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${Math.min(1, ofEscape) * 100}%` }} />
         </div>
       </div>
-      <p className="flex items-center gap-1 px-1 text-[10.5px] text-hud-faint">
-        About these units <InfoTip label="Units" side="right">{UNITS_NOTE}</InfoTip>
-      </p>
     </div>
   );
 };

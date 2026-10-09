@@ -211,10 +211,19 @@ const TemporalHud = () => {
   })));
   const rewinding = isPlaying && timeScale < 0;
   const mode = useAppStore((state) => state.mode);
+  // The history row only appears when it has something to show, keeping the
+  // controls to one line most of the time.
+  const spacetimeHistoryUseful = useSimStore((state) => (
+    state.timeline.markers.length > 0 || state.timeline.step < state.timeline.historyEnd
+  ));
+  const rocketHasEvents = useEventStore((state) => state.events.some((event) => event.mode === 'rocket'));
+  const showHistory = mode === 'spacetime'
+    ? spacetimeHistoryUseful || !isPlaying || rewinding
+    : rocketHasEvents;
 
   return (
     <div className="temporal hud-panel pointer-events-auto grid w-full gap-2 px-3 pb-2.5 pt-2">
-      {mode === 'spacetime' ? <HistoryTrack /> : <EventRibbon />}
+      {showHistory && (mode === 'spacetime' ? <HistoryTrack /> : <EventRibbon />)}
 
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex shrink-0 items-center gap-0.5">
